@@ -1,0 +1,15 @@
+# Credenciais e tokens — NUNCA commitar
+.credentials.json
+*.json.backup.*
+
+# Sessões e dados temporários
+sessions/
+shell-snapshots/
+projects/
+backups/
+ide/
+session-env/
+
+# Arquivos de estado interno
+.last-cleanup
+mcp-needs-auth-cache.json
