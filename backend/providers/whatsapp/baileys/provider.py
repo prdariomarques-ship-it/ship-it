@@ -3,17 +3,13 @@
 a thin HTTP wrapper is required; endpoints follow the common gateway layout
 `POST /{session}/messages/send` with Baileys' native message payloads.
 """
-from providers.whatsapp.base import InboundMessage, WhatsAppProvider, normalize_phone
+from providers.whatsapp.base import (
+    InboundMessage,
+    WhatsAppProvider,
+    extract_baileys_content,
+    normalize_phone,
+)
 from utils.config import get_settings
-
-_MEDIA_BY_MESSAGE_KEY = {
-    "conversation": "text",
-    "extendedTextMessage": "text",
-    "imageMessage": "image",
-    "documentMessage": "pdf",
-    "audioMessage": "audio",
-    "locationMessage": "location",
-}
 
 
 class BaileysProvider(WhatsAppProvider):
@@ -69,18 +65,7 @@ class BaileysProvider(WhatsAppProvider):
         if not remote_jid or key.get("fromMe"):
             return None
 
-        message = data.get("message", {}) or {}
-        media_type = "text"
-        text = ""
-        for message_key, mapped_type in _MEDIA_BY_MESSAGE_KEY.items():
-            if message_key in message:
-                media_type = mapped_type
-                inner = message[message_key]
-                if isinstance(inner, str):
-                    text = inner
-                elif isinstance(inner, dict):
-                    text = inner.get("text", "") or inner.get("caption", "")
-                break
+        media_type, text = extract_baileys_content(data.get("message", {}) or {})
 
         return InboundMessage(
             phone=normalize_phone(str(remote_jid)),

@@ -42,6 +42,11 @@ class RateLimiter:
                 self._redis_available = False
 
         window_start = int(time.time()) // window
+        if len(self._local_windows) > 10_000:
+            # Drop stale windows so a rotating set of client IPs can't grow memory.
+            self._local_windows = {
+                key: value for key, value in self._local_windows.items() if value[0] == window_start
+            }
         current = self._local_windows.get(identifier)
         if current is None or current[0] != window_start:
             self._local_windows[identifier] = (window_start, 1)

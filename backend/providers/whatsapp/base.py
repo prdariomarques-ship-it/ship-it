@@ -76,3 +76,28 @@ class WhatsAppProvider(ABC):
 def normalize_phone(raw: str) -> str:
     """Strip provider suffixes/symbols: '5511999@c.us' -> '5511999'."""
     return raw.split("@")[0].split(":")[0].lstrip("+")
+
+
+# Baileys-style message envelopes are shared by every gateway built on the
+# Baileys library (Evolution API included) — keep the mapping in one place.
+BAILEYS_MEDIA_BY_MESSAGE_KEY = {
+    "conversation": "text",
+    "extendedTextMessage": "text",
+    "imageMessage": "image",
+    "documentMessage": "pdf",
+    "audioMessage": "audio",
+    "locationMessage": "location",
+}
+
+
+def extract_baileys_content(message: dict) -> tuple[str, str]:
+    """Return (media_type, text) from a Baileys-style `message` object."""
+    for message_key, mapped_type in BAILEYS_MEDIA_BY_MESSAGE_KEY.items():
+        if message_key in message:
+            inner = message[message_key]
+            if isinstance(inner, str):
+                return mapped_type, inner
+            if isinstance(inner, dict):
+                return mapped_type, inner.get("text", "") or inner.get("caption", "")
+            return mapped_type, ""
+    return "text", ""

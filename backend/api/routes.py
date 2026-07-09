@@ -135,27 +135,24 @@ async def dashboard_summary(db: DbSession, current_user: CurrentUser) -> dict:
     if cached is not None:
         return cached
 
-    async def count(statement) -> int:
-        return (await db.execute(statement)).scalar_one()
+    def _count(model, *conditions):
+        statement = select(func.count()).select_from(model)
+        for condition in conditions:
+            statement = statement.where(condition)
+        return statement.scalar_subquery()
 
-    summary = {
-        "contacts": await count(select(func.count()).select_from(Contact)),
-        "messages": await count(select(func.count()).select_from(Message)),
-        "pending_tasks": await count(
-            select(func.count())
-            .select_from(Task)
-            .where(Task.user_id == current_user.id, Task.status == TaskStatus.PENDING)
+    # One round trip instead of seven sequential COUNT queries.
+    statement = select(
+        _count(Contact).label("contacts"),
+        _count(Message).label("messages"),
+        _count(Task, Task.user_id == current_user.id, Task.status == TaskStatus.PENDING).label(
+            "pending_tasks"
         ),
-        "notes": await count(
-            select(func.count()).select_from(Note).where(Note.user_id == current_user.id)
-        ),
-        "events": await count(
-            select(func.count())
-            .select_from(CalendarEvent)
-            .where(CalendarEvent.user_id == current_user.id)
-        ),
-        "church_members": await count(select(func.count()).select_from(ChurchMember)),
-        "store_customers": await count(select(func.count()).select_from(StoreCustomer)),
-    }
+        _count(Note, Note.user_id == current_user.id).label("notes"),
+        _count(CalendarEvent, CalendarEvent.user_id == current_user.id).label("events"),
+        _count(ChurchMember).label("church_members"),
+        _count(StoreCustomer).label("store_customers"),
+    )
+    summary = dict((await db.execute(statement)).one()._mapping)
     await cache_service.set(cache_key, summary, ttl_seconds=30)
     return summary

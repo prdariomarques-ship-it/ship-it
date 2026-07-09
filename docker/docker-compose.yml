@@ -29,6 +29,7 @@ services:
       OFFICIAL_ACCESS_TOKEN: ${OFFICIAL_ACCESS_TOKEN:-}
       OFFICIAL_PHONE_NUMBER_ID: ${OFFICIAL_PHONE_NUMBER_ID:-}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
     depends_on:
       postgres:

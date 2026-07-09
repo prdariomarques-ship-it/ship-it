@@ -2,6 +2,13 @@
 # With DOMAIN=localhost Caddy serves plain HTTP locally;
 # with a real domain it provisions HTTPS automatically (Let's Encrypt).
 {$DOMAIN:localhost} {
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
 	# Backend API + OpenAPI docs
 	handle /api/* {
 		reverse_proxy backend:8000

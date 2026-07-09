@@ -23,7 +23,11 @@ export function setTokens(access: string | null, refresh?: string | null): void 
   }
 }
 
-async function tryRefresh(): Promise<boolean> {
+// Tokens rotate on refresh, so concurrent 401s must share one refresh call —
+// a second rotation with the same token would be rejected and log the user out.
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function doRefresh(): Promise<boolean> {
   const refresh = window.localStorage.getItem(REFRESH_KEY);
   if (!refresh) return false;
   const response = await fetch(`${API_URL}/auth/refresh`, {
@@ -38,6 +42,15 @@ async function tryRefresh(): Promise<boolean> {
   const pair = await response.json();
   setTokens(pair.access_token, pair.refresh_token);
   return true;
+}
+
+async function tryRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
 }
 
 export async function apiFetch<T>(

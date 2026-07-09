@@ -1,12 +1,19 @@
 """Async job worker: polls the durable queue, executes handlers, retries with
 exponential backoff and emits lifecycle events.
 
-Runs inside the API process (started in the lifespan); because the queue is
-Postgres-backed, additional worker processes can be added later without
-changing the enqueue side.
+Concurrency-safe by design:
+- Due jobs are claimed with SELECT ... FOR UPDATE SKIP LOCKED and flipped to
+  RUNNING in a single transaction, so multiple worker processes (API replicas
+  or dedicated workers) never execute the same job twice.
+- A handler failure rolls the session back before recording the retry, so a
+  half-written transaction can never be committed by the bookkeeping.
+- Jobs stuck in RUNNING (worker crashed mid-flight) are recovered on each tick:
+  requeued while attempts remain, failed otherwise.
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.session import async_session_factory
 from jobs.events import job_event_publisher
@@ -53,32 +60,68 @@ class JobWorker:
                     pass
 
     async def run_once(self) -> int:
-        """Process one batch of due jobs. Returns how many jobs ran."""
+        """Recover stale jobs and process one batch of due jobs. Returns batch size."""
         async with async_session_factory() as session:
             repository = JobRepository(session)
-            due = await repository.due_jobs(datetime.now(timezone.utc), limit=10)
-            for job in due:
-                await self._execute(session, repository, job)
-            return len(due)
+            now = datetime.now(timezone.utc)
 
-    async def _execute(self, session, repository: JobRepository, job: Job) -> None:
-        now = datetime.now(timezone.utc)
-        await repository.update(
-            job, status=JobStatus.RUNNING, started_at=now, attempts=job.attempts + 1
-        )
+            await self._recover_stale(session, repository, now)
+            claimed = await self._claim_due(session, repository, now)
+            for job in claimed:
+                await self._execute(session, repository, job)
+            return len(claimed)
+
+    async def _claim_due(
+        self, session: AsyncSession, repository: JobRepository, now: datetime
+    ) -> list[Job]:
+        """Atomically flip a batch of due jobs to RUNNING (multi-worker safe)."""
+        jobs = await repository.due_jobs(now, limit=10, for_update=True)
+        for job in jobs:
+            job.status = JobStatus.RUNNING
+            job.started_at = now
+            job.attempts += 1
+        await session.commit()
+        return jobs
+
+    async def _recover_stale(
+        self, session: AsyncSession, repository: JobRepository, now: datetime
+    ) -> None:
+        started_before = now - timedelta(seconds=self._settings.jobs_stale_after_seconds)
+        for job in await repository.stale_running_jobs(started_before):
+            logger.warning("Recovering stale job %s (%s), attempt %s", job.id, job.name, job.attempts)
+            if job.attempts >= job.max_attempts:
+                await repository.update(
+                    job,
+                    status=JobStatus.FAILED,
+                    finished_at=now,
+                    last_error="worker crashed or timed out while running the job",
+                )
+                await job_event_publisher.publish(session, job, "failed", detail="stale job")
+            else:
+                await repository.update(job, status=JobStatus.QUEUED, scheduled_at=now)
+                await job_event_publisher.publish(session, job, "retry_scheduled", detail="stale job")
+
+    async def _execute(self, session: AsyncSession, repository: JobRepository, job: Job) -> None:
         await job_event_publisher.publish(session, job, "started")
+        job_id = job.id
 
         try:
             handler = resolve_handler(job.name)
             await handler(session, dict(job.payload or {}))
         except Exception as exc:  # noqa: BLE001 - handler failures feed the retry logic
+            # Discard whatever the failed handler left in the session before
+            # recording the retry, or half-written changes would be committed.
+            await session.rollback()
+            job = await repository.get(job_id) or job
             await self._handle_failure(session, repository, job, exc)
             return
 
         await repository.update(job, status=JobStatus.SUCCEEDED, finished_at=datetime.now(timezone.utc))
         await job_event_publisher.publish(session, job, "succeeded")
 
-    async def _handle_failure(self, session, repository: JobRepository, job: Job, exc: Exception) -> None:
+    async def _handle_failure(
+        self, session: AsyncSession, repository: JobRepository, job: Job, exc: Exception
+    ) -> None:
         error = f"{type(exc).__name__}: {exc}"
         logger.warning("Job %s (%s) attempt %s failed: %s", job.id, job.name, job.attempts, error)
 

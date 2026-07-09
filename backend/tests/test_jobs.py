@@ -80,6 +80,87 @@ async def test_job_retries_then_fails(session_factory, worker):
 
 
 @pytest.mark.asyncio
+async def test_stale_running_job_is_requeued(session_factory, worker):
+    from models.job import Job
+
+    async with session_factory() as session:
+        stale = Job(
+            name="test.stale",
+            status=JobStatus.RUNNING,
+            attempts=1,
+            max_attempts=3,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            scheduled_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+        session.add(stale)
+        await session.commit()
+        stale_id = stale.id
+
+    @job_handler("test.stale")
+    async def _stale(db, payload):
+        pass
+
+    # First tick recovers it to QUEUED; it then runs on the same tick's claim.
+    await worker.run_once()
+    async with session_factory() as session:
+        refreshed = await session.get(Job, stale_id)
+        assert refreshed.status == JobStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_stale_job_with_exhausted_attempts_fails(session_factory, worker):
+    from models.job import Job
+
+    async with session_factory() as session:
+        stale = Job(
+            name="test.stale-dead",
+            status=JobStatus.RUNNING,
+            attempts=3,
+            max_attempts=3,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            scheduled_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+        session.add(stale)
+        await session.commit()
+        stale_id = stale.id
+
+    await worker.run_once()
+    async with session_factory() as session:
+        refreshed = await session.get(Job, stale_id)
+        assert refreshed.status == JobStatus.FAILED
+        assert "crashed" in refreshed.last_error
+
+
+@pytest.mark.asyncio
+async def test_failed_handler_changes_are_rolled_back(session_factory, worker):
+    """A handler that dirties the session and raises must not leak partial writes."""
+    from sqlalchemy import select
+
+    from models.log import LogEntry
+
+    @job_handler("test.dirty")
+    async def _dirty(db, payload):
+        db.add(LogEntry(source="dirty-handler", message="must not persist"))
+        raise RuntimeError("explode after dirtying the session")
+
+    async with session_factory() as session:
+        job = await JobService(session).enqueue("test.dirty", max_attempts=1)
+
+    await worker.run_once()
+
+    async with session_factory() as session:
+        refreshed = await session.get(type(job), job.id)
+        assert refreshed.status == JobStatus.FAILED
+
+        leaked = (
+            (await session.execute(select(LogEntry).where(LogEntry.source == "dirty-handler")))
+            .scalars()
+            .all()
+        )
+        assert leaked == []
+
+
+@pytest.mark.asyncio
 async def test_scheduled_job_not_picked_before_time(session_factory, worker):
     @job_handler("test.later")
     async def _later(db, payload):

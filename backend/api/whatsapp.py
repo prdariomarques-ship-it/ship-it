@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import CurrentUser
 from database.session import get_db
+from jobs.service import JobService
 from memory.contact_memory import contact_memory_service
 from models.message import Message, MessageDirection, MessageMediaType
 from providers.whatsapp.base import WhatsAppProviderError, normalize_phone
@@ -62,7 +63,11 @@ async def _persist_outbound(
     await db.commit()
     await db.refresh(message)
 
-    await contact_memory_service.record_interaction(db, contact, content, source="whatsapp")
+    summary_due = await contact_memory_service.record_interaction(
+        db, contact, content, source="whatsapp"
+    )
+    if summary_due:
+        await JobService(db).enqueue("contact.summarize", {"contact_id": contact.id})
     return message
 
 

@@ -37,18 +37,24 @@ class ContactMemoryService:
     async def record_interaction(
         self, db: AsyncSession, contact: Contact, content: str, source: str
     ) -> bool:
-        """Store the interaction embedding and touch last_interaction_at.
+        """Touch last_interaction_at and queue the embedding for the worker.
+
+        Embedding needs two external calls (LLM + Qdrant); doing it inline would
+        put third-party latency on the message hot path, so it goes through the
+        durable queue (which also gives it retry for free).
 
         Returns True when the contact is due for a summary refresh.
         """
+        from jobs.service import JobService
+
         contacts = ContactRepository(db)
         await contacts.touch_last_interaction(contact, datetime.now(timezone.utc))
 
         if content.strip():
-            try:
-                await memory_service.store(db, content=content, source=source, contact_id=contact.id)
-            except Exception as exc:  # noqa: BLE001 - memory must never break message flow
-                logger.warning("Embedding skipped (vector store unavailable): %s", exc)
+            await JobService(db).enqueue(
+                "memory.embed",
+                {"content": content, "source": source, "contact_id": contact.id},
+            )
 
         messages = MessageRepository(db)
         total = await messages.count(contact_id=contact.id)

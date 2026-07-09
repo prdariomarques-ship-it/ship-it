@@ -4,9 +4,10 @@ The configured provider normalizes its own webhook payload; we persist the
 contact + message, feed the contact memory, and hand off orchestration to n8n
 through the durable job queue (retry included).
 """
+import hmac
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from models.message import Message, MessageDirection, MessageMediaType
 from repositories.contact import ContactRepository
 from providers.whatsapp.factory import get_whatsapp_provider
 from services.audit import record_log
+from utils.config import get_settings
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -31,7 +33,16 @@ class WebhookAck(BaseModel):
     message_id: int | None = None
 
 
-@router.post("/whatsapp", response_model=WebhookAck)
+def verify_webhook_token(x_webhook_token: Annotated[str | None, Header()] = None) -> None:
+    """When WEBHOOK_SECRET is configured, inbound webhooks must present it."""
+    secret = get_settings().webhook_secret
+    if secret and not hmac.compare_digest(x_webhook_token or "", secret):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token"
+        )
+
+
+@router.post("/whatsapp", response_model=WebhookAck, dependencies=[Depends(verify_webhook_token)])
 async def whatsapp_webhook(
     payload: dict,
     db: Annotated[AsyncSession, Depends(get_db)],

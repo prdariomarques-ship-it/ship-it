@@ -9,14 +9,15 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "Dario OS"
-    app_version: str = "0.2.0"
+    app_version: str = "0.2.1"
     environment: str = "development"
-    debug: bool = True
     api_prefix: str = "/api"
     log_json: bool = False  # structured JSON logs (recommended in production)
 
     # Database
     database_url: str = "postgresql+asyncpg://dario:dario@localhost:5432/darioos"
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
 
     # Auth / JWT
     jwt_secret: str = "change-me-in-production"
@@ -79,11 +80,15 @@ class Settings(BaseSettings):
     # n8n
     n8n_base_url: str = "http://localhost:5678"
 
+    # Inbound webhooks (when set, POST /webhooks/* requires X-Webhook-Token)
+    webhook_secret: str = ""
+
     # Job queue
     jobs_enabled: bool = True
     jobs_poll_interval_seconds: float = 2.0
     jobs_default_max_attempts: int = 3
     jobs_retry_backoff_seconds: int = 30  # base for exponential backoff
+    jobs_stale_after_seconds: int = 300  # running longer than this = crashed worker
     jobs_events_channel: str = "darioos:jobs:events"
 
     # CORS

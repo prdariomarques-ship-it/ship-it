@@ -1,12 +1,8 @@
 """Tools over the church and store domains."""
 from agents.tools.base import Tool, ToolContext, ok
-from models.church import ChurchMember
 from models.store import StoreCustomer
 from repositories.base import SQLAlchemyRepository
-
-
-class _ChurchRepo(SQLAlchemyRepository[ChurchMember]):
-    model = ChurchMember
+from repositories.church import ChurchMemberRepository
 
 
 class _StoreRepo(SQLAlchemyRepository[StoreCustomer]):
@@ -14,7 +10,7 @@ class _StoreRepo(SQLAlchemyRepository[StoreCustomer]):
 
 
 async def _list_church_members(context: ToolContext) -> str:
-    members = await _ChurchRepo(context.db).list(limit=50)
+    members = await ChurchMemberRepository(context.db).list(limit=50)
     return ok(
         members=[
             {
@@ -30,9 +26,8 @@ async def _list_church_members(context: ToolContext) -> str:
 
 
 async def _add_prayer_request(context: ToolContext, member_name: str, request: str) -> str:
-    repository = _ChurchRepo(context.db)
-    candidates = await repository.list(limit=200)
-    matches = [m for m in candidates if member_name.lower() in m.name.lower()]
+    repository = ChurchMemberRepository(context.db)
+    matches = await repository.search_by_name(member_name, limit=1)
     member = matches[0] if matches else await repository.create(name=member_name)
     await repository.update(member, prayer_requests=[*member.prayer_requests, request])
     return ok(member_id=member.id, prayer_requests=member.prayer_requests)

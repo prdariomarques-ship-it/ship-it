@@ -149,8 +149,11 @@ Gerencie pela API admin: `GET/POST /api/jobs`, `POST /api/jobs/{id}/cancel`, `GE
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (46 testes: auth, RBAC, CRUD, providers, executor, jobs, webhook, observabilidade)
+# Testes (59 testes; cobertura ~86%)
 cd backend && pip install -r requirements-dev.txt && pytest
+pytest --cov=. --cov-report=term    # com cobertura
+
+# CI: GitHub Actions roda lint + testes + migrações (backend) e build (frontend) em cada PR
 
 # Migrações
 cd backend
@@ -160,11 +163,13 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 
 ## Segurança
 
-- JWT curto + refresh token rotativo (hash em banco, revogável)
+- JWT curto + refresh token rotativo (hash em banco, revogável; expirados são purgados)
 - RBAC com papéis `admin`/`user`
-- HTTPS automático via Caddy quando `DOMAIN` é um domínio real
-- Rate limit por IP (Redis, com fallback em memória)
-- Senhas com PBKDF2-SHA256 salteado
+- `WEBHOOK_SECRET`: quando definido, o webhook de entrada exige `X-Webhook-Token`
+- Em produção o backend se recusa a subir com `JWT_SECRET` fraca/padrão
+- HTTPS automático + headers de segurança via Caddy
+- Rate limit por IP (Redis, com fallback em memória; probes de health/metrics isentos)
+- Senhas com PBKDF2-SHA256 salteado, verificadas fora do event loop e em tempo constante
 - Backup diário: agende `scripts/backup.sh` no cron (`0 3 * * *`)
 
 ## Documentação

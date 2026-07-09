@@ -1,4 +1,5 @@
 """Authentication service layer: registration, login, refresh rotation, logout."""
+import asyncio
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,11 @@ def _hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+# Verified when the email doesn't exist, so a failed login costs the same time
+# whether the user exists or not (prevents account enumeration by timing).
+_DUMMY_HASH = hash_password("timing-equalizer")
+
+
 class AuthService:
     def __init__(self, session: AsyncSession) -> None:
         self.users = UserRepository(session)
@@ -36,16 +42,20 @@ class AuthService:
             raise AuthError("Email already registered", conflict=True)
         # Bootstrap: the very first account administers the instance.
         role = UserRole.ADMIN if await self.users.count() == 0 else UserRole.USER
+        # PBKDF2 is CPU-bound (~100ms); run it off the event loop.
+        hashed = await asyncio.to_thread(hash_password, password)
         return await self.users.create(
             email=email,
             full_name=full_name,
-            hashed_password=hash_password(password),
+            hashed_password=hashed,
             role=role,
         )
 
     async def login(self, email: str, password: str) -> tuple[str, str]:
         user = await self.users.get_by_email(email)
-        if user is None or not verify_password(password, user.hashed_password):
+        candidate_hash = user.hashed_password if user is not None else _DUMMY_HASH
+        valid = await asyncio.to_thread(verify_password, password, candidate_hash)
+        if user is None or not valid:
             raise AuthError("Invalid credentials")
         if not user.is_active:
             raise AuthError("User is inactive")
@@ -78,6 +88,8 @@ class AuthService:
     async def _issue_pair(self, user: User) -> tuple[str, str]:
         access_token = create_access_token(str(user.id))
         refresh_token = secrets.token_urlsafe(48)
+        # Hygiene: expired tokens are useless; drop them so the table stays small.
+        await self.refresh_tokens.purge_expired(user.id, datetime.now(timezone.utc))
         await self.refresh_tokens.create(
             user_id=user.id,
             token_hash=_hash_refresh_token(refresh_token),

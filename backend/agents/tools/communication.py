@@ -1,21 +1,14 @@
 """Tools over contacts, memory and WhatsApp sending."""
 from agents.tools.base import Tool, ToolContext, ok
 from memory.service import memory_service
-from models.contact import Contact
-from repositories.base import SQLAlchemyRepository
 from repositories.contact import ContactRepository
-
-
-class _ContactRepo(SQLAlchemyRepository[Contact]):
-    model = Contact
 
 
 async def _find_contact(context: ToolContext, query: str) -> str:
     repository = ContactRepository(context.db)
     contact = await repository.get_by_phone(query)
     if contact is None:
-        candidates = await _ContactRepo(context.db).list(limit=200)
-        matches = [c for c in candidates if query.lower() in c.name.lower()]
+        matches = await repository.search_by_name(query, limit=1)
         contact = matches[0] if matches else None
     if contact is None:
         return ok(found=False)

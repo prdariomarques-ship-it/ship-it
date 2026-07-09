@@ -50,7 +50,8 @@ class AgentExecutor:
                     output = f'{{"error": "Unknown tool: {call.name}"}}'
                 else:
                     output = await tool.run(context, call.arguments)
-                logger.info("Agent tool %s(%s) -> %.200s", call.name, call.arguments, output)
+                # Debug level: arguments/results may contain user data (PII).
+                logger.debug("Agent tool %s(%s) -> %.200s", call.name, call.arguments, output)
                 steps.append(ExecutedStep(tool=call.name, arguments=call.arguments, result=output))
                 messages.append(ChatMessage(role="tool", content=output, tool_call_id=call.id))
 

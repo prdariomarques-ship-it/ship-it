@@ -16,6 +16,19 @@ async def summarize_contact(db: AsyncSession, payload: dict) -> None:
     await contact_memory_service.summarize_contact(db, int(payload["contact_id"]))
 
 
+@job_handler("memory.embed")
+async def embed_interaction(db: AsyncSession, payload: dict) -> None:
+    """Embed an interaction into the vector memory (off the message hot path)."""
+    from memory.service import memory_service
+
+    await memory_service.store(
+        db,
+        content=str(payload["content"]),
+        source=str(payload.get("source", "whatsapp")),
+        contact_id=payload.get("contact_id"),
+    )
+
+
 @job_handler("whatsapp.send_text")
 async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     """Send a WhatsApp text through the configured provider (with queue retry)."""

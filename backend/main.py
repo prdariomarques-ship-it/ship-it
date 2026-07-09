@@ -59,8 +59,24 @@ async def lifespan(app: FastAPI):
         await job_worker.stop()
 
 
+def _validate_production_settings(settings) -> None:
+    """Refuse to boot in production with the default/weak JWT secret."""
+    if settings.environment == "production" and (
+        settings.jwt_secret in ("", "change-me-in-production") or len(settings.jwt_secret) < 32
+    ):
+        raise RuntimeError(
+            "JWT_SECRET must be set to a strong value (>= 32 chars) in production; "
+            "generate one with: openssl rand -hex 32"
+        )
+
+
+# Never rate-limit probes or scrapers: a busy client must not blind monitoring.
+_RATE_LIMIT_EXEMPT_PREFIXES = ("/health", "/metrics")
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
+    _validate_production_settings(settings)
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
@@ -84,10 +100,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.middleware("http")(metrics_middleware)
-
     @app.middleware("http")
     async def rate_limit_middleware(request: Request, call_next) -> Response:
+        if request.url.path.startswith(_RATE_LIMIT_EXEMPT_PREFIXES):
+            return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
         if not await rate_limiter.is_allowed(client_ip):
             return JSONResponse(
@@ -95,6 +111,9 @@ def create_app() -> FastAPI:
                 content={"detail": "Rate limit exceeded"},
             )
         return await call_next(request)
+
+    # Registered after (= outermost), so 429s from the rate limiter are counted too.
+    app.middleware("http")(metrics_middleware)
 
     app.include_router(health_router)
     app.include_router(metrics_router)
