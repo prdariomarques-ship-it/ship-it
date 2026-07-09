@@ -9,10 +9,11 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "Dario OS"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     environment: str = "development"
     debug: bool = True
     api_prefix: str = "/api"
+    log_json: bool = False  # structured JSON logs (recommended in production)
 
     # Database
     database_url: str = "postgresql+asyncpg://dario:dario@localhost:5432/darioos"
@@ -20,10 +21,12 @@ class Settings(BaseSettings):
     # Auth / JWT
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 24
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 30
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    cache_default_ttl_seconds: int = 60
 
     # Rate limiting
     rate_limit_requests: int = 120
@@ -32,20 +35,56 @@ class Settings(BaseSettings):
     # Qdrant (vector memory)
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "darioos_memory"
+    embedding_dimensions: int = 1536
+    contact_summary_every_n_messages: int = 10
 
-    # OpenAI
+    # LLM providers ("openai", "anthropic" or "glm")
+    llm_provider: str = "openai"
+    embedding_provider: str = "openai"  # Anthropic has no embeddings API; keep these separate
+
     openai_api_key: str = ""
+    openai_base_url: str = ""  # override for OpenAI-compatible gateways
     openai_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
-    embedding_dimensions: int = 1536
+
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-5"
+    anthropic_max_tokens: int = 2048
+
+    glm_api_key: str = ""
+    glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    glm_model: str = "glm-4-plus"
+
+    # Agents
+    agent_max_iterations: int = 6
+
+    # WhatsApp providers ("openwa", "baileys", "evolution" or "official")
+    whatsapp_provider: str = "openwa"
+
+    openwa_base_url: str = "http://localhost:8002"
+    openwa_api_key: str = ""
+
+    evolution_base_url: str = "http://localhost:8080"
+    evolution_api_key: str = ""
+    evolution_instance: str = "darioos"
+
+    baileys_base_url: str = "http://localhost:3001"
+    baileys_api_key: str = ""
+    baileys_session: str = "darioos"
+
+    official_api_base_url: str = "https://graph.facebook.com/v21.0"
+    official_access_token: str = ""
+    official_phone_number_id: str = ""
 
     # n8n
     n8n_base_url: str = "http://localhost:5678"
-    n8n_webhook_path: str = "/webhook/darioos"
 
-    # OpenWA (WhatsApp)
-    openwa_base_url: str = "http://localhost:8002"
-    openwa_api_key: str = ""
+    # Job queue
+    jobs_enabled: bool = True
+    jobs_poll_interval_seconds: float = 2.0
+    jobs_default_max_attempts: int = 3
+    jobs_retry_backoff_seconds: int = 30  # base for exponential backoff
+    jobs_events_channel: str = "darioos:jobs:events"
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"

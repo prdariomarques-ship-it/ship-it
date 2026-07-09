@@ -1,7 +1,7 @@
 "use client";
 
 import PageHeader from "@/components/PageHeader";
-import { API_URL, setToken } from "@/hooks/useApi";
+import { API_URL, setTokens } from "@/hooks/useApi";
 
 export default function ConfiguracoesPage() {
   return (
@@ -24,7 +24,7 @@ export default function ConfiguracoesPage() {
         <button
           className="button"
           onClick={() => {
-            setToken(null);
+            setTokens(null, null);
             window.location.href = "/login";
           }}
         >

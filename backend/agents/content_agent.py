@@ -1,4 +1,7 @@
 from agents.base import BaseAgent
+from agents.tools.base import Tool
+from agents.tools.communication import search_memory_tool, store_memory_tool
+from agents.tools.productivity import create_note_tool
 
 
 class ContentAgent(BaseAgent):
@@ -17,7 +20,11 @@ class ContentAgent(BaseAgent):
         return (
             "Você é o criador de conteúdo do Dario dentro do Dario OS. "
             "Você produz posts, legendas, roteiros e ideias para Instagram, Facebook, "
-            "YouTube, TikTok e LinkedIn. Responda em português brasileiro. "
-            "Adapte o formato e o tom para cada plataforma e inclua sugestões de "
-            "hashtags quando fizer sentido."
+            "YouTube, TikTok e LinkedIn. Adapte o formato e o tom para cada plataforma "
+            "e inclua sugestões de hashtags quando fizer sentido. "
+            "Salve rascunhos aprovados como notas usando a ferramenta de notas."
         )
+
+    @property
+    def tools(self) -> list[Tool]:
+        return [create_note_tool, search_memory_tool, store_memory_tool]

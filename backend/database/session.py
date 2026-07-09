@@ -16,15 +16,3 @@ async def get_db() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency that yields a database session per request."""
     async with async_session_factory() as session:
         yield session
-
-
-async def init_db() -> None:
-    """Create tables that don't exist yet (development convenience).
-
-    In production schema changes should go through migrations instead.
-    """
-    from database.base import Base
-    import models  # noqa: F401  (register all models on the metadata)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)

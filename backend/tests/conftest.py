@@ -23,6 +23,18 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _reset_local_caches():
+    """Cache/rate-limit singletons survive between tests; clear their local state."""
+    from services.cache import cache_service
+    from services.rate_limit import rate_limiter
+
+    cache_service._local.clear()
+    rate_limiter._local_windows.clear()
+    yield
+    cache_service._local.clear()
+
+
 @pytest_asyncio.fixture
 async def db_engine():
     engine = create_async_engine(

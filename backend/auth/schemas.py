@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from models.user import UserRole
+
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -16,7 +18,7 @@ class UserRead(BaseModel):
     email: EmailStr
     full_name: str
     is_active: bool
-    is_admin: bool
+    role: UserRole
     created_at: datetime
 
 
@@ -25,6 +27,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"

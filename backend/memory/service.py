@@ -1,12 +1,12 @@
-"""Permanent semantic memory: OpenAI embeddings stored in Qdrant, metadata in Postgres."""
+"""Permanent semantic memory: provider embeddings stored in Qdrant, metadata in Postgres."""
 import uuid
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.embedding import Embedding
-from services.openai_service import openai_service
+from providers.llm.factory import get_embedding_provider
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -48,7 +48,7 @@ class MemoryService:
     ) -> Embedding:
         """Embed the content, upsert it into Qdrant and persist its metadata."""
         await self._ensure_collection()
-        vector = await openai_service.embed(content)
+        vector = await get_embedding_provider().embed(content)
         vector_id = str(uuid.uuid4())
 
         await self.client.upsert(
@@ -73,12 +73,10 @@ class MemoryService:
     ) -> list[dict]:
         """Semantic search over the memory. Returns content + score, best first."""
         await self._ensure_collection()
-        vector = await openai_service.embed(query)
+        vector = await get_embedding_provider().embed(query)
 
         query_filter = None
         if contact_id is not None:
-            from qdrant_client.models import FieldCondition, Filter, MatchValue
-
             query_filter = Filter(
                 must=[FieldCondition(key="contact_id", match=MatchValue(value=contact_id))]
             )

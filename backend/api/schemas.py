@@ -41,6 +41,7 @@ class ContactRead(_Read):
     summary: str | None
     preferences: dict
     tags: list
+    last_interaction_at: datetime | None
 
 
 # --- Messages -------------------------------------------------------------

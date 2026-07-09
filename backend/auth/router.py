@@ -1,46 +1,58 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import CurrentUser
-from auth.jwt import create_access_token
-from auth.password import hash_password, verify_password
-from auth.schemas import LoginRequest, TokenResponse, UserCreate, UserRead
+from auth.schemas import LoginRequest, RefreshRequest, TokenResponse, UserCreate, UserRead
+from auth.service import AuthError, AuthService
 from database.session import get_db
 from models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+def get_auth_service(db: Annotated[AsyncSession, Depends(get_db)]) -> AuthService:
+    return AuthService(db)
+
+
+Service = Annotated[AuthService, Depends(get_auth_service)]
+
+
+def _http_error(exc: AuthError) -> HTTPException:
+    code = status.HTTP_409_CONFLICT if exc.conflict else status.HTTP_401_UNAUTHORIZED
+    return HTTPException(status_code=code, detail=str(exc))
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def register(payload: UserCreate, db: DbSession) -> User:
-    existing = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-
-    user = User(
-        email=payload.email,
-        full_name=payload.full_name,
-        hashed_password=hash_password(payload.password),
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+async def register(payload: UserCreate, service: Service) -> User:
+    try:
+        return await service.register(payload.email, payload.full_name, payload.password)
+    except AuthError as exc:
+        raise _http_error(exc) from exc
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: DbSession) -> TokenResponse:
-    user = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
-    if user is None or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is inactive")
-    return TokenResponse(access_token=create_access_token(str(user.id)))
+async def login(payload: LoginRequest, service: Service) -> TokenResponse:
+    try:
+        access_token, refresh_token = await service.login(payload.email, payload.password)
+    except AuthError as exc:
+        raise _http_error(exc) from exc
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(payload: RefreshRequest, service: Service) -> TokenResponse:
+    try:
+        access_token, refresh_token = await service.refresh(payload.refresh_token)
+    except AuthError as exc:
+        raise _http_error(exc) from exc
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(payload: RefreshRequest, service: Service) -> None:
+    await service.logout(payload.refresh_token)
 
 
 @router.get("/me", response_model=UserRead)

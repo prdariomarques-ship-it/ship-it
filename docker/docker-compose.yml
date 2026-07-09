@@ -6,13 +6,28 @@ services:
     restart: unless-stopped
     environment:
       ENVIRONMENT: production
+      LOG_JSON: "true"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:-dario}@postgres:5432/${POSTGRES_DB:-darioos}
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       N8N_BASE_URL: http://n8n:5678
+      # LLM providers (Strategy: openai | anthropic | glm)
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GLM_API_KEY: ${GLM_API_KEY:-}
+      # WhatsApp providers (Strategy: openwa | baileys | evolution | official)
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-openwa}
       OPENWA_BASE_URL: http://openwa:8002
       OPENWA_API_KEY: ${OPENWA_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EVOLUTION_BASE_URL: ${EVOLUTION_BASE_URL:-}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-darioos}
+      BAILEYS_BASE_URL: ${BAILEYS_BASE_URL:-}
+      BAILEYS_API_KEY: ${BAILEYS_API_KEY:-}
+      OFFICIAL_ACCESS_TOKEN: ${OFFICIAL_ACCESS_TOKEN:-}
+      OFFICIAL_PHONE_NUMBER_ID: ${OFFICIAL_PHONE_NUMBER_ID:-}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
     depends_on:

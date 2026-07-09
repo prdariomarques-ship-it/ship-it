@@ -16,9 +16,9 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 async def chat(
     payload: ChatRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: CurrentUser,
+    current_user: CurrentUser,
 ) -> ChatResponse:
     try:
-        return await chat_service.respond(db, payload)
+        return await chat_service.respond(db, current_user, payload)
     except UnknownAgentError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

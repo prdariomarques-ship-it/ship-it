@@ -1,10 +1,10 @@
-"""Registry with every available agent, keyed by name."""
+"""Registry with every available agent, keyed by name (Factory pattern)."""
+from agents.assistant_agent import AssistantAgent
 from agents.base import BaseAgent
-from agents.church import ChurchAgent
-from agents.content import ContentAgent
-from agents.personal import PersonalAgent
-from agents.store import StoreAgent
-from agents.whatsapp import WhatsAppAgent
+from agents.church_agent import ChurchAgent
+from agents.content_agent import ContentAgent
+from agents.personal_agent import PersonalAgent
+from agents.store_agent import StoreAgent
 
 
 class UnknownAgentError(KeyError):
@@ -18,7 +18,7 @@ class UnknownAgentError(KeyError):
 
 _AGENTS: dict[str, BaseAgent] = {
     agent.name: agent
-    for agent in (PersonalAgent(), WhatsAppAgent(), ChurchAgent(), StoreAgent(), ContentAgent())
+    for agent in (PersonalAgent(), ChurchAgent(), StoreAgent(), ContentAgent(), AssistantAgent())
 }
 
 

@@ -1,4 +1,4 @@
-"""Generic CRUD router factory.
+"""Generic CRUD router factory, built on the repository layer.
 
 Builds list/create/get/update/delete endpoints for a model, keeping every
 resource router consistent (auth required, pagination, 404 handling) without
@@ -8,12 +8,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import CurrentUser
 from database.base import Base
 from database.session import get_db
+from repositories.base import SQLAlchemyRepository
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
@@ -31,13 +31,17 @@ def create_crud_router(
     """Build a CRUD router. When user_scoped, rows belong to the current user."""
     router = APIRouter(prefix=prefix, tags=[tag])
 
-    def _scope(statement: Any, user_id: int) -> Any:
-        return statement.where(model.user_id == user_id) if user_scoped else statement
+    class Repository(SQLAlchemyRepository):  # noqa: D401 - closure-scoped repository
+        pass
 
-    async def _get_or_404(db: AsyncSession, item_id: int, user_id: int) -> Base:
-        statement = _scope(select(model).where(model.id == item_id), user_id)
-        item = (await db.execute(statement)).scalar_one_or_none()
-        if item is None:
+    Repository.model = model
+
+    def _scope(user_id: int) -> dict[str, Any]:
+        return {"user_id": user_id} if user_scoped else {}
+
+    async def _get_or_404(repository: Repository, item_id: int, user_id: int) -> Base:
+        item = await repository.get(item_id)
+        if item is None or (user_scoped and item.user_id != user_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{tag} not found")
         return item
 
@@ -48,44 +52,35 @@ def create_crud_router(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> list[Base]:
-        statement = _scope(select(model), current_user.id).order_by(model.id.desc()).limit(limit).offset(offset)
-        return list((await db.execute(statement)).scalars().all())
+        return await Repository(db).list(limit=limit, offset=offset, **_scope(current_user.id))
 
     @router.get("/count")
     async def count_items(db: DbSession, current_user: CurrentUser) -> dict[str, int]:
-        statement = _scope(select(func.count()).select_from(model), current_user.id)
-        return {"count": (await db.execute(statement)).scalar_one()}
+        return {"count": await Repository(db).count(**_scope(current_user.id))}
 
     @router.post("", response_model=read_schema, status_code=status.HTTP_201_CREATED)
     async def create_item(payload: create_schema, db: DbSession, current_user: CurrentUser) -> Base:  # type: ignore[valid-type]
         data = payload.model_dump()
         if user_scoped:
             data["user_id"] = current_user.id
-        item = model(**data)
-        db.add(item)
-        await db.commit()
-        await db.refresh(item)
-        return item
+        return await Repository(db).create(**data)
 
     @router.get("/{item_id}", response_model=read_schema)
     async def get_item(item_id: int, db: DbSession, current_user: CurrentUser) -> Base:
-        return await _get_or_404(db, item_id, current_user.id)
+        return await _get_or_404(Repository(db), item_id, current_user.id)
 
     @router.patch("/{item_id}", response_model=read_schema)
     async def update_item(
         item_id: int, payload: update_schema, db: DbSession, current_user: CurrentUser  # type: ignore[valid-type]
     ) -> Base:
-        item = await _get_or_404(db, item_id, current_user.id)
-        for field, value in payload.model_dump(exclude_unset=True).items():
-            setattr(item, field, value)
-        await db.commit()
-        await db.refresh(item)
-        return item
+        repository = Repository(db)
+        item = await _get_or_404(repository, item_id, current_user.id)
+        return await repository.update(item, **payload.model_dump(exclude_unset=True))
 
     @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_item(item_id: int, db: DbSession, current_user: CurrentUser) -> None:
-        item = await _get_or_404(db, item_id, current_user.id)
-        await db.delete(item)
-        await db.commit()
+        repository = Repository(db)
+        item = await _get_or_404(repository, item_id, current_user.id)
+        await repository.delete(item)
 
     return router

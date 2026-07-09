@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { apiFetch, setToken } from "@/hooks/useApi";
+import { apiFetch, setTokens } from "@/hooks/useApi";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -14,11 +14,14 @@ export default function LoginPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const response = await apiFetch<{ access_token: string }>("/auth/login", {
+      const response = await apiFetch<{
+        access_token: string;
+        refresh_token: string;
+      }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
-      setToken(response.access_token);
+      setTokens(response.access_token, response.refresh_token);
       window.location.href = "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha no login");

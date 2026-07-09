@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import api.schemas as schemas
 from api.crud import create_crud_router
 from auth.dependencies import CurrentUser
+from auth.permissions import require_admin
 from database.session import get_db
+from services.cache import cache_service
 from models import (
     CalendarEvent,
     ChurchMember,
@@ -99,8 +101,10 @@ async def list_messages(
     return list((await db.execute(statement)).scalars().all())
 
 
-# --- Logs (read-only) -------------------------------------------------------
-logs_router = APIRouter(prefix="/logs", tags=["logs"])
+# --- Logs (read-only, admin) ------------------------------------------------
+logs_router = APIRouter(
+    prefix="/logs", tags=["logs"], dependencies=[Depends(require_admin)]
+)
 
 
 @logs_router.get("", response_model=list[schemas.LogRead])
@@ -126,10 +130,15 @@ dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @dashboard_router.get("/summary")
 async def dashboard_summary(db: DbSession, current_user: CurrentUser) -> dict:
+    cache_key = f"dashboard:summary:{current_user.id}"
+    cached = await cache_service.get(cache_key)
+    if cached is not None:
+        return cached
+
     async def count(statement) -> int:
         return (await db.execute(statement)).scalar_one()
 
-    return {
+    summary = {
         "contacts": await count(select(func.count()).select_from(Contact)),
         "messages": await count(select(func.count()).select_from(Message)),
         "pending_tasks": await count(
@@ -148,3 +157,5 @@ async def dashboard_summary(db: DbSession, current_user: CurrentUser) -> dict:
         "church_members": await count(select(func.count()).select_from(ChurchMember)),
         "store_customers": await count(select(func.count()).select_from(StoreCustomer)),
     }
+    await cache_service.set(cache_key, summary, ttl_seconds=30)
+    return summary

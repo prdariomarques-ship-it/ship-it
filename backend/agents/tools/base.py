@@ -1,0 +1,51 @@
+"""Function-calling tool abstraction for agents.
+
+A Tool couples an LLM-visible spec (name, description, JSON Schema) with an
+async handler that runs against the application services. Handlers always
+return a JSON string — that's what goes back to the model.
+"""
+import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.user import User
+from providers.llm.base import ToolSpec
+
+
+@dataclass
+class ToolContext:
+    """Everything a tool handler may need, injected by the executor."""
+
+    db: AsyncSession
+    user: User
+
+
+ToolHandler = Callable[..., Awaitable[str]]
+
+
+@dataclass
+class Tool:
+    name: str
+    description: str
+    handler: ToolHandler  # async (context: ToolContext, **arguments) -> str
+    parameters: dict = field(
+        default_factory=lambda: {"type": "object", "properties": {}, "required": []}
+    )
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
+
+    async def run(self, context: ToolContext, arguments: dict) -> str:
+        try:
+            return await self.handler(context, **arguments)
+        except TypeError as exc:  # bad/missing arguments from the model
+            return json.dumps({"error": f"Invalid arguments: {exc}"})
+        except Exception as exc:  # noqa: BLE001 - tool errors go back to the model
+            return json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+
+
+def ok(**data: object) -> str:
+    """JSON success envelope for tool results."""
+    return json.dumps({"ok": True, **data}, ensure_ascii=False, default=str)
