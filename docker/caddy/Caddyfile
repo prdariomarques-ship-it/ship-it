@@ -1,0 +1,30 @@
+# Reverse proxy for Dario OS.
+# With DOMAIN=localhost Caddy serves plain HTTP locally;
+# with a real domain it provisions HTTPS automatically (Let's Encrypt).
+{$DOMAIN:localhost} {
+	# Backend API + OpenAPI docs
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+	handle /docs* {
+		reverse_proxy backend:8000
+	}
+	handle /openapi.json {
+		reverse_proxy backend:8000
+	}
+	handle /health {
+		reverse_proxy backend:8000
+	}
+
+	# n8n editor and webhooks
+	handle_path /n8n/* {
+		reverse_proxy n8n:5678
+	}
+
+	# Frontend (Next.js)
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	encode gzip
+}

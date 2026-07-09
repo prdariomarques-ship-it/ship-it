@@ -13,3 +13,27 @@ session-env/
 # Arquivos de estado interno
 .last-cleanup
 mcp-needs-auth-cache.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.db
+
+# Node / Next.js
+node_modules/
+.next/
+next-env.d.ts
+npm-debug.log*
+
+# Ambiente
+.env
+.env.local
+
+# Editor
+.idea/
+.vscode/
+.DS_Store

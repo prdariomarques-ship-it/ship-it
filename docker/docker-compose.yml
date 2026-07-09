@@ -1,0 +1,117 @@
+name: darioos
+
+services:
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:-dario}@postgres:5432/${POSTGRES_DB:-darioos}
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      N8N_BASE_URL: http://n8n:5678
+      OPENWA_BASE_URL: http://openwa:8002
+      OPENWA_API_KEY: ${OPENWA_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    networks: [darioos]
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        NEXT_PUBLIC_API_URL: /api
+    restart: unless-stopped
+    depends_on: [backend]
+    networks: [darioos]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dario}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dario}
+      POSTGRES_DB: ${POSTGRES_DB:-darioos}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dario} -d ${POSTGRES_DB:-darioos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [darioos]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks: [darioos]
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [darioos]
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks: [darioos]
+
+  openwa:
+    image: openwa/wa-automate:latest
+    restart: unless-stopped
+    # If you set OPENWA_API_KEY in .env, also append: --key <the same value>
+    command: >-
+      --socket
+      --port 8002
+      --api-host http://openwa:8002
+      --webhook http://backend:8000/api/webhooks/whatsapp
+    volumes:
+      - openwa_data:/sessions
+    networks: [darioos]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [backend, frontend]
+    networks: [darioos]
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  n8n_data:
+  openwa_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  darioos:
+    driver: bridge
