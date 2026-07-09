@@ -1,10 +1,12 @@
 from agents.base import BaseAgent
+from agents.registry import register_agent
 from agents.tools.base import Tool
 from agents.tools.communication import (
     find_contact_tool,
     search_memory_tool,
     send_whatsapp_tool,
     store_memory_tool,
+    update_contact_preference_tool,
 )
 from agents.tools.domain import (
     add_prayer_request_tool,
@@ -22,6 +24,7 @@ from agents.tools.productivity import (
 )
 
 
+@register_agent
 class AssistantAgent(BaseAgent):
     """Agente geral: atende o WhatsApp e orquestra todos os domínios."""
 
@@ -51,6 +54,7 @@ class AssistantAgent(BaseAgent):
             find_contact_tool,
             search_memory_tool,
             store_memory_tool,
+            update_contact_preference_tool,
             send_whatsapp_tool,
             create_task_tool,
             list_tasks_tool,

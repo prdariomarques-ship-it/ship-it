@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.session import get_db
+from events.bus import event_bus
 from jobs.service import JobService
 from memory.contact_memory import contact_memory_service
 from models.message import Message, MessageDirection, MessageMediaType
@@ -95,5 +96,19 @@ async def whatsapp_webhook(
     )
     if summary_due:
         await jobs.enqueue("contact.summarize", {"contact_id": contact.id})
+
+    # Decoupling point: the webhook doesn't know (or care) who reacts to a new
+    # inbound message — n8n via the job above, and anyone else subscribed to
+    # this event (the future AI Console, analytics, a second automation).
+    await event_bus.publish(
+        "whatsapp.message_received",
+        {
+            "contact_id": contact.id,
+            "message_id": message.id,
+            "phone": inbound.phone,
+            "provider": provider.name,
+            "media_type": media_type,
+        },
+    )
 
     return WebhookAck(message_id=message.id)

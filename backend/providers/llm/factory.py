@@ -7,7 +7,9 @@ from functools import lru_cache
 
 from providers.llm.anthropic.provider import AnthropicProvider
 from providers.llm.base import LLMProvider
+from providers.llm.gemini.provider import GeminiProvider
 from providers.llm.glm.provider import GLMProvider
+from providers.llm.ollama.provider import OllamaProvider
 from providers.llm.openai.provider import OpenAIProvider
 from utils.config import get_settings
 
@@ -15,6 +17,8 @@ _PROVIDERS: dict[str, type[LLMProvider]] = {
     "openai": OpenAIProvider,
     "anthropic": AnthropicProvider,
     "glm": GLMProvider,
+    "gemini": GeminiProvider,
+    "ollama": OllamaProvider,
 }
 
 

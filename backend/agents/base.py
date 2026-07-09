@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agents.executor import AgentExecutor, AgentResult
 from agents.planner import Planner
 from agents.tools.base import Tool, ToolContext
-from memory.contact_memory import contact_memory_service
+from memory.manager import memory_manager
 from models.user import User
 from providers.llm.factory import get_llm_provider
 from utils.logging import get_logger
@@ -54,7 +54,7 @@ class BaseAgent(ABC):
     ) -> AgentResult:
         if memories is None:
             try:
-                context_data = await contact_memory_service.build_context(message, contact_id)
+                context_data = await memory_manager.build_agent_context(message, contact_id)
                 memories = context_data["memories"]
             except Exception as exc:  # noqa: BLE001 - memory is an enhancement, not a requirement
                 logger.warning("Memory lookup skipped (vector store unavailable): %s", exc)
@@ -62,4 +62,6 @@ class BaseAgent(ABC):
 
         messages = self.planner.build_messages(self.system_prompt, message, memories)
         executor = AgentExecutor(get_llm_provider(), self.tools)
-        return await executor.run(messages, ToolContext(db=db, user=user))
+        result = await executor.run(messages, ToolContext(db=db, user=user))
+        result.memories_used = len(memories)
+        return result

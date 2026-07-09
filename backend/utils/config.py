@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     glm_model: str = "glm-4-plus"
 
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "llama3.1"
+
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_embedding_model: str = "text-embedding-004"
+
     # Agents
     agent_max_iterations: int = 6
 
@@ -89,7 +97,9 @@ class Settings(BaseSettings):
     jobs_default_max_attempts: int = 3
     jobs_retry_backoff_seconds: int = 30  # base for exponential backoff
     jobs_stale_after_seconds: int = 300  # running longer than this = crashed worker
-    jobs_events_channel: str = "darioos:jobs:events"
+
+    # Event Bus (best-effort Redis fan-out; in-process delivery never depends on it)
+    events_channel: str = "darioos:events"
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"

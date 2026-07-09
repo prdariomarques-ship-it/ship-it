@@ -1,35 +1,29 @@
-"""Chat orchestration: pick the agent, enrich with memory, run plan/execute."""
+"""Chat orchestration: translate a ChatRequest into an agent run.
+
+Agent selection, memory and tool execution all live in the AI Orchestrator;
+this service only adapts between the chat wire format and that call.
+"""
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.registry import get_agent
 from chat.schemas import ChatRequest, ChatResponse
-from memory.contact_memory import contact_memory_service
 from models.user import User
-from utils.logging import get_logger
-
-logger = get_logger(__name__)
+from orchestrator.service import ai_orchestrator
 
 
 class ChatService:
     async def respond(self, db: AsyncSession, user: User, request: ChatRequest) -> ChatResponse:
-        agent = get_agent(request.agent)
-
-        memories: list[dict] = []
-        try:
-            context = await contact_memory_service.build_context(request.message, request.contact_id)
-            memories = context["memories"]
-        except Exception as exc:  # noqa: BLE001 - memory is an enhancement, not a requirement
-            logger.warning("Memory lookup skipped (vector store unavailable): %s", exc)
-
-        result = await agent.run(
+        result = await ai_orchestrator.run(
             db=db,
             user=user,
             message=request.message,
+            agent_name=request.agent,
             contact_id=request.contact_id,
-            memories=memories,
         )
         return ChatResponse(
-            agent=agent.name, reply=result.reply, steps=result.steps, memories_used=len(memories)
+            agent=request.agent,
+            reply=result.reply,
+            steps=result.steps,
+            memories_used=result.memories_used,
         )
 
 

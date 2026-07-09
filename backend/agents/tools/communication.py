@@ -1,6 +1,6 @@
 """Tools over contacts, memory and WhatsApp sending."""
 from agents.tools.base import Tool, ToolContext, ok
-from memory.service import memory_service
+from memory.manager import memory_manager
 from repositories.contact import ContactRepository
 
 
@@ -21,21 +21,32 @@ async def _find_contact(context: ToolContext, query: str) -> str:
             "categories": contact.categories,
             "tags": contact.tags,
             "summary": contact.summary,
+            "preferences": contact.preferences,
             "last_interaction_at": contact.last_interaction_at,
         },
     )
 
 
 async def _search_memory(context: ToolContext, query: str, contact_id: int | None = None) -> str:
-    results = await memory_service.search(query=query, limit=5, contact_id=contact_id)
+    results = await memory_manager.long_term_search(query=query, limit=5, contact_id=contact_id)
     return ok(memories=results)
 
 
 async def _store_memory(context: ToolContext, content: str, contact_id: int | None = None) -> str:
-    record = await memory_service.store(
+    memory_id = await memory_manager.remember(
         context.db, content=content, source="agent", contact_id=contact_id
     )
-    return ok(memory_id=record.id)
+    return ok(memory_id=memory_id)
+
+
+async def _update_contact_preference(
+    context: ToolContext, contact_id: int, key: str, value: str
+) -> str:
+    try:
+        preferences = await memory_manager.set_preference(context.db, contact_id, key, value)
+    except ValueError:
+        return ok(found=False)
+    return ok(found=True, preferences=preferences)
 
 
 async def _send_whatsapp(context: ToolContext, to: str, message: str) -> str:
@@ -50,7 +61,7 @@ async def _send_whatsapp(context: ToolContext, to: str, message: str) -> str:
 
 find_contact_tool = Tool(
     name="find_contact",
-    description="Busca um contato pelo nome ou telefone e retorna seu perfil e resumo.",
+    description="Busca um contato pelo nome ou telefone e retorna seu perfil, resumo e preferências.",
     handler=_find_contact,
     parameters={
         "type": "object",
@@ -84,6 +95,24 @@ store_memory_tool = Tool(
             "contact_id": {"type": "integer"},
         },
         "required": ["content"],
+    },
+)
+
+update_contact_preference_tool = Tool(
+    name="update_contact_preference",
+    description=(
+        "Salva ou atualiza uma preferência estruturada de um contato "
+        "(ex: horário de entrega preferido, forma de contato preferida)."
+    ),
+    handler=_update_contact_preference,
+    parameters={
+        "type": "object",
+        "properties": {
+            "contact_id": {"type": "integer"},
+            "key": {"type": "string", "description": "Nome da preferência, ex: 'horario_entrega'"},
+            "value": {"type": "string"},
+        },
+        "required": ["contact_id", "key", "value"],
     },
 )
 

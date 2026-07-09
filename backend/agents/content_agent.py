@@ -1,9 +1,11 @@
 from agents.base import BaseAgent
+from agents.registry import register_agent
 from agents.tools.base import Tool
 from agents.tools.communication import search_memory_tool, store_memory_tool
 from agents.tools.productivity import create_note_tool
 
 
+@register_agent
 class ContentAgent(BaseAgent):
     """Conteúdo para Instagram, Facebook, YouTube, TikTok e LinkedIn."""
 

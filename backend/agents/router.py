@@ -5,9 +5,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.executor import ExecutedStep
-from agents.registry import UnknownAgentError, get_agent, list_agents
+from agents.registry import UnknownAgentError, list_agents
+from agents.tools.registry import list_tools
 from auth.dependencies import CurrentUser
 from database.session import get_db
+from orchestrator.service import ai_orchestrator
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -49,11 +51,28 @@ async def run_agent(
     current_user: CurrentUser,
 ) -> AgentRunResponse:
     try:
-        agent = get_agent(agent_name)
+        result = await ai_orchestrator.run(
+            db=db,
+            user=current_user,
+            message=payload.message,
+            agent_name=agent_name,
+            contact_id=payload.contact_id,
+        )
     except UnknownAgentError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return AgentRunResponse(agent=agent_name, reply=result.reply, steps=result.steps)
 
-    result = await agent.run(
-        db=db, user=current_user, message=payload.message, contact_id=payload.contact_id
-    )
-    return AgentRunResponse(agent=agent.name, reply=result.reply, steps=result.steps)
+
+class ToolInfo(BaseModel):
+    name: str
+    description: str
+    parameters: dict
+
+
+@router.get("/tools", response_model=list[ToolInfo])
+async def get_tools(_: CurrentUser) -> list[ToolInfo]:
+    """Discovery endpoint for every registered tool (Tool Registry), across all agents."""
+    return [
+        ToolInfo(name=tool.name, description=tool.description, parameters=tool.parameters)
+        for tool in list_tools()
+    ]

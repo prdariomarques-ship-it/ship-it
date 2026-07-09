@@ -1,9 +1,16 @@
 from agents.base import BaseAgent
+from agents.registry import register_agent
 from agents.tools.base import Tool
-from agents.tools.communication import find_contact_tool, search_memory_tool, store_memory_tool
+from agents.tools.communication import (
+    find_contact_tool,
+    search_memory_tool,
+    store_memory_tool,
+    update_contact_preference_tool,
+)
 from agents.tools.domain import add_store_customer_tool, list_store_customers_tool
 
 
+@register_agent
 class StoreAgent(BaseAgent):
     """Produtos, pedidos, clientes, estoque e orçamentos."""
 
@@ -33,4 +40,5 @@ class StoreAgent(BaseAgent):
             find_contact_tool,
             search_memory_tool,
             store_memory_tool,
+            update_contact_preference_tool,
         ]

@@ -1,4 +1,5 @@
 from agents.base import BaseAgent
+from agents.registry import register_agent
 from agents.tools.base import Tool
 from agents.tools.communication import search_memory_tool, store_memory_tool
 from agents.tools.productivity import (
@@ -11,6 +12,7 @@ from agents.tools.productivity import (
 )
 
 
+@register_agent
 class PersonalAgent(BaseAgent):
     """Agenda, lembretes, notas, pesquisa e resumos."""
 

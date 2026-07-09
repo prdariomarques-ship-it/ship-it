@@ -23,6 +23,7 @@ class ExecutedStep(BaseModel):
 class AgentResult(BaseModel):
     reply: str
     steps: list[ExecutedStep] = []
+    memories_used: int = 0
 
 
 class AgentExecutor:

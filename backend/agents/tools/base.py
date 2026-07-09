@@ -34,6 +34,14 @@ class Tool:
         default_factory=lambda: {"type": "object", "properties": {}, "required": []}
     )
 
+    def __post_init__(self) -> None:
+        # Self-registration: importing the module that defines a Tool is
+        # enough for it to show up in the Tool Registry (GET /api/tools),
+        # with no separate registration step for tool authors to remember.
+        from agents.tools.registry import register_tool
+
+        register_tool(self)
+
     def spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
 

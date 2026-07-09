@@ -11,12 +11,14 @@ services:
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       N8N_BASE_URL: http://n8n:5678
-      # LLM providers (Strategy: openai | anthropic | glm)
+      # LLM providers (Strategy: openai | anthropic | glm | gemini | ollama)
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       # WhatsApp providers (Strategy: openwa | baileys | evolution | official)
       WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-openwa}
       OPENWA_BASE_URL: http://openwa:8002

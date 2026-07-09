@@ -1,10 +1,12 @@
 from agents.base import BaseAgent
+from agents.registry import register_agent
 from agents.tools.base import Tool
 from agents.tools.communication import search_memory_tool, store_memory_tool
 from agents.tools.domain import add_prayer_request_tool, list_church_members_tool
 from agents.tools.productivity import create_event_tool, list_events_tool
 
 
+@register_agent
 class ChurchAgent(BaseAgent):
     """Pedidos de oração, escalas, cultos, avisos e versículos."""
 
