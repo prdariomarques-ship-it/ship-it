@@ -80,12 +80,14 @@ backend/
   mail/           # Rotas OAuth do Gmail: connect/callback/status/disconnect (admin-only)
   gcalendar/      # Rotas OAuth do Google Calendar (admin-only)
   gcontacts/      # Rotas OAuth do Google Contacts (admin-only)
+  gdrive/         # Rotas OAuth do Google Drive (admin-only)
   providers/
     llm/          # openai / anthropic / glm / gemini / ollama  (contrato LLMProvider)
     whatsapp/     # openwa / baileys / evolution / official  (contrato WhatsAppProvider)
     mail/         # gmail  (contrato MailProvider) — somente leitura, ver docs/EMAIL.md
     calendar/     # google  (contrato CalendarProvider) — leitura+escrita, ver docs/CALENDAR.md
     contacts/     # google  (contrato ContactsProvider) — leitura+escrita, ver docs/CONTACTS.md
+    drive/        # google  (contrato DriveProvider) — somente leitura, ver docs/DRIVE.md
   repositories/   # Repository pattern (genérico + especializados)
   observability/  # health/readiness, métricas Prometheus
   services/       # cache Redis, rate limit, auditoria
@@ -94,10 +96,11 @@ backend/
   database/       # Engine async + base declarativa
   models/         # users, contacts, messages, church_members, store_customers,
                   # notes, calendar, tasks, embeddings, logs, refresh_tokens, jobs,
-                  # email_accounts, google_calendar_accounts, google_contacts_accounts
+                  # email_accounts, google_calendar_accounts, google_contacts_accounts,
+                  # google_drive_accounts, google_drive_indexed_files
   utils/          # Settings (config.py) + logging estruturado (logging.py)
   alembic/        # Migrações
-  tests/          # 399 testes pytest
+  tests/          # 473 testes pytest
 ```
 
 ## Fluxo de execução (WhatsApp) — ponta a ponta, automático
@@ -179,7 +182,7 @@ A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo 
 | `church` | Oração, escalas, cultos, avisos, versículos | membros, pedidos de oração, eventos, memória |
 | `store` | Produtos, pedidos, clientes, orçamentos | clientes, contatos, memória, preferências |
 | `content` | Conteúdo para redes sociais | notas, memória |
-| `assistant` | Atende o WhatsApp; acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail, somente leitura) + Google Calendar + Google Contacts |
+| `assistant` | Atende o WhatsApp; acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail, somente leitura) + Google Calendar + Google Contacts + Google Drive (base de conhecimento) |
 
 Cada agente possui **system prompt**, **tools** (function calling via Tool Registry), **memory** (Memory Manager — busca semântica injetada no contexto pelo planner), **planner** (monta o contexto) e **executor** (loop plan → act → observe com orçamento de iterações).
 
@@ -215,6 +218,7 @@ Ferramentas seguem o mesmo espírito: declare um `Tool(...)` em `agents/tools/`,
 - **E-mail**: crie `providers/mail/<nome>/provider.py` implementando `MailProvider` (OAuth + `search`/`get_thread`), registre em `providers/mail/factory.py` e selecione com `MAIL_PROVIDER=<nome>`. Hoje só `gmail` existe. Guia completo: [`docs/EMAIL.md`](docs/EMAIL.md).
 - **Calendário**: crie `providers/calendar/<nome>/provider.py` implementando `CalendarProvider`, registre em `providers/calendar/factory.py` e selecione com `CALENDAR_PROVIDER=<nome>`. Hoje só `google` existe. Guia completo: [`docs/CALENDAR.md`](docs/CALENDAR.md).
 - **Contatos**: crie `providers/contacts/<nome>/provider.py` implementando `ContactsProvider`, registre em `providers/contacts/factory.py` e selecione com `CONTACTS_PROVIDER=<nome>`. Hoje só `google` existe. Guia completo: [`docs/CONTACTS.md`](docs/CONTACTS.md).
+- **Drive**: crie `providers/drive/<nome>/provider.py` implementando `DriveProvider`, registre em `providers/drive/factory.py` e selecione com `DRIVE_PROVIDER=<nome>`. Hoje só `google` existe. Guia completo: [`docs/DRIVE.md`](docs/DRIVE.md).
 
 Nenhuma outra parte da aplicação muda — rotas, agentes e jobs dependem apenas dos contratos.
 
@@ -243,6 +247,12 @@ Configuração (`MAIL_PROVIDER`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GO
 Dois domínios novos e isolados (Sprint 2), leitura **e** escrita: agendas/eventos (listar, buscar, criar, editar, excluir, verificar conflitos/disponibilidade) e contatos (listar, buscar, criar, editar, remover) do Google real do usuário — não confundir com a agenda interna (`/api/calendar`) nem com os contatos de WhatsApp (`/api/contacts`) que o Dario OS já tinha antes. Mesmo padrão do Gmail: só `assistant` tem acesso direto às ferramentas; reaproveitam o mesmo app OAuth do Google Cloud já criado para o Gmail (só mais uma URI de redirecionamento e um escopo, cadastrados no mesmo app, por domínio).
 
 Configuração e passo a passo: **[`docs/CALENDAR.md`](docs/CALENDAR.md)** (`CALENDAR_PROVIDER`, `GOOGLE_CALENDAR_REDIRECT_URI`) e **[`docs/CONTACTS.md`](docs/CONTACTS.md)** (`CONTACTS_PROVIDER`, `GOOGLE_CONTACTS_REDIRECT_URI`).
+
+## Google Drive (base de conhecimento)
+
+Domínio novo e isolado (Sprint 3): o Google Drive como base oficial de conhecimento do Dario OS. Lista, busca, lê (PDF, DOCX, TXT, Markdown, CSV) e indexa arquivos — a indexação alimenta exclusivamente o Memory Manager/Qdrant que já existiam (mesma coleção, tag `knowledge`), sem nenhum banco ou mecanismo de conhecimento novo. Perguntas como "qual documento fala sobre investimentos?" já são respondidas pela ferramenta `search_memory` existente, assim que os arquivos relevantes forem indexados — nenhuma tool de busca de conhecimento nova foi criada. Google Docs, Sheets, Slides, Meet, Tasks e Keep estão fora do escopo. Mesmo padrão de gateway único (`assistant`) e reaproveitamento do app OAuth do Gmail.
+
+Configuração e passo a passo: **[`docs/DRIVE.md`](docs/DRIVE.md)** (`DRIVE_PROVIDER`, `GOOGLE_DRIVE_REDIRECT_URI`, `GDRIVE_MAX_FILE_SIZE_BYTES`).
 
 ## Autenticação
 
@@ -290,7 +300,7 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (399 testes; cobertura ~93%)
+# Testes (473 testes; cobertura ~93%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
 
@@ -317,7 +327,7 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - Senhas com PBKDF2-SHA256 salteado, verificadas fora do event loop e em tempo constante
 - Backup diário: agende `scripts/backup.sh` no cron (`0 3 * * *`)
 - Refresh token do Gmail cifrado em repouso (Fernet, `EMAIL_TOKEN_ENCRYPTION_KEY`); nenhuma credencial de terceiro é persistida em texto puro
-- Isolamento técnico entre usuários/contatos decidido em código, nunca só pelo prompt do LLM (WhatsApp: PROD-005; e-mail/Calendar/Contacts: Sprint 1 e 2) — ver [`SECURITY.md`](SECURITY.md) para o modelo de segurança completo
+- Isolamento técnico entre usuários/contatos decidido em código, nunca só pelo prompt do LLM (WhatsApp: PROD-005; e-mail/Calendar/Contacts/Drive: Sprint 1-3) — ver [`SECURITY.md`](SECURITY.md) para o modelo de segurança completo
 
 ## Documentação
 
@@ -330,6 +340,7 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - [docs/EMAIL.md](docs/EMAIL.md) — integração Gmail: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
 - [docs/CALENDAR.md](docs/CALENDAR.md) — integração Google Calendar: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
 - [docs/CONTACTS.md](docs/CONTACTS.md) — integração Google Contacts: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
+- [docs/DRIVE.md](docs/DRIVE.md) — Google Drive como base de conhecimento: arquitetura, integração com o Memory Manager existente, isolamento, ferramentas, setup OAuth passo a passo
 - [SECURITY.md](SECURITY.md) — modelo de segurança consolidado (autenticação, isolamento, segredos, checklist de produção)
 - [docs/fase4.1-relatorio.md](docs/fase4.1-relatorio.md) — relatório técnico do fluxo ponta a ponta do WhatsApp
 - [docs/fase4.2-relatorio.md](docs/fase4.2-relatorio.md) — relatório técnico do Cognitive Pipeline

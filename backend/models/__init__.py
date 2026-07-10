@@ -5,6 +5,8 @@ from models.email_account import EmailAccount
 from models.embedding import Embedding
 from models.gcalendar_account import GoogleCalendarAccount
 from models.gcontacts_account import GoogleContactsAccount
+from models.gdrive_account import GoogleDriveAccount
+from models.gdrive_indexed_file import GoogleDriveIndexedFile
 from models.job import Job, JobStatus
 from models.log import LogEntry
 from models.message import Message, MessageDirection, MessageMediaType
@@ -22,6 +24,8 @@ __all__ = [
     "Embedding",
     "GoogleCalendarAccount",
     "GoogleContactsAccount",
+    "GoogleDriveAccount",
+    "GoogleDriveIndexedFile",
     "Job",
     "JobStatus",
     "LogEntry",

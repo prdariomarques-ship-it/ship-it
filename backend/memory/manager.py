@@ -71,6 +71,12 @@ class MemoryManager:
         record = await memory_service.store(db, content=content, source=source, contact_id=contact_id)
         return record.id
 
+    async def forget(self, db: AsyncSession, embedding_ids: list[int]) -> None:
+        """Delete specific memory/knowledge entries (Qdrant + Postgres) by
+        the ids `remember()` returned. See `MemoryService.delete` for why
+        this exists (Sprint 3: re-indexing a changed Google Drive file)."""
+        await memory_service.delete(db, embedding_ids)
+
     async def get_preferences(self, db: AsyncSession, contact_id: int) -> dict:
         contact = await ContactRepository(db).get(contact_id)
         return dict(contact.preferences) if contact else {}

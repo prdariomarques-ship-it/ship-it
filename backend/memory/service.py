@@ -3,6 +3,7 @@ import uuid
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.embedding import Embedding
@@ -67,6 +68,24 @@ class MemoryService:
         await db.commit()
         await db.refresh(record)
         return record
+
+    async def delete(self, db: AsyncSession, embedding_ids: list[int]) -> None:
+        """Remove specific memory/knowledge entries (Qdrant point + Postgres
+        row) by `Embedding.id`. Generic — not tied to any one `source` —
+        added for the Google Drive knowledge indexer (Sprint 3) to replace
+        a file's stale chunks on re-indexing instead of accumulating
+        duplicates forever; same minimal, additive-extension idiom already
+        used for `auth/jwt.py::create_oauth_state_token`'s `purpose` param."""
+        if not embedding_ids:
+            return
+        rows = (await db.execute(select(Embedding).where(Embedding.id.in_(embedding_ids)))).scalars().all()
+        vector_ids = [row.vector_id for row in rows]
+        if vector_ids:
+            await self._ensure_collection()
+            await self.client.delete(collection_name=self._settings.qdrant_collection, points_selector=vector_ids)
+        for row in rows:
+            await db.delete(row)
+        await db.commit()
 
     async def search(
         self, query: str, limit: int = 5, contact_id: int | None = None

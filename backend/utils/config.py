@@ -147,6 +147,15 @@ class Settings(BaseSettings):
     google_contacts_redirect_uri: str = ""  # e.g. https://<domain>/api/gcontacts/oauth/callback
     google_people_api_base_url: str = "https://people.googleapis.com/v1"
 
+    # Google Drive (Sprint 3) — base de conhecimento; mesmo padrão de reuso de
+    # google_client_id/google_client_secret/email_token_encryption_key.
+    drive_provider: str = "google"
+    google_drive_redirect_uri: str = ""  # e.g. https://<domain>/api/gdrive/oauth/callback
+    google_drive_api_base_url: str = "https://www.googleapis.com/drive/v3"
+    # Trava de segurança de "download seguro": arquivo maior que isto é
+    # recusado antes de baixar, nunca lido parcialmente na memória.
+    gdrive_max_file_size_bytes: int = 20_000_000
+
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
 

@@ -74,6 +74,19 @@ Leitura e escrita (Sprint 2); `/connect`, `/status` e `/disconnect` são admin-o
 
 As quatro ferramentas (`search_google_contacts`, `create_google_contact`, `update_google_contact`, `delete_google_contact`) são acessadas via `/api/chat`/`/api/agents/assistant/run`, como qualquer outra tool.
 
+## Google Drive (base de conhecimento)
+
+Somente leitura (Sprint 3); `/connect`, `/status` e `/disconnect` são admin-only. Guia completo: [`docs/DRIVE.md`](DRIVE.md).
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/api/gdrive/connect` | Retorna a URL de consentimento do Google (admin) |
+| GET | `/api/gdrive/oauth/callback` | Callback do Google (autenticado via `state` assinado) |
+| GET | `/api/gdrive/status` | Status da conexão do usuário autenticado (admin) |
+| DELETE | `/api/gdrive/disconnect` | Remove a conta conectada (admin) |
+
+As sete ferramentas (`list_google_drive_files`, `search_google_drive_files`, `read_google_drive_file`, `index_google_drive_file`, `index_google_drive_folder`, `summarize_google_drive_document`, `update_google_drive_index`) são acessadas via `/api/chat`/`/api/agents/assistant/run`. Perguntas sobre o conteúdo já indexado ("qual documento fala sobre X") usam a ferramenta `search_memory` já existente — não têm rota própria, ver `docs/DRIVE.md`.
+
 ## Automação e jobs
 
 | Método | Rota | Descrição |

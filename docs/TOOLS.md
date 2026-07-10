@@ -93,6 +93,7 @@ Isso é auditabilidade real, não hipotética: `GET /api/chat` e `/api/agents/{n
 | `agents/tools/mail.py` | `search_emails`, `read_email_thread`, `summarize_email_thread`, `detect_pending_email_actions` — registradas **só** em `assistant_agent.py`; ver `docs/EMAIL.md` |
 | `agents/tools/gcalendar.py` | `list_google_calendars`, `search_google_calendar_events`, `create_google_calendar_event`, `update_google_calendar_event`, `delete_google_calendar_event`, `check_google_calendar_availability` — registradas **só** em `assistant_agent.py`; ver `docs/CALENDAR.md` |
 | `agents/tools/gcontacts.py` | `search_google_contacts`, `create_google_contact`, `update_google_contact`, `delete_google_contact` — registradas **só** em `assistant_agent.py`; ver `docs/CONTACTS.md` |
+| `agents/tools/gdrive.py` | `list_google_drive_files`, `search_google_drive_files`, `read_google_drive_file`, `index_google_drive_file`, `index_google_drive_folder`, `summarize_google_drive_document`, `update_google_drive_index` — registradas **só** em `assistant_agent.py`; ver `docs/DRIVE.md`. Perguntas sobre o conteúdo indexado usam `search_memory` (linha acima), não uma tool nova. |
 
 ## Adicionando uma ferramenta nova
 

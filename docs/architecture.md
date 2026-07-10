@@ -272,7 +272,8 @@ Eventos publicados hoje: `whatsapp.message_received` (webhook), `agent.selected`
 | --- | --- | --- |
 | Curto prazo | `short_term(contact_id)` | `MessageRepository.recent_for_contact` (Postgres) |
 | Longo prazo | `long_term_search(query, contact_id)` | Busca semântica no Qdrant (`MemoryService`) |
-| Conhecimento | `knowledge_search(query)` | Mesma coleção Qdrant, filtrada por `source="knowledge"` — consultada de verdade pela primeira vez na Fase 4.2, pelo Cognitive Pipeline |
+| Conhecimento | `knowledge_search(query)` | Mesma coleção Qdrant, filtrada por `source="knowledge"` — consultada de verdade pela primeira vez na Fase 4.2, pelo Cognitive Pipeline; alimentada de verdade pela primeira vez na Sprint 3 (indexação do Google Drive) |
+| Remoção | `forget(embedding_ids)` (Sprint 3) | `MemoryService.delete` — apaga pontos específicos do Qdrant + linhas de `Embedding`; usado pela reindexação do Drive para substituir pedaços obsoletos em vez de acumulá-los |
 | Preferências | `get_preferences` / `set_preference` | `Contact.preferences` (JSON) — a tool `update_contact_preference` já usa este caminho |
 | Resumo | `get_summary` (Fase 4.2) | `Contact.summary`, mantido por `ContactMemoryService.summarize_contact` |
 | Categorias/padrões | `add_categories` (Fase 4.2) | `Contact.categories` (JSON); deduplica na escrita — nunca grava a mesma categoria duas vezes |
@@ -338,6 +339,9 @@ providers/
     google/     REST via httpx puro — OAuth 2.0 + Google Calendar API, leitura+escrita (Sprint 2)
   contacts/   base.py (ContactsProvider, Contact, ContactSearchQuery, ...)
     google/     REST via httpx puro — OAuth 2.0 + Google People API, leitura+escrita (Sprint 2)
+  drive/      base.py (DriveProvider, DriveFile, DriveSearchQuery, ...)
+    google/     REST via httpx puro — OAuth 2.0 + Google Drive API, somente leitura;
+                extrai texto de PDF (pypdf) e DOCX (python-docx) (Sprint 3)
 ```
 
 `LLM_PROVIDER` e `EMBEDDING_PROVIDER` são independentes porque nem todo vendor tem API de embeddings de dimensão previsível (Anthropic não tem API de embeddings; GLM e Ollama têm, mas com dimensão que não bate com a coleção Qdrant configurada — ambos levantam `EmbeddingsNotSupportedError` de propósito em vez de gravar vetores incompatíveis silenciosamente). Sem chave/endereço configurado, todo provider degrada para resposta stub — o sistema continua de pé.
@@ -452,8 +456,41 @@ flowchart TB
 - **Não confundir com domínios internos já existentes**: `models.calendar.CalendarEvent`/`create_event`/`/api/calendar` são a agenda **interna** do Dario OS (tarefas/lembretes, sem Google); `models.contact.Contact`/`find_contact`/`/api/contacts` são os contatos **de WhatsApp** (isolamento PROD-005). Os domínios Google desta sprint são deliberadamente nomeados `gcalendar`/`gcontacts` em todo lugar (modelos, tools, rotas) para nunca colidir com esses dois domínios pré-existentes, nem confundir qual é qual — ver a seção "Não confundir" em cada um dos dois novos documentos.
 - **Consolidação de ferramentas**: 12 capacidades pedidas para Calendar viraram 6 tools (e 7 para Contacts viraram 4) parametrizando em vez de duplicar — mesmo padrão já usado pelo `search_emails` do Gmail (um `since`/`until` cobre "hoje", "amanhã", "esta semana", "próximos compromissos" em vez de uma tool por variação).
 - **Um único app OAuth do Google Cloud para os três domínios**: Calendar e Contacts reaproveitam `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` já configurados para o Gmail — só precisam de mais uma URI de redirecionamento e mais um escopo cada, cadastrados no mesmo app.
-- **`state` OAuth com propósito por domínio**: `auth/jwt.py::create_oauth_state_token`/`decode_oauth_state_token` ganharam um parâmetro `purpose` (Sprint 2) — cada domínio usa o seu (`gmail_oauth_state`, `gcalendar_oauth_state`, `gcontacts_oauth_state`), então um `state` válido para um callback nunca é aceito por outro, mesmo com os três reutilizando o mesmo helper e o mesmo `JWT_SECRET`. Extensão aditiva com valor padrão — nenhum chamador existente do Gmail mudou.
+- **`state` OAuth com propósito por domínio**: `auth/jwt.py::create_oauth_state_token`/`decode_oauth_state_token` ganharam um parâmetro `purpose` (Sprint 2) — cada domínio usa o seu (`gmail_oauth_state`, `gcalendar_oauth_state`, `gcontacts_oauth_state`, `gdrive_oauth_state` desde a Sprint 3), então um `state` válido para um callback nunca é aceito por outro, mesmo com os quatro reutilizando o mesmo helper e o mesmo `JWT_SECRET`. Extensão aditiva com valor padrão — nenhum chamador existente do Gmail mudou.
 - **Corrida de concorrência resolvida desde o início**: `GoogleCalendarAccountRepository.upsert_for_user`/`GoogleContactsAccountRepository.upsert_for_user` já nascem com a recuperação de corrida de unique-constraint (dois callbacks OAuth concorrentes para o mesmo usuário) que só foi corrigida no Gmail depois, na auditoria da Sprint 1.1 (`EmailAccountRepository.upsert_for_user`) — mesmo idiom de `ContactRepository.get_or_create_by_phone`, aplicado aqui de imediato em vez de esperar por uma auditoria de correção.
+
+## Google Drive — Sprint 3 (base de conhecimento)
+
+Quarto domínio Google, mesmo padrão de isolamento e gateway único dos três anteriores — com uma diferença central: **o que ele produz (conhecimento indexado) não cria um armazenamento novo; alimenta exclusivamente o Memory Manager / Knowledge Store / Qdrant que já existiam desde a Fase 4.2** (`memory/manager.py::KNOWLEDGE_SOURCE`, documentado então como "pronto para uso, só faltando quem alimentasse"). Guia completo: **[`docs/DRIVE.md`](DRIVE.md)**.
+
+```mermaid
+flowchart TB
+    subgraph Gateway["Único gateway: assistant"]
+        DriveTools["agents/tools/gdrive.py\n(7 tools)"]
+    end
+    Others["personal / church / store / content\n(sem tools de Drive)"]
+    Planner["Cognitive Planner"]
+    Access["_get_access_token(context)\nsempre por context.user.id"]
+    Provider["GoogleDriveProvider\nescopo drive.readonly"]
+    GDrive[(Google Drive API)]
+    MM["Memory Manager\n(remember / forget — já existente)"]
+    Qdrant[(Qdrant\nsource=knowledge)]
+    Bookkeeping["GoogleDriveIndexedFile\n(bookkeeping — nunca conteúdo)"]
+    SearchMemory["search_memory\n(tool já existente)"]
+
+    Others -. "precisa de conhecimento?" .-> Planner
+    Planner -- "roteia a etapa para" --> DriveTools
+    DriveTools --> Access --> Provider --> GDrive
+    DriveTools -- "indexação" --> MM --> Qdrant
+    DriveTools -- "bookkeeping" --> Bookkeeping
+    SearchMemory -- "busca semântica" --> Qdrant
+```
+
+- **RAG sem ferramenta nova**: como o conteúdo indexado entra na mesma coleção Qdrant com a mesma tag `source="knowledge"` que qualquer outra memória, a ferramenta `search_memory` (já existente, já registrada em `assistant` desde antes desta sprint) já responde "qual documento fala sobre X" assim que os arquivos relevantes forem indexados — nenhuma tool de busca de conhecimento foi criada.
+- **Única extensão ao Memory Manager**: `MemoryService.delete`/`MemoryManager.forget(db, embedding_ids)` — pequena, aditiva, genérica (não específica do Drive), necessária para que reindexar um arquivo alterado substitua os pedaços antigos em vez de acumulá-los para sempre (o que quebraria justamente "o que mudou na última versão"). Nenhuma linha do `store`/`search`/`knowledge_search` pré-existentes mudou.
+- **Bookkeeping, não um segundo banco de conhecimento**: `GoogleDriveIndexedFile` guarda só metadados (arquivo, quando indexado, quais `Embedding.id` do Postgres) — nunca o conteúdo do documento, que vive exclusivamente no Qdrant via o Memory Manager já existente.
+- **Extração de texto dentro do Provider**: PDF (`pypdf`) e DOCX (`python-docx`) são parseados dentro de `GoogleDriveProvider`, mesmo lugar (e mesmo princípio: tradução, não regra de negócio) que `GmailProvider._extract_body` já decodifica payloads MIME. Arquivos nativos do Google (`application/vnd.google-apps.*`) são recusados antes de tentar baixar — a API do Drive não aceita `alt=media` para eles, e lê-los exigiria `files.export`, que é a própria integração de Docs/Sheets/Slides que esta sprint exclui.
+- **Conhecimento é global à instância, por design**: diferente de Gmail/Calendar/Contacts (isolados por conta Google conectada), o resultado da indexação não é particionado por usuário — mesma característica que `knowledge_search` já tinha desde a Fase 4.2, consistente com o modelo de dono único do Dario OS. O que precisa e está isolado é qual Drive é lido, nunca quem pode ver o conhecimento resultante depois.
 
 ## Agentes
 

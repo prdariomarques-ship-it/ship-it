@@ -28,6 +28,15 @@ from agents.tools.gcontacts import (
     search_google_contacts_tool,
     update_google_contact_tool,
 )
+from agents.tools.gdrive import (
+    index_google_drive_file_tool,
+    index_google_drive_folder_tool,
+    list_google_drive_files_tool,
+    read_google_drive_file_tool,
+    search_google_drive_files_tool,
+    summarize_google_drive_document_tool,
+    update_google_drive_index_tool,
+)
 from agents.tools.mail import (
     detect_pending_email_actions_tool,
     read_email_thread_tool,
@@ -61,7 +70,10 @@ class AssistantAgent(BaseAgent):
         return (
             "Você é o assistente geral do Dario dentro do Dario OS, responsável por "
             "atender conversas do WhatsApp e executar pedidos em qualquer módulo "
-            "(agenda, tarefas, notas, igreja, loja, contatos). "
+            "(agenda, tarefas, notas, igreja, loja, contatos, documentos). "
+            "Para perguntas sobre documentos já indexados (ex: 'qual documento fala "
+            "sobre X'), use primeiro a ferramenta search_memory antes de tentar buscar "
+            "no Google Drive do zero. "
             "Responda mensagens de forma educada, calorosa e objetiva. "
             "Use as memórias e o perfil do contato para personalizar a resposta. "
             "Nunca invente compromissos ou informações: consulte as ferramentas. "
@@ -104,4 +116,11 @@ class AssistantAgent(BaseAgent):
             create_google_contact_tool,
             update_google_contact_tool,
             delete_google_contact_tool,
+            list_google_drive_files_tool,
+            search_google_drive_files_tool,
+            read_google_drive_file_tool,
+            index_google_drive_file_tool,
+            index_google_drive_folder_tool,
+            summarize_google_drive_document_tool,
+            update_google_drive_index_tool,
         ]
