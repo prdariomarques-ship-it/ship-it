@@ -4,7 +4,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from providers.llm.anthropic.provider import AnthropicProvider
-from providers.llm.base import STUB_REPLY, ChatMessage, EmbeddingsNotSupportedError, ToolCallRequest, ToolSpec
+from providers.llm.base import (
+    STUB_REPLY,
+    ChatMessage,
+    EmbeddingsNotSupportedError,
+    TokenUsage,
+    ToolCallRequest,
+    ToolSpec,
+    estimate_cost_usd,
+)
 from providers.llm.factory import _build, get_llm_provider
 from providers.llm.gemini.provider import GeminiProvider
 from providers.llm.glm.provider import GLMProvider
@@ -123,6 +131,47 @@ async def test_llm_providers_degrade_gracefully_without_keys():
 async def test_anthropic_has_no_embeddings():
     with pytest.raises(EmbeddingsNotSupportedError):
         await AnthropicProvider(api_key="x").embed("texto")
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_reports_token_usage():
+    provider = OpenAIProvider(api_key="test-key")
+    fake_message = MagicMock(content="oi", tool_calls=None)
+    fake_response = MagicMock()
+    fake_response.choices = [MagicMock(message=fake_message)]
+    fake_response.usage = MagicMock(prompt_tokens=42, completion_tokens=8)
+
+    with patch.object(provider.client.chat.completions, "create", new=AsyncMock(return_value=fake_response)):
+        result = await provider.chat([ChatMessage(role="user", content="oi")])
+    assert result.usage.prompt_tokens == 42
+    assert result.usage.completion_tokens == 8
+
+
+@pytest.mark.asyncio
+async def test_openai_chat_without_usage_reports_zero():
+    provider = OpenAIProvider(api_key="test-key")
+    fake_message = MagicMock(content="oi", tool_calls=None)
+    fake_response = MagicMock(usage=None)
+    fake_response.choices = [MagicMock(message=fake_message)]
+
+    with patch.object(provider.client.chat.completions, "create", new=AsyncMock(return_value=fake_response)):
+        result = await provider.chat([ChatMessage(role="user", content="oi")])
+    assert result.usage.prompt_tokens == 0
+    assert result.usage.completion_tokens == 0
+
+
+@pytest.mark.asyncio
+async def test_anthropic_chat_reports_token_usage():
+    provider = AnthropicProvider(api_key="test-key")
+    fake_block = MagicMock(type="text", text="oi")
+    fake_response = MagicMock()
+    fake_response.content = [fake_block]
+    fake_response.usage = MagicMock(input_tokens=15, output_tokens=6)
+
+    with patch.object(provider.client.messages, "create", new=AsyncMock(return_value=fake_response)):
+        result = await provider.chat([ChatMessage(role="user", content="oi")])
+    assert result.usage.prompt_tokens == 15
+    assert result.usage.completion_tokens == 6
 
 
 # --- Multi-LLM: factory selection -------------------------------------------
@@ -274,3 +323,40 @@ async def test_gemini_embed_disabled_returns_zero_vector():
     vector = await provider.embed("texto")
     assert vector == [0.0] * len(vector)
     assert all(value == 0.0 for value in vector)
+
+
+@pytest.mark.asyncio
+async def test_gemini_chat_reports_token_usage():
+    provider = GeminiProvider(api_key="test-key")
+    body = {
+        "candidates": [{"content": {"parts": [{"text": "oi"}]}}],
+        "usageMetadata": {"promptTokenCount": 12, "candidatesTokenCount": 4, "totalTokenCount": 16},
+    }
+    with _patch_httpx_post(_mock_httpx_response(body)):
+        result = await provider.chat([ChatMessage(role="user", content="oi")])
+    assert result.usage.prompt_tokens == 12
+    assert result.usage.completion_tokens == 4
+    assert result.usage.total_tokens == 16
+
+
+# --- Token usage / cost estimate ---------------------------------------------
+def test_token_usage_addition_sums_both_fields():
+    total = TokenUsage(prompt_tokens=10, completion_tokens=5) + TokenUsage(prompt_tokens=3, completion_tokens=2)
+    assert total == TokenUsage(prompt_tokens=13, completion_tokens=7)
+    assert total.total_tokens == 20
+
+
+def test_estimate_cost_usd_uses_the_pricing_table():
+    usage = TokenUsage(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    assert estimate_cost_usd("openai", usage) == pytest.approx(0.15 + 0.60)
+    assert estimate_cost_usd("anthropic", usage) == pytest.approx(3.00 + 15.00)
+
+
+def test_estimate_cost_usd_unknown_provider_is_zero():
+    usage = TokenUsage(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    assert estimate_cost_usd("some-future-vendor", usage) == 0.0
+
+
+def test_estimate_cost_usd_self_hosted_providers_are_free():
+    usage = TokenUsage(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    assert estimate_cost_usd("ollama", usage) == 0.0

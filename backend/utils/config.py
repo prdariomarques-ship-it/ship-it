@@ -66,6 +66,7 @@ class Settings(BaseSettings):
 
     # Agents
     agent_max_iterations: int = 6
+    agent_run_timeout_seconds: int = 60
 
     # WhatsApp providers ("openwa", "baileys", "evolution" or "official")
     whatsapp_provider: str = "openwa"
@@ -84,12 +85,20 @@ class Settings(BaseSettings):
     official_api_base_url: str = "https://graph.facebook.com/v21.0"
     official_access_token: str = ""
     official_phone_number_id: str = ""
+    official_app_secret: str = ""  # signs webhooks (X-Hub-Signature-256); optional but recommended
 
     # n8n
     n8n_base_url: str = "http://localhost:5678"
 
     # Inbound webhooks (when set, POST /webhooks/* requires X-Webhook-Token)
     webhook_secret: str = ""
+
+    # Automatic end-to-end reply: webhook -> AI Orchestrator -> send.
+    # Disable if an external automation (e.g. n8n) should own replies instead,
+    # to avoid the contact receiving two answers to the same message.
+    auto_reply_enabled: bool = True
+    # Loop/flood breaker: max automatic replies per contact per minute.
+    auto_reply_max_per_contact_per_minute: int = 6
 
     # Job queue
     jobs_enabled: bool = True

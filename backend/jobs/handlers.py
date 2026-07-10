@@ -1,13 +1,24 @@
 """Built-in job handlers."""
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from database.session import async_session_factory
+from events.bus import Event, event_bus
 from jobs.registry import job_handler
+from jobs.service import JobService
 from memory.contact_memory import contact_memory_service
 from providers.whatsapp.factory import get_whatsapp_provider
+from repositories.contact import ContactRepository
+from repositories.message import MessageRepository
+from repositories.user import UserRepository
+from services.messaging import persist_outbound_message
 from utils.logging import get_logger
 from workflows.service import workflow_service
 
 logger = get_logger(__name__)
+
+APOLOGY_MESSAGE = (
+    "Desculpe, tive um problema para responder agora. O Dario vai revisar sua mensagem em breve."
+)
 
 
 @job_handler("contact.summarize")
@@ -31,11 +42,83 @@ async def embed_interaction(db: AsyncSession, payload: dict) -> None:
 
 @job_handler("whatsapp.send_text")
 async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
-    """Send a WhatsApp text through the configured provider (with queue retry)."""
-    await get_whatsapp_provider().send_text(str(payload["to"]), str(payload["content"]))
+    """Send a WhatsApp text through the configured provider (with queue retry),
+    then persist it and feed the contact memory — same bookkeeping as the
+    dashboard-triggered send, whether this was queued by the automatic reply
+    or by an agent's send_whatsapp_message tool call."""
+    to = str(payload["to"])
+    content = str(payload["content"])
+    await get_whatsapp_provider().send_text(to, content)
+    await persist_outbound_message(db, to, content)
 
 
 @job_handler("workflow.trigger")
 async def trigger_workflow(db: AsyncSession, payload: dict) -> None:
     """Fire an n8n workflow; queue retries cover transient n8n outages."""
     await workflow_service.trigger(str(payload["workflow"]), dict(payload.get("data", {})))
+
+
+@job_handler("whatsapp.process_inbound")
+async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> None:
+    """The automatic end-to-end reply: AI Orchestrator picks the agent, runs
+    it (memory + tools), and the reply is queued back through the existing
+    whatsapp.send_text job — so sending inherits the same retry as everything
+    else. This is the piece that makes the WhatsApp flow work without n8n.
+    """
+    from orchestrator.service import ai_orchestrator
+
+    contact_id = int(payload["contact_id"])
+    message_id = int(payload["message_id"])
+
+    contact = await ContactRepository(db).get(contact_id)
+    message = await MessageRepository(db).get(message_id)
+    owner = await UserRepository(db).get_first_admin()
+    if contact is None or message is None or owner is None or not contact.phone:
+        logger.warning(
+            "Skipping auto-reply: contact=%s message=%s owner=%s",
+            contact_id, message_id, owner is not None,
+        )
+        return
+
+    result = await ai_orchestrator.run(
+        db=db,
+        user=owner,
+        message=message.content,
+        agent_name="assistant",
+        contact_id=contact.id,
+    )
+
+    if result.reply.strip():
+        await JobService(db).enqueue(
+            "whatsapp.send_text", {"to": contact.phone, "content": result.reply}
+        )
+
+
+def register_event_subscribers() -> None:
+    """Wire the handlers above into the Event Bus. Called explicitly from the
+    app's startup (not a bare module-level side effect), so tests can
+    re-arm this subscription after the per-test event bus reset."""
+    event_bus.subscribe("job.failed", _apologize_after_failed_auto_reply)
+
+
+async def _apologize_after_failed_auto_reply(event: Event) -> None:
+    """Safety net: if the automatic-reply job exhausts its retries, don't
+    leave the contact in silence — send a short apology instead. Demonstrates
+    the Event Bus doing real work: this handler has no direct coupling to the
+    job worker or the webhook, it only reacts to `job.failed`.
+    """
+    if event.payload.get("job_name") != "whatsapp.process_inbound":
+        return
+
+    job_payload = event.payload.get("job_payload") or {}
+    contact_id = job_payload.get("contact_id")
+    if contact_id is None:
+        return
+
+    async with async_session_factory() as session:
+        contact = await ContactRepository(session).get(int(contact_id))
+        if contact is None or not contact.phone:
+            return
+        await JobService(session).enqueue(
+            "whatsapp.send_text", {"to": contact.phone, "content": APOLOGY_MESSAGE}
+        )

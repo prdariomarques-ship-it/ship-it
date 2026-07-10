@@ -11,12 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import CurrentUser
 from database.session import get_db
-from jobs.service import JobService
-from memory.contact_memory import contact_memory_service
-from models.message import Message, MessageDirection, MessageMediaType
-from providers.whatsapp.base import WhatsAppProviderError, normalize_phone
+from models.message import MessageMediaType
+from providers.whatsapp.base import WhatsAppProviderError
 from providers.whatsapp.factory import get_whatsapp_provider
-from repositories.contact import ContactRepository
+from services.messaging import persist_outbound_message
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -47,30 +45,6 @@ class SendResponse(BaseModel):
     message_id: int | None = None
 
 
-async def _persist_outbound(
-    db: AsyncSession, phone: str, content: str, media_type: MessageMediaType
-) -> Message:
-    clean_phone = normalize_phone(phone)
-    contact = await ContactRepository(db).get_or_create_by_phone(clean_phone)
-
-    message = Message(
-        contact_id=contact.id,
-        direction=MessageDirection.OUTBOUND,
-        media_type=media_type,
-        content=content,
-    )
-    db.add(message)
-    await db.commit()
-    await db.refresh(message)
-
-    summary_due = await contact_memory_service.record_interaction(
-        db, contact, content, source="whatsapp"
-    )
-    if summary_due:
-        await JobService(db).enqueue("contact.summarize", {"contact_id": contact.id})
-    return message
-
-
 def _bad_gateway(exc: WhatsAppProviderError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
 
@@ -81,7 +55,7 @@ async def send_text(payload: SendTextRequest, db: DbSession, _: CurrentUser) -> 
         await get_whatsapp_provider().send_text(payload.to, payload.content)
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await _persist_outbound(db, payload.to, payload.content, MessageMediaType.TEXT)
+    message = await persist_outbound_message(db, payload.to, payload.content, MessageMediaType.TEXT)
     return SendResponse(message_id=message.id)
 
 
@@ -93,7 +67,7 @@ async def send_image(payload: SendMediaRequest, db: DbSession, _: CurrentUser) -
         )
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await _persist_outbound(db, payload.to, payload.url, MessageMediaType.IMAGE)
+    message = await persist_outbound_message(db, payload.to, payload.url, MessageMediaType.IMAGE)
     return SendResponse(message_id=message.id)
 
 
@@ -105,7 +79,7 @@ async def send_file(payload: SendMediaRequest, db: DbSession, _: CurrentUser) ->
         )
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await _persist_outbound(db, payload.to, payload.url, MessageMediaType.PDF)
+    message = await persist_outbound_message(db, payload.to, payload.url, MessageMediaType.PDF)
     return SendResponse(message_id=message.id)
 
 
@@ -115,7 +89,7 @@ async def send_audio(payload: SendMediaRequest, db: DbSession, _: CurrentUser) -
         await get_whatsapp_provider().send_audio(payload.to, payload.url)
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await _persist_outbound(db, payload.to, payload.url, MessageMediaType.AUDIO)
+    message = await persist_outbound_message(db, payload.to, payload.url, MessageMediaType.AUDIO)
     return SendResponse(message_id=message.id)
 
 
@@ -127,7 +101,7 @@ async def send_location(payload: SendLocationRequest, db: DbSession, _: CurrentU
         )
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await _persist_outbound(
+    message = await persist_outbound_message(
         db, payload.to, f"{payload.latitude},{payload.longitude}", MessageMediaType.LOCATION
     )
     return SendResponse(message_id=message.id)

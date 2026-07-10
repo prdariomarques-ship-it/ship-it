@@ -27,6 +27,8 @@ class Message(Base, TimestampMixin):
     direction: Mapped[MessageDirection] = mapped_column(Enum(MessageDirection), nullable=False)
     media_type: Mapped[MessageMediaType] = mapped_column(Enum(MessageMediaType), default=MessageMediaType.TEXT)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    external_id: Mapped[str | None] = mapped_column(String(128), index=True)  # OpenWA message id
+    # Provider message id; unique (NULLs excluded) so a redelivered webhook
+    # can never create a duplicate row — see webhooks/router.py's dedup check.
+    external_id: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
 
     contact = relationship("Contact", back_populates="messages")

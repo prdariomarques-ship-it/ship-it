@@ -25,9 +25,16 @@ class RateLimiter:
             self._redis = aioredis.from_url(self._settings.redis_url, decode_responses=True)
         return self._redis
 
-    async def is_allowed(self, identifier: str) -> bool:
-        limit = self._settings.rate_limit_requests
-        window = self._settings.rate_limit_window_seconds
+    async def is_allowed(
+        self, identifier: str, limit: int | None = None, window_seconds: int | None = None
+    ) -> bool:
+        """Fixed-window check. Pass limit/window_seconds to use a different
+        threshold than the global HTTP one for this identifier's namespace
+        (e.g. a per-contact auto-reply throttle) — callers must stay
+        consistent about which namespace uses which threshold, since the
+        window key itself doesn't encode the limit."""
+        limit = limit if limit is not None else self._settings.rate_limit_requests
+        window = window_seconds if window_seconds is not None else self._settings.rate_limit_window_seconds
         key = f"ratelimit:{identifier}:{int(time.time()) // window}"
 
         if self._redis_available:

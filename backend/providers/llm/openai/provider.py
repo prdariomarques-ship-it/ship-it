@@ -10,6 +10,7 @@ from providers.llm.base import (
     LLMResult,
     ToolCallRequest,
     ToolSpec,
+    TokenUsage,
 )
 from utils.config import get_settings
 from utils.logging import get_logger
@@ -104,7 +105,11 @@ class OpenAIProvider(LLMProvider):
             )
             for call in (choice.tool_calls or [])
         ]
-        return LLMResult(content=choice.content or "", tool_calls=tool_calls)
+        usage = TokenUsage(
+            prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
+        ) if response.usage else TokenUsage()
+        return LLMResult(content=choice.content or "", tool_calls=tool_calls, usage=usage)
 
     async def embed(self, text: str) -> list[float]:
         if not self.enabled:

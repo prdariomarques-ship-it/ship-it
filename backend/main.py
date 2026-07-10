@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 import jobs.handlers  # noqa: F401 - register the built-in job handlers
 from agents.router import router as agents_router
+from jobs.handlers import register_event_subscribers
 from api.routes import (
     calendar_router,
     church_router,
@@ -51,6 +52,7 @@ OPENAPI_TAGS = [
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(json_output=settings.log_json)
+    register_event_subscribers()
     if settings.jobs_enabled and settings.environment != "test":
         job_worker.start()
     logger.info("%s v%s started (%s)", settings.app_name, settings.app_version, settings.environment)

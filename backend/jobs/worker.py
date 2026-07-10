@@ -11,6 +11,7 @@ Concurrency-safe by design:
   requeued while attempts remain, failed otherwise.
 """
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from database.session import async_session_factory
 from jobs.events import job_event_publisher
 from jobs.registry import resolve_handler
 from models.job import Job, JobStatus
+from observability.metrics import record_job_duration
 from repositories.job import JobRepository
 from utils.config import get_settings
 from utils.logging import get_logger
@@ -67,9 +69,20 @@ class JobWorker:
 
             await self._recover_stale(session, repository, now)
             claimed = await self._claim_due(session, repository, now)
-            for job in claimed:
+            # Capture ids while the objects are guaranteed fresh (just
+            # committed above). session.rollback() inside one job's failure
+            # handling expires *every* object on this shared session — the
+            # next job in this batch must be re-fetched by id (an explicit,
+            # safely-awaited query) rather than have its stale in-memory
+            # attributes accessed directly, which would crash with
+            # MissingGreenlet on the first implicit attribute refresh.
+            job_ids = [job.id for job in claimed]
+            for job_id in job_ids:
+                job = await repository.get(job_id)
+                if job is None:
+                    continue
                 await self._execute(session, repository, job)
-            return len(claimed)
+            return len(job_ids)
 
     async def _claim_due(
         self, session: AsyncSession, repository: JobRepository, now: datetime
@@ -103,7 +116,8 @@ class JobWorker:
 
     async def _execute(self, session: AsyncSession, repository: JobRepository, job: Job) -> None:
         await job_event_publisher.publish(session, job, "started")
-        job_id = job.id
+        job_id, job_name = job.id, job.name
+        started = time.perf_counter()
 
         try:
             handler = resolve_handler(job.name)
@@ -112,10 +126,12 @@ class JobWorker:
             # Discard whatever the failed handler left in the session before
             # recording the retry, or half-written changes would be committed.
             await session.rollback()
+            record_job_duration(job_name, time.perf_counter() - started)
             job = await repository.get(job_id) or job
             await self._handle_failure(session, repository, job, exc)
             return
 
+        record_job_duration(job_name, time.perf_counter() - started)
         await repository.update(job, status=JobStatus.SUCCEEDED, finished_at=datetime.now(timezone.utc))
         await job_event_publisher.publish(session, job, "succeeded")
 

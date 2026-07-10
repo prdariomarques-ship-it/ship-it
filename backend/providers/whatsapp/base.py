@@ -1,10 +1,12 @@
 """Provider-agnostic WhatsApp contract (Strategy pattern).
 
-Each provider knows how to (a) send every media type through its own API and
-(b) normalize its webhook payload into an InboundMessage. The application only
-ever sees these neutral types.
+Each provider knows how to (a) send every media type through its own API,
+(b) normalize its webhook payload into an InboundMessage, and (c) verify its
+own webhook's cryptographic signature scheme, if it has one. The application
+only ever sees these neutral types.
 """
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 
 import httpx
 from pydantic import BaseModel
@@ -51,6 +53,16 @@ class WhatsAppProvider(ABC):
     @abstractmethod
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         """Normalize an inbound webhook payload; None for non-message events."""
+
+    def verify_signature(self, raw_body: bytes, headers: Mapping[str, str]) -> bool:
+        """Per-payload cryptographic signature check, when the provider's
+        webhook supports one (e.g. Meta's X-Hub-Signature-256).
+
+        Default: no such scheme for this provider — the shared WEBHOOK_SECRET
+        token (checked separately, provider-agnostically, in the webhook
+        route) is the only guard. Override in providers that sign requests.
+        """
+        return True
 
     async def _request(
         self,

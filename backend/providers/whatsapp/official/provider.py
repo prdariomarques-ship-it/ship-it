@@ -2,6 +2,10 @@
 
 Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
 """
+import hashlib
+import hmac
+from collections.abc import Mapping
+
 from providers.whatsapp.base import InboundMessage, WhatsAppProvider, normalize_phone
 from utils.config import get_settings
 
@@ -17,6 +21,20 @@ class OfficialProvider(WhatsAppProvider):
         self._base_url = settings.official_api_base_url.rstrip("/")
         self._token = settings.official_access_token
         self._phone_number_id = settings.official_phone_number_id
+        self._app_secret = settings.official_app_secret
+
+    def verify_signature(self, raw_body: bytes, headers: Mapping[str, str]) -> bool:
+        """Meta signs every webhook delivery with X-Hub-Signature-256 (HMAC-SHA256
+        over the raw body, keyed with the app secret). Skipped if OFFICIAL_APP_SECRET
+        isn't configured, to avoid breaking existing setups that rely solely on
+        WEBHOOK_SECRET — configure it for real production hardening."""
+        if not self._app_secret:
+            return True
+        signature = headers.get("x-hub-signature-256", "")
+        if not signature.startswith("sha256="):
+            return False
+        expected = "sha256=" + hmac.new(self._app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._token}"}

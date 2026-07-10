@@ -22,6 +22,7 @@ from providers.llm.base import (
     LLMResult,
     ToolCallRequest,
     ToolSpec,
+    TokenUsage,
 )
 from utils.config import get_settings
 from utils.logging import get_logger
@@ -123,7 +124,12 @@ class GeminiProvider(LLMProvider):
                     )
                 )
 
-        return LLMResult(content="".join(text_parts), tool_calls=tool_calls)
+        usage_meta = data.get("usageMetadata", {})
+        usage = TokenUsage(
+            prompt_tokens=usage_meta.get("promptTokenCount", 0),
+            completion_tokens=usage_meta.get("candidatesTokenCount", 0),
+        )
+        return LLMResult(content="".join(text_parts), tool_calls=tool_calls, usage=usage)
 
     async def embed(self, text: str) -> list[float]:
         if not self.enabled:

@@ -1,11 +1,13 @@
 """AI Orchestrator: single entry point for agent selection, execution and events."""
+import asyncio
+
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from agents.registry import UnknownAgentError
 from events.bus import event_bus
 from models.user import User
-from orchestrator.service import ai_orchestrator
+from orchestrator.service import AgentTimeoutError, ai_orchestrator
 
 
 @pytest.fixture
@@ -77,3 +79,47 @@ async def test_unknown_agent_does_not_publish_any_event(db_session, user):
         event_bus.unsubscribe_all()
 
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_times_out_a_hung_agent(db_session, user, monkeypatch):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "agent_run_timeout_seconds", 0.05)
+
+    async def _hangs_forever(self, db, user, message, contact_id=None, memories=None):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr("agents.base.BaseAgent.run", _hangs_forever)
+
+    events = []
+
+    async def handler(event):
+        events.append(event)
+
+    event_bus.subscribe("agent.failed", handler)
+    try:
+        with pytest.raises(AgentTimeoutError):
+            await ai_orchestrator.run(db=db_session, user=user, message="oi", agent_name="personal")
+    finally:
+        event_bus.unsubscribe_all()
+
+    assert len(events) == 1
+    assert events[0].payload == {
+        "agent": "personal",
+        "contact_id": None,
+        "user_id": user.id,
+        "reason": "timeout",
+    }
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_records_agent_run_metrics(db_session, user):
+    from observability.metrics import AGENT_RUN_DURATION, AGENT_RUNS
+
+    before = AGENT_RUNS.labels("personal", "openai", "ok")._value.get()
+    await ai_orchestrator.run(db=db_session, user=user, message="oi", agent_name="personal")
+    after = AGENT_RUNS.labels("personal", "openai", "ok")._value.get()
+
+    assert after == before + 1
+    assert AGENT_RUN_DURATION.labels("personal")._sum.get() >= 0

@@ -45,7 +45,11 @@ class AssistantAgent(BaseAgent):
             "Responda mensagens de forma educada, calorosa e objetiva. "
             "Use as memórias e o perfil do contato para personalizar a resposta. "
             "Nunca invente compromissos ou informações: consulte as ferramentas. "
-            "Se não souber, diga que o Dario responderá em breve."
+            "Se não souber, diga que o Dario responderá em breve. "
+            "Sua resposta de texto final é enviada automaticamente ao contato que "
+            "está te escrevendo agora — não use a ferramenta de envio de WhatsApp "
+            "para isso. Use-a apenas para avisar OUTRA pessoa (diferente de quem "
+            "está te escrevendo), quando o pedido exigir isso explicitamente."
         )
 
     @property

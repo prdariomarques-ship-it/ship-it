@@ -9,6 +9,7 @@ from providers.llm.base import (
     LLMResult,
     ToolCallRequest,
     ToolSpec,
+    TokenUsage,
 )
 from utils.config import get_settings
 from utils.logging import get_logger
@@ -108,7 +109,11 @@ class AnthropicProvider(LLMProvider):
                 tool_calls.append(
                     ToolCallRequest(id=block.id, name=block.name, arguments=dict(block.input or {}))
                 )
-        return LLMResult(content="".join(content_parts), tool_calls=tool_calls)
+        usage = TokenUsage(
+            prompt_tokens=getattr(response.usage, "input_tokens", 0) or 0,
+            completion_tokens=getattr(response.usage, "output_tokens", 0) or 0,
+        ) if response.usage else TokenUsage()
+        return LLMResult(content="".join(content_parts), tool_calls=tool_calls, usage=usage)
 
     async def embed(self, text: str) -> list[float]:
         raise EmbeddingsNotSupportedError(

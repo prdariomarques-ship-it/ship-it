@@ -87,23 +87,62 @@ backend/
   models/         # users, contacts, messages, church_members, store_customers,
                   # notes, calendar, tasks, embeddings, logs, refresh_tokens, jobs
   alembic/        # Migrações
-  tests/          # 96 testes pytest
+  tests/          # 125 testes pytest
 ```
 
-## Fluxo de execução (WhatsApp)
+## Fluxo de execução (WhatsApp) — ponta a ponta, automático
 
+Desde a Fase 4.1, uma mensagem recebida gera uma resposta automática sem depender de nenhuma automação externa (o n8n continua rodando em paralelo para quem já usa, mas deixou de ser obrigatório):
+
+```mermaid
+sequenceDiagram
+    participant WA as WhatsApp
+    participant P as Provider (OpenWA/Baileys/<br/>Evolution/Official)
+    participant W as Webhook
+    participant DB as Postgres
+    participant Q as Fila de jobs
+    participant EB as Event Bus
+    participant O as AI Orchestrator
+    participant A as Agente (assistant)
+    participant MM as Memory Manager
+
+    WA->>P: mensagem
+    P->>W: POST /webhooks/whatsapp
+    W->>W: verifica assinatura + WEBHOOK_SECRET
+    W->>DB: dedup por external_id
+    W->>DB: persiste contato + mensagem (inbound)
+    W->>Q: enqueue memory.embed
+    W->>Q: enqueue workflow.trigger (n8n, opcional)
+    W->>Q: enqueue whatsapp.process_inbound (se AUTO_REPLY_ENABLED)
+    W->>EB: publish whatsapp.message_received
+    W-->>P: 200 OK
+
+    Q->>O: worker roda whatsapp.process_inbound
+    O->>EB: publish agent.selected
+    O->>A: seleciona e executa (timeout + métricas)
+    A->>MM: busca memória (curto/longo prazo, preferências)
+    A->>A: executa tools (Tool Registry) quando necessário
+    A-->>O: resposta + tokens + custo estimado
+    O->>EB: publish agent.replied
+    O->>Q: enqueue whatsapp.send_text
+
+    Q->>P: worker roda whatsapp.send_text
+    P->>WA: envia resposta
+    Q->>DB: persiste mensagem (outbound) + alimenta memória
 ```
-WhatsApp → Provider (OpenWA/Baileys/Evolution/Official)
-        → POST /api/webhooks/whatsapp        (payload normalizado pelo provider)
-        → persiste contato + mensagem; publica evento whatsapp.message_received
-        → fila de jobs → n8n (workflow "whatsapp-inbound", com retry)
-              e/ou       → memory.embed (embedding assíncrono, fora do hot path)
-        → n8n chama /api/chat → AI Orchestrator → agente assistant
-              (planner monta contexto → executor roda tools → publica agent.replied)
-        → /api/whatsapp/send-text → Provider → WhatsApp
-```
+
+Se `whatsapp.process_inbound` esgotar as tentativas (LLM fora do ar, timeout persistente), um subscriber do Event Bus reage ao evento `job.failed` e envia uma mensagem de desculpas — o contato nunca fica em silêncio.
 
 A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo automático do contato via LLM. Cada contato acumula: resumo automático, histórico, embeddings, preferências, tags e última interação — tudo acessível através do **Memory Manager**.
+
+### Segurança e robustez do fluxo
+
+- **Assinatura do webhook**: `WEBHOOK_SECRET` (token compartilhado, qualquer provider) e `OFFICIAL_APP_SECRET` (HMAC-SHA256 real via `X-Hub-Signature-256`, WhatsApp Cloud API).
+- **Mensagens duplicadas**: dedup por `external_id` antes de processar, mais constraint única no banco (recupera de corrida entre requisições concorrentes).
+- **Loop/flood**: no máximo `AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE` respostas automáticas por contato por minuto.
+- **Timeout**: `AGENT_RUN_TIMEOUT_SECONDS` limita cada execução de agente; excedido, o Orchestrator publica `agent.failed` e a fila tenta de novo.
+- **Retry**: herdado da fila de jobs (backoff exponencial) — nada de lógica de retry nova.
+- **Nunca fica em silêncio**: falha definitiva no auto-reply dispara uma mensagem de desculpas via assinatura do Event Bus em `job.failed`.
 
 ## Agentes
 
@@ -182,11 +221,19 @@ async def handler(db: AsyncSession, payload: dict) -> None: ...
 
 Gerencie pela API admin: `GET/POST /api/jobs`, `POST /api/jobs/{id}/cancel`, `GET /api/jobs/handlers`.
 
+Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.send_text` (envia + persiste + alimenta memória), `workflow.trigger` (n8n) e `whatsapp.process_inbound` (o auto-reply ponta a ponta — webhook → AI Orchestrator → resposta).
+
 ## Observabilidade
 
 - `GET /health` / `GET /health/live` — liveness.
 - `GET /health/ready` — readiness com verificação de Postgres (obrigatório), Redis e Qdrant (degradam sem derrubar).
-- `GET /metrics` — Prometheus (contadores e histograma de latência por rota).
+- `GET /metrics` — Prometheus:
+  - `darioos_http_requests_total` / `darioos_http_request_duration_seconds` — por rota.
+  - `darioos_agent_runs_total{agent,provider,status}` e `darioos_agent_run_duration_seconds{agent}` — execuções de agente (tempo total por agente).
+  - `darioos_agent_tool_calls_total{tool}` — ferramentas mais usadas.
+  - `darioos_agent_tokens_total{provider,kind}` e `darioos_agent_cost_usd_total{provider}` — tokens consumidos e custo estimado (tabela de preços aproximada em `providers/llm/base.py`).
+  - `darioos_job_duration_seconds{name}` — tempo de execução por tipo de job.
+- Tempo por etapa: cada `ExecutedStep` (chamada de ferramenta) carrega seu próprio `duration_ms`, visível em `steps` na resposta de `/api/chat` e `/api/agents/{name}/run`.
 - `LOG_JSON=true` — logs estruturados em JSON (padrão no Docker Compose).
 
 ## Desenvolvimento
@@ -195,7 +242,7 @@ Gerencie pela API admin: `GET/POST /api/jobs`, `POST /api/jobs/{id}/cancel`, `GE
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (96 testes; cobertura ~88%)
+# Testes (125 testes; cobertura ~90%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
 
@@ -212,6 +259,9 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - JWT curto + refresh token rotativo (hash em banco, revogável; expirados são purgados)
 - RBAC com papéis `admin`/`user`
 - `WEBHOOK_SECRET`: quando definido, o webhook de entrada exige `X-Webhook-Token`
+- `OFFICIAL_APP_SECRET`: verificação real de assinatura HMAC-SHA256 (`X-Hub-Signature-256`) para o provider `official` (WhatsApp Cloud API)
+- Mensagens duplicadas (redelivery de webhook) são detectadas e não reprocessadas; constraint única no banco cobre a corrida entre requisições concorrentes
+- Loop/flood breaker: limite de respostas automáticas por contato por minuto
 - Em produção o backend se recusa a subir com `JWT_SECRET` fraca/padrão
 - HTTPS automático + headers de segurança via Caddy
 - Rate limit por IP (Redis, com fallback em memória; probes de health/metrics isentos)
@@ -222,3 +272,4 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 
 - [docs/architecture.md](docs/architecture.md) — arquitetura, camadas e decisões
 - [docs/api.md](docs/api.md) — visão geral dos endpoints (referência completa no Swagger em `/docs`)
+- [docs/fase4.1-relatorio.md](docs/fase4.1-relatorio.md) — relatório técnico do fluxo ponta a ponta do WhatsApp

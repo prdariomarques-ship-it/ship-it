@@ -20,6 +20,9 @@ class JobEventPublisher:
             "attempts": job.attempts,
             "status": job.status.value,
             "detail": detail,
+            # The job's own enqueue payload (e.g. contact_id/phone) — lets
+            # subscribers act on *what* failed, not just *that* it failed.
+            "job_payload": dict(job.payload or {}),
         }
 
         level = "error" if event == "failed" else "info"
