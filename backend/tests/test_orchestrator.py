@@ -87,7 +87,7 @@ async def test_orchestrator_times_out_a_hung_agent(db_session, user, monkeypatch
 
     monkeypatch.setattr(get_settings(), "agent_run_timeout_seconds", 0.05)
 
-    async def _hangs_forever(self, db, user, message, contact_id=None, memories=None):
+    async def _hangs_forever(self, db, user, message, contact_id=None, memories=None, history=None):
         await asyncio.sleep(10)
 
     monkeypatch.setattr("agents.base.BaseAgent.run", _hangs_forever)

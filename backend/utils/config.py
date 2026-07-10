@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # LLM providers ("openai", "anthropic" or "glm")
     llm_provider: str = "openai"
     embedding_provider: str = "openai"  # Anthropic has no embeddings API; keep these separate
+    # Automatic provider switch (AgentExecutor): when the primary LLM_PROVIDER
+    # raises mid-run, retry once with this provider instead. Empty (default)
+    # means no fallback — a provider exception propagates, same as before.
+    llm_fallback_provider: str = ""
 
     openai_api_key: str = ""
     openai_base_url: str = ""  # override for OpenAI-compatible gateways

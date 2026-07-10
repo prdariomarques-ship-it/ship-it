@@ -134,9 +134,80 @@ Responsabilidades hoje:
 4. Registra métricas Prometheus (`darioos_agent_runs_total`, `_run_duration_seconds`, `_tool_calls_total`, `_tokens_total`, `_cost_usd_total`) — um único lugar, nenhum chamador precisa se instrumentar.
 5. Publica `agent.replied` com contagem de tool calls, memórias usadas, tokens consumidos e custo estimado.
 
-Deliberadamente não decide *como* o agente pensa (isso é `BaseAgent`/`Planner`/`AgentExecutor`) nem *qual* memória usar (isso é `MemoryManager`) — é uma camada fina de coordenação, não mais um lugar para lógica de negócio. A evolução natural (Fase 4) é este método de seleção crescer de "nome explícito" para um classificador de intenção ou um Goal Planner, sem que nenhum chamador precise mudar.
+Deliberadamente não decide *como* o agente pensa (isso é `BaseAgent`/`Planner`/`AgentExecutor`) nem *qual* memória usar (isso é `MemoryManager`) — é uma camada fina de coordenação, não mais um lugar para lógica de negócio.
+
+`AIOrchestrator.run` ganhou dois parâmetros opcionais na Fase 4.2 — `memories` e `history` — usados exclusivamente pelo Cognitive Pipeline (abaixo) para injetar um contexto já carregado uma única vez para todo o plano, em vez de cada etapa buscar memória de novo. Chamadores que não os passam (`/api/chat`, `/api/agents/{name}/run`) continuam com o comportamento de sempre: `BaseAgent.run` busca a própria memória.
 
 O custo estimado usa uma tabela estática de preços por milhão de tokens (`providers/llm/base.py::estimate_cost_usd`) — aproximada por natureza (não substitui o faturamento real do provedor), mas suficiente como sinal operacional de custo por conversa/agente.
+
+## Cognitive Pipeline (Fase 4.2)
+
+A previsão da Fase 3 — "este método de seleção [de agente] cresce de nome explícito para um classificador de intenção" — se concretizou como o Cognitive Pipeline: o ponto de entrada para "uma mensagem chegou, pense antes de agir", usado pelo auto-reply do WhatsApp (`jobs/handlers.py::process_inbound_whatsapp_message`). Não é uma camada nova: é uma composição, dentro da camada de "Coordenação cognitiva" já existente (`orchestrator/`), de componentes pequenos e independentes — cada um testável isoladamente — que terminam delegando a execução real ao mesmo `AIOrchestrator.run` de sempre.
+
+```mermaid
+flowchart TD
+    A[Mensagem recebida] --> B[Normalizar]
+    B --> C["Intent Engine\n(orchestrator/intent.py)"]
+    C --> D["Priority Engine\n(orchestrator/priority.py)"]
+    D --> E["Carregar contexto\ncurto prazo + preferências + resumo"]
+    E --> F{"Contexto profundo\nnecessário?"}
+    F -- sim --> G["Memória longo prazo\n(Qdrant)"]
+    G --> H{"Intenção pede\nconhecimento?"}
+    H -- sim --> I["Conhecimento\n(Qdrant, source=knowledge)"]
+    H -- não --> J
+    I --> J["Cognitive Planner\n(orchestrator/planning.py)"]
+    F -- não --> J
+    J --> K{"needs_confirmation?"}
+    K -- sim --> L["Responder pedindo confirmação\n(nenhuma etapa executada)"]
+    K -- não --> M["Para cada etapa do Plano"]
+    M --> N["Escolher agente\n(Agent Registry)"]
+    N --> O["AI Orchestrator.run\n(agente + memória + tools)"]
+    O --> P["Escolher e executar ferramentas\n(Tool Registry, dentro do AgentExecutor)"]
+    P --> Q["Response Validator"]
+    Q -- inválido, 1ª tentativa --> O
+    Q -- ok ou 2ª tentativa --> R["Compor resposta final"]
+    R --> S["Learning Engine\natualiza memória (categorias)"]
+    S --> T["Registrar métricas + log estruturado"]
+    T --> U[Responder ao usuário]
+```
+
+Cada etapa é um módulo independente em `orchestrator/`, sem estado compartilhado além do que passa explicitamente entre eles:
+
+| Etapa | Módulo | Decisão primária | Caminho de degradação |
+| --- | --- | --- | --- |
+| Intenção | `intent.py::IntentEngine` | Function calling (`classify_intent`) — pode devolver várias hipóteses com confiança quando a mensagem é ambígua | Heurística por palavras-chave, só quando o modelo não responde ou levanta exceção |
+| Prioridade | `priority.py::PriorityEngine` | Function calling (`classify_priority`), considerando a intenção já identificada | Mesma heurística, exposta também como `quick_priority_hint` (síncrona, sem LLM) para o webhook decidir a ordem de execução na fila sem esperar um modelo |
+| Planejamento | `planning.py::CognitivePlanner` | Function calling (`create_plan`) — decide 1..5 etapas, o agente de cada uma (lido do Agent Registry, então um agente novo instalado por pasta já é planejável) e se precisa de confirmação | Plano de uma etapa só, com a mensagem original, agente escolhido por uma tabela pequena intenção→agente, caindo para `assistant` |
+| Validação | `validation.py::ResponseValidator` | Determinística (sem LLM): resposta vazia, erro de ferramenta vazado na resposta, ferramenta que falhou | — (é ela própria o mecanismo, não tem fallback) |
+| Aprendizado | `learning.py::LearningEngine` | Marca o contato com os domínios (`Contact.categories`) que os agentes usados no plano atendem, deduplicado na escrita | — |
+
+Nenhum desses componentes chama uma ferramenta diretamente — Planner e Pipeline só decidem o quê e quem; a seleção e execução de ferramentas continuam exclusivamente dentro do `AgentExecutor`, através do Tool Registry, exatamente como antes da Fase 4.2.
+
+### Fluxo do Planner
+
+`CognitivePlanner.create_plan` é o mesmo padrão de decisão-com-degradação dos outros dois engines, aplicado a "quantas etapas, com qual agente, precisa de confirmação":
+
+```mermaid
+flowchart TD
+    A["create_plan(mensagem, intenção, prioridade)"] --> B["agent_names = Agent Registry.list_agents()\n(lido em tempo de execução — um agente novo\ninstalado por pasta já entra aqui sozinho)"]
+    B --> C["LLM.chat(system + mensagem, tools=[create_plan])"]
+    C -->|"exceção (provider fora do ar)"| F["Plano de 1 etapa:\nobjective=mensagem original\nagent = tabela intenção→agente, senão assistant"]
+    C -->|"sem tool_call\n(stub/degradado)"| F
+    C -->|"tool_call create_plan"| D["Para cada etapa recebida (máx. 5):\nagente válido no Registry?"]
+    D -->|não| E["substitui pelo agente da tabela\nintenção→agente, senão assistant"]
+    D -->|sim| G[mantém o agente escolhido]
+    E --> H["Plan(steps, needs_confirmation, reasoning)"]
+    G --> H
+    F --> H
+```
+
+O Planner nunca inventa um agente que não existe: um nome desconhecido vindo do modelo (alucinação, ou um agente removido depois do treinamento do prompt) é substituído, nunca aceito como está — a mesma tabela pequena intenção→agente que serve de fallback quando não há resposta estruturada nenhuma.
+
+**"Pensar antes de agir" tem um limite bem definido, de propósito**: no máximo 2 tentativas de validação por etapa (`_MAX_VALIDATION_ATTEMPTS`), no máximo 5 etapas por plano (`_MAX_PLAN_STEPS`), e nenhuma etapa dependente roda se sua dependência falhou (fica `SKIPPED`). Um plano nunca fica girando indefinidamente, e a resposta final nunca fica em silêncio — mesmo esgotando as tentativas, a melhor resposta disponível é devolvida (ver `docs/fase4.2-relatorio.md` para os testes que provam isso).
+
+**Troca automática de provider**: uma novidade que mora em `agents/executor.py`, não no pipeline — `AgentExecutor` agora captura qualquer exceção levantada pelo provider LLM configurado (diferente de um provider que degrada normalmente para `STUB_REPLY`, que nunca levanta) e tenta uma vez com `LLM_FALLBACK_PROVIDER`, se configurado. Sem fallback configurado (o padrão), o comportamento é idêntico ao pré-Fase-4.2: a exceção propaga. Como todo agente passa pelo `AgentExecutor`, essa troca beneficia qualquer chamador (chat, `/api/agents/*/run`, Cognitive Pipeline), não só o WhatsApp.
+
+**Prioridade de execução real, não só classificada**: o webhook usa `quick_priority_hint` (sem LLM, seguro para o hot path) para decidir `scheduled_at` do job `whatsapp.process_inbound` — mensagens não-urgentes mantêm `delay_seconds=0` (comportamento idêntico ao pré-Fase-4.2); mensagens urgentes são agendadas alguns segundos no passado, o que as torna imediatamente devidas **e** as ordena à frente de jobs já na fila (`JobRepository.due_jobs` ordena por `scheduled_at` crescente). O `PriorityEngine` completo (com LLM) roda de qualquer forma dentro do pipeline, mas seu resultado não pode mais alterar a ordem de um job que já foi retirado da fila — só afeta como a conversa é tratada dali em diante (profundidade de contexto, aprendizado).
 
 ## Agent Registry e Tool Registry (arquitetura de plugin)
 
@@ -152,6 +223,34 @@ class WeatherAgent(BaseAgent):
 `agents/registry.py` importa automaticamente qualquer `agents/*_agent.py` (via `pkgutil.iter_modules`, executado uma vez, de forma preguiçosa, na primeira chamada a `get_agent`/`list_agents`) — o decorator roda no import e o agente já está disponível em `GET /api/agents`, `/api/chat` e `/api/agents/{name}/run`. Nenhum dicionário central para editar.
 
 Ferramentas seguem o mesmo princípio, de forma ainda mais direta: `Tool` é um dataclass cujo `__post_init__` se registra sozinho no Tool Registry — a própria construção do objeto módulo-nível (`create_task_tool = Tool(...)`) é o registro. `GET /api/agents/tools` lista todas as ferramentas do sistema, de qualquer agente, para descoberta (base para o futuro AI Console).
+
+### Fluxo de ferramentas
+
+O Planner (cognitivo ou de agente) nunca chama uma ferramenta — só o `AgentExecutor` o faz, e só com ferramentas que o próprio agente declarou (`agent.tools`), cada uma já auto-registrada no Tool Registry:
+
+```mermaid
+sequenceDiagram
+    participant Ex as AgentExecutor
+    participant LLM as LLM Provider
+    participant TR as Tool Registry
+    participant T as Tool.run
+    participant App as Serviço/Repositório
+
+    Ex->>LLM: chat(mensagens, tools=specs)
+    LLM-->>Ex: tool_calls (nome + argumentos)
+    loop cada tool_call
+        Ex->>TR: busca a Tool pelo nome (dict local, populado no __post_init__)
+        Ex->>T: run(ToolContext(db, user), argumentos)
+        T->>App: executa a regra de negócio real
+        App-->>T: resultado
+        T-->>Ex: JSON ("ok" ou "error")
+        Ex->>Ex: registra ExecutedStep (tool, args, resultado,\nduração, status, reason)
+    end
+    Ex->>LLM: chat(mensagens + resultados das tools)
+    LLM-->>Ex: resposta final (sem mais tool_calls)
+```
+
+Cada `ExecutedStep` carrega `status` (`"ok"`/`"error"`, derivado do envelope JSON da própria tool — `agents.executor.is_tool_error`) e `reason` (o texto que o modelo deu junto com a chamada da ferramenta, quando deu algum) — a auditabilidade que a Fase 4.2 pediu ("motivo da escolha, tempo, resultado, falhas") sem exigir que nenhuma das ~20 ferramentas existentes mudasse de assinatura.
 
 ## Event Bus
 
@@ -173,10 +272,50 @@ Eventos publicados hoje: `whatsapp.message_received` (webhook), `agent.selected`
 | --- | --- | --- |
 | Curto prazo | `short_term(contact_id)` | `MessageRepository.recent_for_contact` (Postgres) |
 | Longo prazo | `long_term_search(query, contact_id)` | Busca semântica no Qdrant (`MemoryService`) |
-| Conhecimento | `knowledge_search(query)` | Mesma coleção Qdrant, filtrada por `source="knowledge"` — pronta para a ingestão de documentos da Fase 4 |
-| Preferências | `get_preferences` / `set_preference` | `Contact.preferences` (JSON), modelado desde o início mas nunca exposto até agora — a tool `update_contact_preference` já usa este caminho |
+| Conhecimento | `knowledge_search(query)` | Mesma coleção Qdrant, filtrada por `source="knowledge"` — consultada de verdade pela primeira vez na Fase 4.2, pelo Cognitive Pipeline |
+| Preferências | `get_preferences` / `set_preference` | `Contact.preferences` (JSON) — a tool `update_contact_preference` já usa este caminho |
+| Resumo | `get_summary` (Fase 4.2) | `Contact.summary`, mantido por `ContactMemoryService.summarize_contact` |
+| Categorias/padrões | `add_categories` (Fase 4.2) | `Contact.categories` (JSON); deduplica na escrita — nunca grava a mesma categoria duas vezes |
 
-`BaseAgent.run` chama `memory_manager.build_agent_context(...)` (que por sua vez delega ao já existente `ContactMemoryService.build_context`) para montar o contexto do planner — um único ponto de entrada em vez de cada chamador saber que a busca semântica vive em `memory/service.py`.
+`BaseAgent.run` chama `memory_manager.build_agent_context(...)` (que por sua vez delega ao já existente `ContactMemoryService.build_context`) para montar o contexto do planner quando ninguém forneceu memória pronta — um único ponto de entrada em vez de cada chamador saber que a busca semântica vive em `memory/service.py`.
+
+### Fluxo de memória (Fase 4.2)
+
+O Cognitive Pipeline é o primeiro chamador a consultar **todos** os tipos de memória antes de responder, e o único a escrever de volta (aprendizado). Contexto caro (busca semântica) só é buscado quando a mensagem realmente precisa — evitar carregar contexto desnecessário é uma decisão explícita, não um efeito colateral:
+
+```mermaid
+flowchart LR
+    subgraph Leitura["Carregar contexto (por mensagem)"]
+        ST["short_term\n(sempre, se houver contact_id)"]
+        PR["preferences\n(sempre, se houver contact_id)"]
+        SU["summary\n(sempre, se houver contact_id)"]
+        LT["long_term_search\n(só se prioridade alta/urgente\nou intenção não-trivial)"]
+        KN["knowledge_search\n(só se a intenção pedir\nconhecimento/pesquisa)"]
+    end
+
+    ST --> HIST["history (ChatMessage[])"]
+    PR --> MEM["memories (list[dict])"]
+    SU --> MEM
+    LT --> MEM
+    KN --> MEM
+
+    HIST --> ORCH["AIOrchestrator.run(history=, memories=)"]
+    MEM --> ORCH
+    ORCH --> AGENT["BaseAgent.run\n(pula o auto-fetch: memória já veio pronta)"]
+    AGENT --> PLANNER["agents.planner.Planner.build_messages\n(system prompt + memórias + histórico + mensagem)"]
+
+    subgraph Escrita["Atualizar memória (após responder)"]
+        EMB["memory.embed (job)\nmensagem inbound/outbound"]
+        SUMJOB["contact.summarize (job)\na cada N mensagens"]
+        CAT["LearningEngine.add_categories\ndeduplicado"]
+    end
+
+    PLANNER -.-> EMB
+    PLANNER -.-> SUMJOB
+    PLANNER -.-> CAT
+```
+
+Toda busca semântica (Qdrant indisponível é um cenário real, não hipotético — já aconteceu em testes) é protegida por `try/except`: uma falha aí é registrada e ignorada, nunca derruba o pipeline inteiro. O mesmo vale para o auto-fetch original em `BaseAgent.run` — o padrão já existia desde a Fase 3, o Cognitive Pipeline só o reaplica no seu próprio ponto de leitura.
 
 ## Providers
 
@@ -253,10 +392,29 @@ Um agente é composto por:
 - **system prompt** — identidade e regras;
 - **tools** — `Tool` = JSON Schema + handler async com `ToolContext(db, user)`; resultados voltam ao modelo como JSON;
 - **memory** — `MemoryManager.build_agent_context` injeta memórias relevantes no contexto pelo planner;
-- **planner** (`agents/planner.py`) — monta a lista de mensagens (prompt + memórias + pedido);
-- **executor** (`agents/executor.py`) — loop de function calling: modelo → tool calls → resultados → ... até resposta final ou orçamento de iterações (`AGENT_MAX_ITERATIONS`).
+- **planner** (`agents/planner.py`) — monta a lista de mensagens (prompt + memórias + histórico + pedido);
+- **executor** (`agents/executor.py`) — loop de function calling: modelo → tool calls → resultados → ... até resposta final ou orçamento de iterações (`AGENT_MAX_ITERATIONS`), com troca automática de provider (`LLM_FALLBACK_PROVIDER`) se o provider configurado levantar uma exceção.
 
 O executor registra cada passo (`steps` na resposta da API) e quantas memórias foram usadas (`AgentResult.memories_used`), o que dá auditabilidade às ações dos agentes sem que o chamador precise recalcular nada.
+
+`Planner.build_messages` sempre teve um parâmetro `history` — só nunca tinha sido conectado a nada. A Fase 4.2 fechou essa lacuna: `BaseAgent.run` agora aceita `history` e repassa para o planner; `AIOrchestrator.run` aceita `history`/`memories` e repassa para `BaseAgent.run`. O Cognitive Pipeline é quem preenche os dois (curto prazo vira `history`; longo prazo + conhecimento + preferências + resumo viram `memories`) — chamadores que não passam nada continuam exatamente como antes.
+
+### Fluxo de agentes
+
+```mermaid
+flowchart TD
+    A["ai_orchestrator.run(agent_name, message, ...)"] --> B["Agent Registry: get_agent(agent_name)"]
+    B -->|"nome desconhecido"| C[UnknownAgentError]
+    B -->|encontrado| D["BaseAgent.run"]
+    D --> E{"memories/history\njá fornecidos?"}
+    E -- não --> F["MemoryManager.build_agent_context\n(auto-fetch, best-effort)"]
+    E -- sim --> G["usa o que foi passado\n(pulo o auto-fetch)"]
+    F --> H["Planner.build_messages\n(system prompt + memórias + histórico + mensagem)"]
+    G --> H
+    H --> I["AgentExecutor.run\n(function calling + Tool Registry)"]
+    I --> J["AgentResult\n(reply, steps, usage, memories_used, duration_ms)"]
+    J --> K["Event Bus: agent.replied\n+ métricas Prometheus"]
+```
 
 ## Memória por contato
 
@@ -270,7 +428,7 @@ O executor registra cada passo (`steps` na resposta da API) e quantas memórias 
 Ver o diagrama de sequência completo no [README](../README.md#fluxo-de-execução-whatsapp--ponta-a-ponta-automático). Pontos de arquitetura que valem detalhar aqui:
 
 - **`services/messaging.py::persist_outbound_message`** é o único lugar que persiste uma mensagem de saída e alimenta a memória do contato — usado tanto por `api/whatsapp.py` (envio manual via dashboard) quanto pelo job `whatsapp.send_text` (envio automático, seja pela resposta do agente ou por uma tool `send_whatsapp_message`). Antes da Fase 4.1, só o caminho da API fazia isso — o envio via fila silenciosamente pulava persistência e memória; extrair a função fechou essa lacuna nos dois lugares de uma vez.
-- **`whatsapp.process_inbound`** (`jobs/handlers.py`) é o job que roda o AI Orchestrator para o agente `assistant`, agindo em nome do **primeiro usuário admin** (`UserRepository.get_first_admin`) — Dario OS é um sistema de dono único, então ações de ferramentas disparadas por uma mensagem de WhatsApp (criar tarefa, agendar evento) pertencem ao dono da instância, não ao contato que escreveu.
+- **`whatsapp.process_inbound`** (`jobs/handlers.py`) é o job que roda o Cognitive Pipeline (Fase 4.2; antes, chamava o AI Orchestrator diretamente para o agente fixo `assistant`) agindo em nome do **primeiro usuário admin** (`UserRepository.get_first_admin`) — Dario OS é um sistema de dono único, então ações de ferramentas disparadas por uma mensagem de WhatsApp (criar tarefa, agendar evento) pertencem ao dono da instância, não ao contato que escreveu.
 - **Deduplicação**: o webhook verifica `external_id` antes de processar (uma redelivery do provider não gera nem resposta duplicada, nem embedding duplicado, nem job duplicado); uma constraint única em `messages.external_id` cobre a corrida entre requisições concorrentes (mesmo padrão de recuperação de `IntegrityError` já usado em `ContactRepository.get_or_create_by_phone`).
 - **Assinatura do webhook**: `WhatsAppProvider.verify_signature(raw_body, headers)` (novo método na Strategy, com default no-op) permite que cada provider valide seu próprio esquema — `OfficialProvider` implementa HMAC-SHA256 real (`X-Hub-Signature-256`, o esquema da Meta); os demais seguem cobertos pelo `WEBHOOK_SECRET` compartilhado.
 - **Loop/flood**: `RateLimiter.is_allowed` ganhou parâmetros opcionais de limite/janela (retrocompatível — sem eles, usa o limite HTTP global) para servir também como o freio de auto-reply por contato, sem duplicar lógica de rate limiting.
@@ -312,3 +470,6 @@ Alembic com `env.py` async lendo `DATABASE_URL` das settings. O container do bac
 - O Event Bus é aditivo: a maior parte dos fluxos ainda é chamada direta (síncrona) por decisão — reescrever tudo para "só eventos" trocaria simplicidade e rastreabilidade por um desacoplamento que ninguém está pedindo hoje. Ver `docs/fase3-relatorio.md` para a justificativa completa dessa fronteira.
 - O auto-reply (`whatsapp.process_inbound`) e o hand-off legado ao n8n (`workflow.trigger`) rodam **em paralelo** por padrão — quem já usa n8n para gerar a resposta deve desativar `AUTO_REPLY_ENABLED` para o contato não receber duas respostas à mesma mensagem.
 - **Nota de transparência sobre cobertura de testes**: `webhooks/router.py` e os handlers de envio em `api/whatsapp.py` mostram uma cobertura de linha aparentemente baixa na ferramenta `coverage.py` (investigado a fundo: não é cache de bytecode, não é ordem de import, não é specífico do plugin `pytest-cov` — reproduz com `coverage run` puro). A correção comportamental dessas rotas está provada por asserções diretas em ~20 testes de integração (status HTTP correto por cenário, linhas exatas persistidas no banco, payloads exatos de job) — evidência mais forte que a métrica de linha para este caso específico. Ver `docs/fase4.1-relatorio.md` para os detalhes da investigação.
+- **Custo/latência do Cognitive Pipeline**: intenção, prioridade e planejamento são, cada um, uma chamada LLM independente (decisão real, não regra fixa) — até 3 chamadas antes mesmo da execução do agente escolhido. Deliberado (decisões independentes e testáveis > uma única chamada monolítica), mas é um custo real por mensagem; se o volume justificar, a Fase 4.3 pode combinar intenção+prioridade+planejamento numa única chamada de function calling sem mudar a interface pública de nenhum dos três componentes.
+- **`AIOrchestrator.run` ganhou `memories`/`history` opcionais** em vez de um novo método paralelo — menos superfície de API, mas significa que qualquer chamador futuro pode, sem querer, pular o auto-fetch de memória passando `memories=[]`. Aceitável hoje (só o Cognitive Pipeline os usa); documentado para quem vier adicionar um terceiro chamador.
+- **Composição de resposta multi-etapa é concatenação simples** (`CognitivePipeline._compose_reply`), não uma síntese via LLM — mais barato e mais previsível, mas uma resposta de duas etapas pode soar como duas respostas coladas em vez de um texto único e fluido. Ver riscos remanescentes em `docs/fase4.2-relatorio.md`.

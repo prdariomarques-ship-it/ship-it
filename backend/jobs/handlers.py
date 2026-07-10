@@ -60,12 +60,14 @@ async def trigger_workflow(db: AsyncSession, payload: dict) -> None:
 
 @job_handler("whatsapp.process_inbound")
 async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> None:
-    """The automatic end-to-end reply: AI Orchestrator picks the agent, runs
-    it (memory + tools), and the reply is queued back through the existing
-    whatsapp.send_text job — so sending inherits the same retry as everything
-    else. This is the piece that makes the WhatsApp flow work without n8n.
+    """The automatic end-to-end reply: the Cognitive Pipeline (Fase 4.2)
+    classifies intent/priority, plans, picks the agent(s), runs them (memory
+    + tools), validates the result, and updates memory — then the reply is
+    queued back through the existing whatsapp.send_text job, so sending
+    inherits the same retry as everything else. This is the piece that makes
+    the WhatsApp flow work without n8n.
     """
-    from orchestrator.service import ai_orchestrator
+    from orchestrator.pipeline import cognitive_pipeline
 
     contact_id = int(payload["contact_id"])
     message_id = int(payload["message_id"])
@@ -80,12 +82,8 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
         )
         return
 
-    result = await ai_orchestrator.run(
-        db=db,
-        user=owner,
-        message=message.content,
-        agent_name="assistant",
-        contact_id=contact.id,
+    result = await cognitive_pipeline.process(
+        db=db, user=owner, message=message.content, contact_id=contact.id
     )
 
     if result.reply.strip():

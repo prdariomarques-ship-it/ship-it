@@ -31,7 +31,7 @@ AGENT_RUN_DURATION = Histogram(
 AGENT_TOOL_CALLS = Counter(
     "darioos_agent_tool_calls_total",
     "Tool calls executed by agents",
-    labelnames=("tool",),
+    labelnames=("tool", "status"),  # status: ok | error
 )
 
 AGENT_TOKENS = Counter(
@@ -63,6 +63,40 @@ WHATSAPP_SESSION_STATUS = Gauge(
     "Last known connection status of a WhatsApp provider's session "
     "(1=connected, 0=disconnected/auth_expired/reconnecting/unknown)",
     labelnames=("provider",),
+)
+
+PIPELINE_STAGE_DURATION = Histogram(
+    "darioos_pipeline_stage_duration_seconds",
+    "Duration of each Cognitive Pipeline stage",
+    labelnames=("stage",),
+)
+
+PIPELINE_RUN_DURATION = Histogram(
+    "darioos_pipeline_run_duration_seconds",
+    "Total duration of one Cognitive Pipeline run, end to end",
+)
+
+INTENT_CLASSIFICATIONS = Counter(
+    "darioos_intent_classifications_total",
+    "Messages classified by top intent",
+    labelnames=("intent",),
+)
+
+PRIORITY_CLASSIFICATIONS = Counter(
+    "darioos_priority_classifications_total",
+    "Messages classified by priority level",
+    labelnames=("priority",),
+)
+
+PIPELINE_VALIDATION_RETRIES = Counter(
+    "darioos_pipeline_validation_retries_total",
+    "Response validation retries triggered by the Cognitive Pipeline",
+)
+
+PIPELINE_MEMORY_LOOKUPS = Counter(
+    "darioos_pipeline_memory_lookups_total",
+    "Memory/knowledge lookups performed by the Cognitive Pipeline",
+    labelnames=("kind",),  # short_term | long_term | knowledge | preferences | summary
 )
 
 metrics_router = APIRouter(tags=["observability"])
@@ -107,8 +141,8 @@ def record_agent_run(
         AGENT_COST_USD.labels(provider).inc(cost_usd)
 
 
-def record_tool_call(tool_name: str) -> None:
-    AGENT_TOOL_CALLS.labels(tool_name).inc()
+def record_tool_call(tool_name: str, status: str = "ok") -> None:
+    AGENT_TOOL_CALLS.labels(tool_name, status).inc()
 
 
 def record_job_duration(name: str, duration_seconds: float) -> None:
@@ -121,3 +155,27 @@ def record_whatsapp_request(provider: str, status: str) -> None:
 
 def record_whatsapp_session_status(provider: str, connected: bool) -> None:
     WHATSAPP_SESSION_STATUS.labels(provider).set(1 if connected else 0)
+
+
+def record_pipeline_stage(stage: str, duration_seconds: float) -> None:
+    PIPELINE_STAGE_DURATION.labels(stage).observe(duration_seconds)
+
+
+def record_pipeline_run(duration_seconds: float) -> None:
+    PIPELINE_RUN_DURATION.observe(duration_seconds)
+
+
+def record_intent_classification(intent: str) -> None:
+    INTENT_CLASSIFICATIONS.labels(intent).inc()
+
+
+def record_priority_classification(priority: str) -> None:
+    PRIORITY_CLASSIFICATIONS.labels(priority).inc()
+
+
+def record_validation_retry() -> None:
+    PIPELINE_VALIDATION_RETRIES.inc()
+
+
+def record_memory_lookup(kind: str) -> None:
+    PIPELINE_MEMORY_LOOKUPS.labels(kind).inc()

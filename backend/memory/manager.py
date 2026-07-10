@@ -75,6 +75,25 @@ class MemoryManager:
         contact = await ContactRepository(db).get(contact_id)
         return dict(contact.preferences) if contact else {}
 
+    async def get_summary(self, db: AsyncSession, contact_id: int) -> str | None:
+        """The AI-maintained profile summary (`ContactMemoryService.summarize_contact`)."""
+        contact = await ContactRepository(db).get(contact_id)
+        return contact.summary if contact else None
+
+    async def add_categories(self, db: AsyncSession, contact_id: int, categories: list[str]) -> list[str]:
+        """Merge new categories into a contact's tags; skips ones already
+        present so learning never writes the same fact twice. Returns only
+        the categories that were actually new."""
+        repository = ContactRepository(db)
+        contact = await repository.get(contact_id)
+        if contact is None:
+            return []
+        new_ones = [category for category in categories if category not in contact.categories]
+        if not new_ones:
+            return []
+        await repository.update(contact, categories=[*contact.categories, *new_ones])
+        return new_ones
+
     async def set_preference(self, db: AsyncSession, contact_id: int, key: str, value: object) -> dict:
         """Merge one preference into the contact's preferences; returns the full dict."""
         repository = ContactRepository(db)

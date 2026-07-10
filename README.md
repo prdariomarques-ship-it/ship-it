@@ -39,7 +39,7 @@ Edite `docker/.env` para configurar o provedor de LLM (`OPENAI_API_KEY`, `ANTHRO
 
 ## Arquitetura
 
-O backend segue Clean Architecture com camadas explícitas e desacopladas. Desde a Fase 3, a seleção de agente, a execução de ferramentas e a comunicação entre módulos passam por três peças centrais — **AI Orchestrator**, **Agent/Tool Registry** e **Event Bus**:
+O backend segue Clean Architecture com camadas explícitas e desacopladas. Desde a Fase 3, a seleção de agente, a execução de ferramentas e a comunicação entre módulos passam por três peças centrais — **AI Orchestrator**, **Agent/Tool Registry** e **Event Bus**. Desde a Fase 4.2, o WhatsApp é atendido por um **Cognitive Pipeline** — intenção, prioridade, planejamento, validação e aprendizado, cada um um componente pequeno e independente dentro dessa mesma camada de coordenação (ver `docs/architecture.md#cognitive-pipeline-fase-42`).
 
 ```
 Rotas (FastAPI) ──→ AI Orchestrator ──→ Agent Registry ──→ BaseAgent
@@ -62,13 +62,15 @@ Rotas (FastAPI) ──→ AI Orchestrator ──→ Agent Registry ──→ Bas
 - **Factory + Strategy** (`providers/*/factory.py`, `agents/registry.py`) — provedores e agentes são resolvidos por configuração/auto-discovery, nunca por `if` espalhado.
 - **AI Orchestrator** (`orchestrator/`) — ponto único de seleção de agente + execução + eventos de ciclo de vida; chat e a rota `/agents/{name}/run` delegam aqui em vez de tocar `agents.registry`/`BaseAgent` diretamente.
 - **Event Bus** (`events/`) — pub/sub assíncrono in-process (com fan-out best-effort via Redis) para que módulos reajam a acontecimentos sem se importarem uns aos outros. Não substitui a fila de jobs: eventos são "avise quem está ouvindo", jobs são "isso precisa acontecer e sobreviver a uma queda".
-- **Memory Manager** (`memory/manager.py`) — fachada única sobre memória de curto prazo (histórico recente), longo prazo (busca semântica), conhecimento (mesma coleção, tag `knowledge`, pronta para a Fase 4) e preferências estruturadas por contato.
+- **Memory Manager** (`memory/manager.py`) — fachada única sobre memória de curto prazo (histórico recente), longo prazo (busca semântica), conhecimento (mesma coleção, tag `knowledge` — consultada de verdade pela primeira vez na Fase 4.2), resumo do contato e preferências estruturadas.
+- **Cognitive Pipeline** (`orchestrator/intent.py`, `priority.py`, `planning.py`, `validation.py`, `learning.py`, `pipeline.py`) — Fase 4.2: intenção e prioridade classificadas por function calling (com degradação honesta para heurística quando o LLM não responde), um Planner que decide etapas/agentes/confirmação, validação determinística com retry bounded, e aprendizado que tagueia domínios recorrentes do contato. Ver `docs/AGENTS.md`, `docs/TOOLS.md`, `docs/MEMORY.md`, `docs/WORKFLOWS.md` para a referência completa por assunto.
 
 ```
 backend/
   api/            # Rotas CRUD (fábrica genérica) + dashboard + whatsapp
   auth/           # JWT, refresh token rotativo, RBAC (admin/user), service layer
-  orchestrator/   # AI Orchestrator — seleção de agente + execução + eventos
+  orchestrator/   # AI Orchestrator (seleção + execução + eventos) e o Cognitive
+                  # Pipeline (intent, priority, planning, validation, learning)
   agents/         # BaseAgent + planner + executor + tools; Agent Registry (auto-discovery)
     tools/        # Tools (function calling) + Tool Registry (auto-registro)
   events/         # Event Bus (pub/sub interno, fan-out best-effort via Redis)
@@ -87,12 +89,12 @@ backend/
   models/         # users, contacts, messages, church_members, store_customers,
                   # notes, calendar, tasks, embeddings, logs, refresh_tokens, jobs
   alembic/        # Migrações
-  tests/          # 125 testes pytest
+  tests/          # 231 testes pytest
 ```
 
 ## Fluxo de execução (WhatsApp) — ponta a ponta, automático
 
-Desde a Fase 4.1, uma mensagem recebida gera uma resposta automática sem depender de nenhuma automação externa (o n8n continua rodando em paralelo para quem já usa, mas deixou de ser obrigatório):
+Desde a Fase 4.1, uma mensagem recebida gera uma resposta automática sem depender de nenhuma automação externa (o n8n continua rodando em paralelo para quem já usa, mas deixou de ser obrigatório). Desde a Fase 4.2, quem processa essa mensagem é o **Cognitive Pipeline** — pensa antes de agir em vez de ir direto para um agente fixo:
 
 ```mermaid
 sequenceDiagram
@@ -102,8 +104,9 @@ sequenceDiagram
     participant DB as Postgres
     participant Q as Fila de jobs
     participant EB as Event Bus
+    participant CP as Cognitive Pipeline
     participant O as AI Orchestrator
-    participant A as Agente (assistant)
+    participant A as Agente(s) escolhido(s)
     participant MM as Memory Manager
 
     WA->>P: mensagem
@@ -113,18 +116,28 @@ sequenceDiagram
     W->>DB: persiste contato + mensagem (inbound)
     W->>Q: enqueue memory.embed
     W->>Q: enqueue workflow.trigger (n8n, opcional)
-    W->>Q: enqueue whatsapp.process_inbound (se AUTO_REPLY_ENABLED)
+    W->>Q: enqueue whatsapp.process_inbound<br/>(delay conforme prioridade rápida, se AUTO_REPLY_ENABLED)
     W->>EB: publish whatsapp.message_received
     W-->>P: 200 OK
 
-    Q->>O: worker roda whatsapp.process_inbound
-    O->>EB: publish agent.selected
-    O->>A: seleciona e executa (timeout + métricas)
-    A->>MM: busca memória (curto/longo prazo, preferências)
-    A->>A: executa tools (Tool Registry) quando necessário
-    A-->>O: resposta + tokens + custo estimado
-    O->>EB: publish agent.replied
-    O->>Q: enqueue whatsapp.send_text
+    Q->>CP: worker roda whatsapp.process_inbound
+    CP->>CP: intenção (function calling + fallback)
+    CP->>CP: prioridade (function calling + fallback)
+    CP->>MM: carrega contexto (curto prazo, preferências,<br/>resumo, longo prazo/conhecimento se necessário)
+    CP->>CP: planeja (1..5 etapas, agente por etapa)
+    loop cada etapa do plano
+        CP->>O: ai_orchestrator.run(agente, memória, histórico)
+        O->>EB: publish agent.selected
+        O->>A: executa (timeout + métricas)
+        A->>A: executa tools (Tool Registry) quando necessário
+        A-->>O: resposta + tokens + custo estimado
+        O->>EB: publish agent.replied
+        O-->>CP: AgentResult
+        CP->>CP: valida resposta (retry 1x se inválida)
+    end
+    CP->>MM: aprendizado (tagueia domínios, deduplicado)
+    CP->>DB: log estruturado (intent, priority, agentes, tempo por etapa)
+    CP->>Q: enqueue whatsapp.send_text
 
     Q->>P: worker roda whatsapp.send_text
     P->>WA: envia resposta
@@ -133,7 +146,7 @@ sequenceDiagram
 
 Se `whatsapp.process_inbound` esgotar as tentativas (LLM fora do ar, timeout persistente), um subscriber do Event Bus reage ao evento `job.failed` e envia uma mensagem de desculpas — o contato nunca fica em silêncio.
 
-A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo automático do contato via LLM. Cada contato acumula: resumo automático, histórico, embeddings, preferências, tags e última interação — tudo acessível através do **Memory Manager**.
+A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo automático do contato via LLM. Cada contato acumula: resumo automático, histórico, embeddings, preferências, tags e última interação — tudo acessível através do **Memory Manager**. Detalhes do Cognitive Pipeline (intenção, prioridade, planejamento, validação, aprendizado): `docs/architecture.md#cognitive-pipeline-fase-42`.
 
 ### Segurança e robustez do fluxo
 
@@ -146,7 +159,8 @@ A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo 
 - **Loop/flood**: no máximo `AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE` respostas automáticas por contato por minuto.
 - **Timeout**: `AGENT_RUN_TIMEOUT_SECONDS` limita cada execução de agente; excedido, o Orchestrator publica `agent.failed` e a fila tenta de novo.
 - **Retry (auto-reply)**: herdado da fila de jobs (backoff exponencial) — nada de lógica de retry nova.
-- **Nunca fica em silêncio**: falha definitiva no auto-reply dispara uma mensagem de desculpas via assinatura do Event Bus em `job.failed`.
+- **Nunca fica em silêncio**: falha definitiva no auto-reply dispara uma mensagem de desculpas via assinatura do Event Bus em `job.failed`; mesmo esgotando as tentativas de validação de uma etapa, o Cognitive Pipeline devolve a melhor resposta disponível em vez de nada.
+- **Troca automática de provider**: `AgentExecutor` intercepta uma exceção do provider LLM configurado e tenta uma vez com `LLM_FALLBACK_PROVIDER` (se configurado) — sem fallback, o comportamento é o de sempre.
 - **Testes de compatibilidade**: `tests/test_whatsapp_provider_compatibility.py` garante que qualquer Provider que implemente a interface (inclusive um novo, nunca visto antes) funciona automaticamente com o webhook e o envio, sem alterar código de aplicação.
 
 ## Agentes
@@ -205,6 +219,8 @@ Nenhuma outra parte da aplicação muda — rotas, agentes e jobs dependem apena
 
 Trocar de modelo é só configuração: `LLM_PROVIDER=gemini` (ou `ollama`, `glm`, `anthropic`) — nenhum código muda.
 
+**Troca automática em caso de falha** (Fase 4.2): `LLM_FALLBACK_PROVIDER=<nome>` faz o `AgentExecutor` tentar esse provedor uma vez sempre que `LLM_PROVIDER` levantar uma exceção em vez de simplesmente degradar (ex.: rede fora do ar, chave expirada) — vazio por padrão, comportamento idêntico ao de antes da Fase 4.2.
+
 ## Autenticação
 
 - `POST /api/auth/register` — o primeiro usuário vira `admin`, os demais `user`.
@@ -235,11 +251,14 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 - `GET /metrics` — Prometheus:
   - `darioos_http_requests_total` / `darioos_http_request_duration_seconds` — por rota.
   - `darioos_agent_runs_total{agent,provider,status}` e `darioos_agent_run_duration_seconds{agent}` — execuções de agente (tempo total por agente).
-  - `darioos_agent_tool_calls_total{tool}` — ferramentas mais usadas.
+  - `darioos_agent_tool_calls_total{tool,status}` — ferramentas mais usadas, com status (`ok`/`error`).
   - `darioos_agent_tokens_total{provider,kind}` e `darioos_agent_cost_usd_total{provider}` — tokens consumidos e custo estimado (tabela de preços aproximada em `providers/llm/base.py`).
   - `darioos_job_duration_seconds{name}` — tempo de execução por tipo de job.
   - `darioos_whatsapp_provider_requests_total{provider,status}` e `darioos_whatsapp_session_status{provider}` — disponibilidade do gateway de WhatsApp (chamadas HTTP e estado da sessão).
-- Tempo por etapa: cada `ExecutedStep` (chamada de ferramenta) carrega seu próprio `duration_ms`, visível em `steps` na resposta de `/api/chat` e `/api/agents/{name}/run`.
+  - `darioos_pipeline_stage_duration_seconds{stage}` e `darioos_pipeline_run_duration_seconds` — tempo por etapa e tempo total do Cognitive Pipeline (Fase 4.2).
+  - `darioos_intent_classifications_total{intent}` e `darioos_priority_classifications_total{priority}` — distribuição de intenções e prioridades classificadas.
+  - `darioos_pipeline_validation_retries_total` e `darioos_pipeline_memory_lookups_total{kind}` — quantas vezes a validação pediu uma nova tentativa, e quais tipos de memória foram consultados.
+- Tempo por etapa: cada `ExecutedStep` (chamada de ferramenta) carrega seu próprio `duration_ms`, visível em `steps` na resposta de `/api/chat` e `/api/agents/{name}/run`; o Cognitive Pipeline expõe o mesmo detalhamento por etapa em `stage_durations_ms`, além de registrar tudo (intenção, prioridade, agentes usados, tempos) em um log estruturado (`source=cognitive_pipeline`) por conversa.
 - `LOG_JSON=true` — logs estruturados em JSON (padrão no Docker Compose).
 
 ## Desenvolvimento
@@ -279,4 +298,9 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 
 - [docs/architecture.md](docs/architecture.md) — arquitetura, camadas e decisões
 - [docs/api.md](docs/api.md) — visão geral dos endpoints (referência completa no Swagger em `/docs`)
+- [docs/AGENTS.md](docs/AGENTS.md) — agentes: anatomia, catálogo, como instalar um novo, como são escolhidos
+- [docs/TOOLS.md](docs/TOOLS.md) — ferramentas: contrato, Tool Registry, fluxo de seleção/execução, catálogo
+- [docs/MEMORY.md](docs/MEMORY.md) — os seis tipos de memória, ciclo de vida de uma mensagem, aprendizado
+- [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — fila de jobs, hand-off n8n, o Cognitive Pipeline como workflow do WhatsApp
 - [docs/fase4.1-relatorio.md](docs/fase4.1-relatorio.md) — relatório técnico do fluxo ponta a ponta do WhatsApp
+- [docs/fase4.2-relatorio.md](docs/fase4.2-relatorio.md) — relatório técnico do Cognitive Pipeline

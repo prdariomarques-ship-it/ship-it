@@ -35,7 +35,7 @@ from agents.registry import get_agent
 from events.bus import event_bus
 from models.user import User
 from observability.metrics import record_agent_run, record_tool_call
-from providers.llm.base import estimate_cost_usd
+from providers.llm.base import ChatMessage, estimate_cost_usd
 from providers.llm.factory import get_llm_provider
 from utils.config import get_settings
 from utils.logging import get_logger
@@ -55,9 +55,19 @@ class AIOrchestrator:
         message: str,
         agent_name: str = "assistant",
         contact_id: int | None = None,
+        memories: list[dict] | None = None,
+        history: list[ChatMessage] | None = None,
     ) -> AgentResult:
         """Select the agent (raises UnknownAgentError if the name is invalid),
-        run it under a timeout, and publish lifecycle events + metrics."""
+        run it under a timeout, and publish lifecycle events + metrics.
+
+        `memories`/`history` are optional pre-fetched context (used by
+        `orchestrator.pipeline.CognitivePipeline`, which already queried
+        memory once for the whole plan and would otherwise duplicate that
+        lookup per step); left `None`, `agent.run` fetches memory itself
+        exactly as before — existing callers (chat, `/api/agents/*/run`) are
+        unaffected.
+        """
         agent = get_agent(agent_name)
         provider_name = get_llm_provider().name
         await event_bus.publish(
@@ -68,7 +78,15 @@ class AIOrchestrator:
         timeout = get_settings().agent_run_timeout_seconds
         try:
             result = await asyncio.wait_for(
-                agent.run(db=db, user=user, message=message, contact_id=contact_id), timeout=timeout
+                agent.run(
+                    db=db,
+                    user=user,
+                    message=message,
+                    contact_id=contact_id,
+                    memories=memories,
+                    history=history,
+                ),
+                timeout=timeout,
             )
         except asyncio.TimeoutError as exc:
             record_agent_run(agent=agent.name, provider=provider_name, status="timeout", duration_seconds=timeout)
@@ -89,7 +107,7 @@ class AIOrchestrator:
             cost_usd=cost_usd,
         )
         for step in result.steps:
-            record_tool_call(step.tool)
+            record_tool_call(step.tool, status=step.status)
 
         await event_bus.publish(
             "agent.replied",

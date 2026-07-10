@@ -42,6 +42,16 @@ def get_llm_provider() -> LLMProvider:
 
 
 @lru_cache
+def get_fallback_llm_provider() -> LLMProvider | None:
+    """Secondary provider `AgentExecutor` switches to when the primary one
+    raises mid-run (network outage, provider-side 5xx, expired key) — see
+    `LLM_FALLBACK_PROVIDER`. `None` when unset, which preserves the
+    pre-Fase-4.2 behaviour exactly: a provider exception propagates."""
+    name = get_settings().llm_fallback_provider
+    return _build(name) if name else None
+
+
+@lru_cache
 def get_embedding_provider() -> LLMProvider:
     """Provider used for embeddings, selected by EMBEDDING_PROVIDER."""
     return _build(get_settings().embedding_provider)

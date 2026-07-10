@@ -13,6 +13,7 @@ from agents.planner import Planner
 from agents.tools.base import Tool, ToolContext
 from memory.manager import memory_manager
 from models.user import User
+from providers.llm.base import ChatMessage
 from providers.llm.factory import get_llm_provider
 from utils.logging import get_logger
 
@@ -51,6 +52,7 @@ class BaseAgent(ABC):
         message: str,
         contact_id: int | None = None,
         memories: list[dict] | None = None,
+        history: list[ChatMessage] | None = None,
     ) -> AgentResult:
         if memories is None:
             try:
@@ -60,7 +62,7 @@ class BaseAgent(ABC):
                 logger.warning("Memory lookup skipped (vector store unavailable): %s", exc)
                 memories = []
 
-        messages = self.planner.build_messages(self.system_prompt, message, memories)
+        messages = self.planner.build_messages(self.system_prompt, message, memories, history=history)
         executor = AgentExecutor(get_llm_provider(), self.tools)
         result = await executor.run(messages, ToolContext(db=db, user=user))
         result.memories_used = len(memories)

@@ -26,6 +26,7 @@ from jobs.service import JobService
 from memory.contact_memory import contact_memory_service
 from models.message import Message, MessageDeliveryStatus, MessageDirection, MessageMediaType
 from observability.metrics import record_whatsapp_session_status
+from orchestrator.priority import Priority, quick_priority_hint
 from providers.whatsapp.base import ConnectionStatus, DeliveryStatus, WhatsAppProvider
 from providers.whatsapp.factory import get_whatsapp_provider
 from repositories.contact import ContactRepository
@@ -46,6 +47,17 @@ _DELIVERY_STATUS_MAP = {
     DeliveryStatus.DELIVERED: MessageDeliveryStatus.DELIVERED,
     DeliveryStatus.READ: MessageDeliveryStatus.READ,
     DeliveryStatus.FAILED: MessageDeliveryStatus.FAILED,
+}
+
+# Non-urgent messages keep the pre-Fase-4.2 delay of 0 (immediately due);
+# urgent ones are scheduled slightly in the past so they both become due
+# right away and sort ahead of same-instant jobs (due_jobs orders by
+# scheduled_at ascending) — a real, minimal queue-jump, not a simulated one.
+_PRIORITY_ENQUEUE_DELAY: dict[Priority, float] = {
+    Priority.URGENT: -5.0,
+    Priority.HIGH: 0.0,
+    Priority.NORMAL: 0.0,
+    Priority.LOW: 0.0,
 }
 
 
@@ -227,8 +239,20 @@ async def whatsapp_webhook(
             window_seconds=60,
         )
         if allowed:
+            # Priority de execução (Fase 4.2): a cheap, non-LLM keyword hint
+            # decides scheduled_at. Non-urgent messages keep delay_seconds=0
+            # (identical to pre-4.2 behaviour); urgent ones are scheduled a
+            # few seconds in the past, which both makes them immediately due
+            # and — since due_jobs orders by scheduled_at ascending — lets
+            # them sort ahead of anything else already sitting in the queue.
+            # The Cognitive Pipeline still runs the full (LLM-backed)
+            # PriorityEngine once the job executes; this only affects when
+            # it gets picked up, not how it's handled.
+            delay_seconds = _PRIORITY_ENQUEUE_DELAY[quick_priority_hint(inbound.text)]
             await jobs.enqueue(
-                "whatsapp.process_inbound", {"contact_id": contact.id, "message_id": message.id}
+                "whatsapp.process_inbound",
+                {"contact_id": contact.id, "message_id": message.id},
+                delay_seconds=delay_seconds,
             )
         else:
             logger.warning("Auto-reply throttled for contact %s (loop/flood guard)", contact.id)
