@@ -9,12 +9,22 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
+from sqlalchemy.dialects import postgresql
 
 revision: str = '790826c45a84'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+# `op.drop_table('name')` in downgrade() takes only a table name, with no
+# column metadata — unlike op.create_table(...) in upgrade(), which carries
+# the inline sa.Enum(...) definitions and so auto-emits CREATE TYPE via
+# SQLAlchemy's DDL event chain. Without any column reference at drop time,
+# that same chain never fires DROP TYPE, so these six enum types silently
+# survive a full downgrade and collide with CREATE TYPE on the next upgrade.
+# Dropped explicitly here, mirroring the pattern used in
+# d3e16cbf2688_message_provider_timestamp_and_delivery_.py.
+_ENUM_NAMES = ('jobstatus', 'userrole', 'messagedirection', 'messagemediatype', 'taskstatus', 'taskpriority')
 
 
 def upgrade() -> None:
@@ -220,3 +230,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_church_members_phone'), table_name='church_members')
     op.drop_table('church_members')
     # ### end Alembic commands ###
+
+    bind = op.get_bind()
+    for enum_name in _ENUM_NAMES:
+        postgresql.ENUM(name=enum_name).drop(bind, checkfirst=True)
