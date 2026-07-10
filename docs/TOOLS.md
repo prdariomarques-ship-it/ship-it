@@ -91,6 +91,8 @@ Isso é auditabilidade real, não hipotética: `GET /api/chat` e `/api/agents/{n
 | `agents/tools/communication.py` | `send_whatsapp_message`, `find_contact`, `search_memory`, `store_memory`, `update_contact_preference` |
 | `agents/tools/domain.py` | `list_church_members`, `add_prayer_request`, `list_store_customers`, `add_store_customer` |
 | `agents/tools/mail.py` | `search_emails`, `read_email_thread`, `summarize_email_thread`, `detect_pending_email_actions` — registradas **só** em `assistant_agent.py`; ver `docs/EMAIL.md` |
+| `agents/tools/gcalendar.py` | `list_google_calendars`, `search_google_calendar_events`, `create_google_calendar_event`, `update_google_calendar_event`, `delete_google_calendar_event`, `check_google_calendar_availability` — registradas **só** em `assistant_agent.py`; ver `docs/CALENDAR.md` |
+| `agents/tools/gcontacts.py` | `search_google_contacts`, `create_google_contact`, `update_google_contact`, `delete_google_contact` — registradas **só** em `assistant_agent.py`; ver `docs/CONTACTS.md` |
 
 ## Adicionando uma ferramenta nova
 

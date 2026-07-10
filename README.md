@@ -78,10 +78,14 @@ backend/
   memory/         # Memory Manager (fachada) + memória por contato (Qdrant)
   jobs/           # Fila durável: agendamento, retry exponencial, eventos, worker
   mail/           # Rotas OAuth do Gmail: connect/callback/status/disconnect (admin-only)
+  gcalendar/      # Rotas OAuth do Google Calendar (admin-only)
+  gcontacts/      # Rotas OAuth do Google Contacts (admin-only)
   providers/
     llm/          # openai / anthropic / glm / gemini / ollama  (contrato LLMProvider)
     whatsapp/     # openwa / baileys / evolution / official  (contrato WhatsAppProvider)
     mail/         # gmail  (contrato MailProvider) — somente leitura, ver docs/EMAIL.md
+    calendar/     # google  (contrato CalendarProvider) — leitura+escrita, ver docs/CALENDAR.md
+    contacts/     # google  (contrato ContactsProvider) — leitura+escrita, ver docs/CONTACTS.md
   repositories/   # Repository pattern (genérico + especializados)
   observability/  # health/readiness, métricas Prometheus
   services/       # cache Redis, rate limit, auditoria
@@ -90,10 +94,10 @@ backend/
   database/       # Engine async + base declarativa
   models/         # users, contacts, messages, church_members, store_customers,
                   # notes, calendar, tasks, embeddings, logs, refresh_tokens, jobs,
-                  # email_accounts
+                  # email_accounts, google_calendar_accounts, google_contacts_accounts
   utils/          # Settings (config.py) + logging estruturado (logging.py)
   alembic/        # Migrações
-  tests/          # 304 testes pytest
+  tests/          # 399 testes pytest
 ```
 
 ## Fluxo de execução (WhatsApp) — ponta a ponta, automático
@@ -175,7 +179,7 @@ A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo 
 | `church` | Oração, escalas, cultos, avisos, versículos | membros, pedidos de oração, eventos, memória |
 | `store` | Produtos, pedidos, clientes, orçamentos | clientes, contatos, memória, preferências |
 | `content` | Conteúdo para redes sociais | notas, memória |
-| `assistant` | Atende o WhatsApp; acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail, somente leitura) |
+| `assistant` | Atende o WhatsApp; acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail, somente leitura) + Google Calendar + Google Contacts |
 
 Cada agente possui **system prompt**, **tools** (function calling via Tool Registry), **memory** (Memory Manager — busca semântica injetada no contexto pelo planner), **planner** (monta o contexto) e **executor** (loop plan → act → observe com orçamento de iterações).
 
@@ -209,6 +213,8 @@ Ferramentas seguem o mesmo espírito: declare um `Tool(...)` em `agents/tools/`,
 - **LLM**: crie `providers/llm/<nome>/provider.py` implementando `LLMProvider` (`chat` com tools + `embed`), registre no dicionário de `providers/llm/factory.py` e selecione com `LLM_PROVIDER=<nome>`. Reaproveite `OpenAIProvider` por herança quando o vendor for compatível com a API da OpenAI (caso de GLM e Ollama).
 - **WhatsApp**: crie `providers/whatsapp/<nome>/provider.py` implementando `WhatsAppProvider` (5 métodos de envio + `parse_webhook` normalizando para `InboundMessage`), registre em `providers/whatsapp/factory.py` e selecione com `WHATSAPP_PROVIDER=<nome>`. Guia completo (contrato, exemplo mínimo, checklist de testes de compatibilidade): [`backend/providers/whatsapp/README.md`](backend/providers/whatsapp/README.md).
 - **E-mail**: crie `providers/mail/<nome>/provider.py` implementando `MailProvider` (OAuth + `search`/`get_thread`), registre em `providers/mail/factory.py` e selecione com `MAIL_PROVIDER=<nome>`. Hoje só `gmail` existe. Guia completo: [`docs/EMAIL.md`](docs/EMAIL.md).
+- **Calendário**: crie `providers/calendar/<nome>/provider.py` implementando `CalendarProvider`, registre em `providers/calendar/factory.py` e selecione com `CALENDAR_PROVIDER=<nome>`. Hoje só `google` existe. Guia completo: [`docs/CALENDAR.md`](docs/CALENDAR.md).
+- **Contatos**: crie `providers/contacts/<nome>/provider.py` implementando `ContactsProvider`, registre em `providers/contacts/factory.py` e selecione com `CONTACTS_PROVIDER=<nome>`. Hoje só `google` existe. Guia completo: [`docs/CONTACTS.md`](docs/CONTACTS.md).
 
 Nenhuma outra parte da aplicação muda — rotas, agentes e jobs dependem apenas dos contratos.
 
@@ -231,6 +237,12 @@ Trocar de modelo é só configuração: `LLM_PROVIDER=gemini` (ou `ollama`, `glm
 Domínio novo e isolado (Sprint 1), somente leitura: buscar, ler, resumir e detectar pendências em e-mails do Gmail. Enviar, responder, mover, excluir e re-rotular estão fora do escopo. Só o agente `assistant` tem acesso direto às ferramentas de e-mail — qualquer outro agente que precise desse contexto passa pelo Cognitive Planner, que roteia a etapa para `assistant`, em vez de ganhar acesso próprio ao domínio.
 
 Configuração (`MAIL_PROVIDER`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `EMAIL_TOKEN_ENCRYPTION_KEY`) e o passo a passo completo de setup no Google Cloud Console: **[`docs/EMAIL.md`](docs/EMAIL.md)**.
+
+## Google Calendar e Google Contacts
+
+Dois domínios novos e isolados (Sprint 2), leitura **e** escrita: agendas/eventos (listar, buscar, criar, editar, excluir, verificar conflitos/disponibilidade) e contatos (listar, buscar, criar, editar, remover) do Google real do usuário — não confundir com a agenda interna (`/api/calendar`) nem com os contatos de WhatsApp (`/api/contacts`) que o Dario OS já tinha antes. Mesmo padrão do Gmail: só `assistant` tem acesso direto às ferramentas; reaproveitam o mesmo app OAuth do Google Cloud já criado para o Gmail (só mais uma URI de redirecionamento e um escopo, cadastrados no mesmo app, por domínio).
+
+Configuração e passo a passo: **[`docs/CALENDAR.md`](docs/CALENDAR.md)** (`CALENDAR_PROVIDER`, `GOOGLE_CALENDAR_REDIRECT_URI`) e **[`docs/CONTACTS.md`](docs/CONTACTS.md)** (`CONTACTS_PROVIDER`, `GOOGLE_CONTACTS_REDIRECT_URI`).
 
 ## Autenticação
 
@@ -278,7 +290,7 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (304 testes; cobertura ~92%)
+# Testes (399 testes; cobertura ~93%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
 
@@ -305,7 +317,7 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - Senhas com PBKDF2-SHA256 salteado, verificadas fora do event loop e em tempo constante
 - Backup diário: agende `scripts/backup.sh` no cron (`0 3 * * *`)
 - Refresh token do Gmail cifrado em repouso (Fernet, `EMAIL_TOKEN_ENCRYPTION_KEY`); nenhuma credencial de terceiro é persistida em texto puro
-- Isolamento técnico entre usuários/contatos decidido em código, nunca só pelo prompt do LLM (WhatsApp: PROD-005; e-mail: Sprint 1) — ver [`SECURITY.md`](SECURITY.md) para o modelo de segurança completo
+- Isolamento técnico entre usuários/contatos decidido em código, nunca só pelo prompt do LLM (WhatsApp: PROD-005; e-mail/Calendar/Contacts: Sprint 1 e 2) — ver [`SECURITY.md`](SECURITY.md) para o modelo de segurança completo
 
 ## Documentação
 
@@ -316,6 +328,8 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - [docs/MEMORY.md](docs/MEMORY.md) — os seis tipos de memória, ciclo de vida de uma mensagem, aprendizado
 - [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — fila de jobs, hand-off n8n, o Cognitive Pipeline como workflow do WhatsApp
 - [docs/EMAIL.md](docs/EMAIL.md) — integração Gmail: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
+- [docs/CALENDAR.md](docs/CALENDAR.md) — integração Google Calendar: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
+- [docs/CONTACTS.md](docs/CONTACTS.md) — integração Google Contacts: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
 - [SECURITY.md](SECURITY.md) — modelo de segurança consolidado (autenticação, isolamento, segredos, checklist de produção)
 - [docs/fase4.1-relatorio.md](docs/fase4.1-relatorio.md) — relatório técnico do fluxo ponta a ponta do WhatsApp
 - [docs/fase4.2-relatorio.md](docs/fase4.2-relatorio.md) — relatório técnico do Cognitive Pipeline

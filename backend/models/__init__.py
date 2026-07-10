@@ -3,6 +3,8 @@ from models.church import ChurchMember
 from models.contact import Contact
 from models.email_account import EmailAccount
 from models.embedding import Embedding
+from models.gcalendar_account import GoogleCalendarAccount
+from models.gcontacts_account import GoogleContactsAccount
 from models.job import Job, JobStatus
 from models.log import LogEntry
 from models.message import Message, MessageDirection, MessageMediaType
@@ -18,6 +20,8 @@ __all__ = [
     "Contact",
     "EmailAccount",
     "Embedding",
+    "GoogleCalendarAccount",
+    "GoogleContactsAccount",
     "Job",
     "JobStatus",
     "LogEntry",

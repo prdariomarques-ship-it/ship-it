@@ -14,6 +14,20 @@ from agents.tools.domain import (
     list_church_members_tool,
     list_store_customers_tool,
 )
+from agents.tools.gcalendar import (
+    check_google_calendar_availability_tool,
+    create_google_calendar_event_tool,
+    delete_google_calendar_event_tool,
+    list_google_calendars_tool,
+    search_google_calendar_events_tool,
+    update_google_calendar_event_tool,
+)
+from agents.tools.gcontacts import (
+    create_google_contact_tool,
+    delete_google_contact_tool,
+    search_google_contacts_tool,
+    update_google_contact_tool,
+)
 from agents.tools.mail import (
     detect_pending_email_actions_tool,
     read_email_thread_tool,
@@ -80,4 +94,14 @@ class AssistantAgent(BaseAgent):
             read_email_thread_tool,
             summarize_email_thread_tool,
             detect_pending_email_actions_tool,
+            list_google_calendars_tool,
+            search_google_calendar_events_tool,
+            create_google_calendar_event_tool,
+            update_google_calendar_event_tool,
+            delete_google_calendar_event_tool,
+            check_google_calendar_availability_tool,
+            search_google_contacts_tool,
+            create_google_contact_tool,
+            update_google_contact_tool,
+            delete_google_contact_tool,
         ]

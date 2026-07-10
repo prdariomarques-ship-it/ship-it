@@ -48,6 +48,32 @@ Somente leitura (Sprint 1); `/connect`, `/status` e `/disconnect` são admin-onl
 
 As quatro ferramentas de leitura de e-mail (`search_emails`, `read_email_thread`, `summarize_email_thread`, `detect_pending_email_actions`) são acessadas via `/api/chat`/`/api/agents/assistant/run`, como qualquer outra tool — não têm rota HTTP própria.
 
+## Google Calendar
+
+Leitura e escrita (Sprint 2); `/connect`, `/status` e `/disconnect` são admin-only. Não confundir com `/api/calendar` (agenda interna do Dario OS — ver `docs/CALENDAR.md`). Guia completo: [`docs/CALENDAR.md`](CALENDAR.md).
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/api/gcalendar/connect` | Retorna a URL de consentimento do Google (admin) |
+| GET | `/api/gcalendar/oauth/callback` | Callback do Google (autenticado via `state` assinado) |
+| GET | `/api/gcalendar/status` | Status da conexão do usuário autenticado (admin) |
+| DELETE | `/api/gcalendar/disconnect` | Remove a conta conectada (admin) |
+
+As seis ferramentas (`list_google_calendars`, `search_google_calendar_events`, `create_google_calendar_event`, `update_google_calendar_event`, `delete_google_calendar_event`, `check_google_calendar_availability`) são acessadas via `/api/chat`/`/api/agents/assistant/run`, como qualquer outra tool.
+
+## Google Contacts
+
+Leitura e escrita (Sprint 2); `/connect`, `/status` e `/disconnect` são admin-only. Não confundir com `/api/contacts` (contatos internos de WhatsApp do Dario OS — ver `docs/CONTACTS.md`). Guia completo: [`docs/CONTACTS.md`](CONTACTS.md).
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/api/gcontacts/connect` | Retorna a URL de consentimento do Google (admin) |
+| GET | `/api/gcontacts/oauth/callback` | Callback do Google (autenticado via `state` assinado) |
+| GET | `/api/gcontacts/status` | Status da conexão do usuário autenticado (admin) |
+| DELETE | `/api/gcontacts/disconnect` | Remove a conta conectada (admin) |
+
+As quatro ferramentas (`search_google_contacts`, `create_google_contact`, `update_google_contact`, `delete_google_contact`) são acessadas via `/api/chat`/`/api/agents/assistant/run`, como qualquer outra tool.
+
 ## Automação e jobs
 
 | Método | Rota | Descrição |

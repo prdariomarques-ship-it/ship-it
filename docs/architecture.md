@@ -334,6 +334,10 @@ providers/
     official/   WhatsApp Cloud API (Meta Graph)
   mail/       base.py (MailProvider, EmailMessage, EmailThread, EmailSearchQuery, OAuthTokens)
     gmail/      REST via httpx puro — OAuth 2.0 + Gmail API, somente leitura (Sprint 1)
+  calendar/   base.py (CalendarProvider, CalendarEvent, EventSearchQuery, AvailabilityResult, ...)
+    google/     REST via httpx puro — OAuth 2.0 + Google Calendar API, leitura+escrita (Sprint 2)
+  contacts/   base.py (ContactsProvider, Contact, ContactSearchQuery, ...)
+    google/     REST via httpx puro — OAuth 2.0 + Google People API, leitura+escrita (Sprint 2)
 ```
 
 `LLM_PROVIDER` e `EMBEDDING_PROVIDER` são independentes porque nem todo vendor tem API de embeddings de dimensão previsível (Anthropic não tem API de embeddings; GLM e Ollama têm, mas com dimensão que não bate com a coleção Qdrant configurada — ambos levantam `EmbeddingsNotSupportedError` de propósito em vez de gravar vetores incompatíveis silenciosamente). Sem chave/endereço configurado, todo provider degrada para resposta stub — o sistema continua de pé.
@@ -418,6 +422,38 @@ flowchart TB
 - **Credenciais nunca em texto puro**: o refresh token OAuth é cifrado em repouso com Fernet antes de tocar o banco (`services/token_crypto.py`).
 - **Somente leitura**: escopo `gmail.readonly` solicitado ao Google — enviar/responder/mover/excluir não existem em nenhum ponto do código desta sprint.
 - **`mail/router.py`** expõe conexão/desconexão admin-only (`/api/mail/connect|status|disconnect`) e o callback OAuth (`/api/mail/oauth/callback`, autenticado por um `state` JWT de curta duração em vez de Bearer, porque é o Google — não o usuário — quem chama essa rota).
+
+## Google Calendar e Google Contacts — Sprint 2
+
+Dois domínios novos, tão isolados quanto o e-mail e entre si — mesmo padrão Strategy + Factory (`providers/calendar/`, `providers/contacts/`), mesmo gateway único (`assistant`), mesma resolução de identidade só por `ToolContext.user.id`, mesma criptografia de refresh token. Guias completos: **[`docs/CALENDAR.md`](CALENDAR.md)**, **[`docs/CONTACTS.md`](CONTACTS.md)**.
+
+```mermaid
+flowchart TB
+    subgraph Gateway["Único gateway: assistant"]
+        CalTools["agents/tools/gcalendar.py\n(6 tools)"]
+        ConTools["agents/tools/gcontacts.py\n(4 tools)"]
+    end
+    Others["personal / church / store / content\n(sem tools Google)"]
+    Planner["Cognitive Planner"]
+    CalAccess["_get_access_token(context)\nsempre por context.user.id"]
+    ConAccess["_get_access_token(context)\nsempre por context.user.id"]
+    CalProvider["GoogleCalendarProvider\nescopo calendar (leitura+escrita)"]
+    ConProvider["GoogleContactsProvider\nescopo contacts (leitura+escrita)"]
+    GCal[(Google Calendar API)]
+    GPeople[(Google People API)]
+
+    Others -. "precisa de calendário/contatos?" .-> Planner
+    Planner -- "roteia a etapa para" --> CalTools
+    Planner -- "roteia a etapa para" --> ConTools
+    CalTools --> CalAccess --> CalProvider --> GCal
+    ConTools --> ConAccess --> ConProvider --> GPeople
+```
+
+- **Não confundir com domínios internos já existentes**: `models.calendar.CalendarEvent`/`create_event`/`/api/calendar` são a agenda **interna** do Dario OS (tarefas/lembretes, sem Google); `models.contact.Contact`/`find_contact`/`/api/contacts` são os contatos **de WhatsApp** (isolamento PROD-005). Os domínios Google desta sprint são deliberadamente nomeados `gcalendar`/`gcontacts` em todo lugar (modelos, tools, rotas) para nunca colidir com esses dois domínios pré-existentes, nem confundir qual é qual — ver a seção "Não confundir" em cada um dos dois novos documentos.
+- **Consolidação de ferramentas**: 12 capacidades pedidas para Calendar viraram 6 tools (e 7 para Contacts viraram 4) parametrizando em vez de duplicar — mesmo padrão já usado pelo `search_emails` do Gmail (um `since`/`until` cobre "hoje", "amanhã", "esta semana", "próximos compromissos" em vez de uma tool por variação).
+- **Um único app OAuth do Google Cloud para os três domínios**: Calendar e Contacts reaproveitam `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` já configurados para o Gmail — só precisam de mais uma URI de redirecionamento e mais um escopo cada, cadastrados no mesmo app.
+- **`state` OAuth com propósito por domínio**: `auth/jwt.py::create_oauth_state_token`/`decode_oauth_state_token` ganharam um parâmetro `purpose` (Sprint 2) — cada domínio usa o seu (`gmail_oauth_state`, `gcalendar_oauth_state`, `gcontacts_oauth_state`), então um `state` válido para um callback nunca é aceito por outro, mesmo com os três reutilizando o mesmo helper e o mesmo `JWT_SECRET`. Extensão aditiva com valor padrão — nenhum chamador existente do Gmail mudou.
+- **Corrida de concorrência resolvida desde o início**: `GoogleCalendarAccountRepository.upsert_for_user`/`GoogleContactsAccountRepository.upsert_for_user` já nascem com a recuperação de corrida de unique-constraint (dois callbacks OAuth concorrentes para o mesmo usuário) que só foi corrigida no Gmail depois, na auditoria da Sprint 1.1 (`EmailAccountRepository.upsert_for_user`) — mesmo idiom de `ContactRepository.get_or_create_by_phone`, aplicado aqui de imediato em vez de esperar por uma auditoria de correção.
 
 ## Agentes
 
@@ -506,5 +542,6 @@ Alembic com `env.py` async lendo `DATABASE_URL` das settings. O container do bac
 - **Nota de transparência sobre cobertura de testes**: `webhooks/router.py` e os handlers de envio em `api/whatsapp.py` mostram uma cobertura de linha aparentemente baixa na ferramenta `coverage.py` (investigado a fundo: não é cache de bytecode, não é ordem de import, não é specífico do plugin `pytest-cov` — reproduz com `coverage run` puro). A correção comportamental dessas rotas está provada por asserções diretas em ~20 testes de integração (status HTTP correto por cenário, linhas exatas persistidas no banco, payloads exatos de job) — evidência mais forte que a métrica de linha para este caso específico. Ver `docs/fase4.1-relatorio.md` para os detalhes da investigação.
 - **Custo/latência do Cognitive Pipeline**: intenção, prioridade e planejamento são, cada um, uma chamada LLM independente (decisão real, não regra fixa) — até 3 chamadas antes mesmo da execução do agente escolhido. Deliberado (decisões independentes e testáveis > uma única chamada monolítica), mas é um custo real por mensagem; se o volume justificar, a Fase 4.3 pode combinar intenção+prioridade+planejamento numa única chamada de function calling sem mudar a interface pública de nenhum dos três componentes.
 - **E-mail como domínio isolado de gateway único** (Sprint 1): em vez de dar as tools de Gmail a todo agente que pudesse se beneficiar delas, só `assistant` as recebeu — qualquer outro agente que precise de contexto de e-mail passa pelo Cognitive Planner, que já sabia rotear uma etapa para outro agente. Menos superfície de ataque (só um agente pode tocar o domínio), ao custo de uma etapa extra de planejamento quando um agente especializado precisa de e-mail; aceitável porque isso ainda não acontece em nenhum fluxo real desta sprint.
+- **Calendar/Contacts como contas Google separadas do Gmail** (Sprint 2): em vez de estender `EmailAccount` para guardar três escopos numa linha só (um único consentimento, um único refresh token para tudo), cada domínio Google tem seu próprio modelo/tabela/refresh token, exatamente como o Gmail já tinha o seu. Custo: até três consentimentos OAuth separados se o dono quiser os três domínios (mitigado por reaproveitar o mesmo app/credenciais do Google Cloud — só muda a URI de redirecionamento e o escopo por domínio). Ganho: cada domínio pode ser conectado/desconectado independentemente, sem risco de uma mudança num afetar o token dos outros dois, e sem introduzir uma tabela "genérica" de contas OAuth que a instrução desta sprint pediu para evitar.
 - **`AIOrchestrator.run` ganhou `memories`/`history` opcionais** em vez de um novo método paralelo — menos superfície de API, mas significa que qualquer chamador futuro pode, sem querer, pular o auto-fetch de memória passando `memories=[]`. Aceitável hoje (só o Cognitive Pipeline os usa); documentado para quem vier adicionar um terceiro chamador.
 - **Composição de resposta multi-etapa é concatenação simples** (`CognitivePipeline._compose_reply`), não uma síntese via LLM — mais barato e mais previsível, mas uma resposta de duas etapas pode soar como duas respostas coladas em vez de um texto único e fluido. Ver riscos remanescentes em `docs/fase4.2-relatorio.md`.

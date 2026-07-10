@@ -125,12 +125,27 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = ""  # e.g. https://<domain>/api/mail/oauth/callback
-    # Symmetric key (Fernet, urlsafe-base64, 32 bytes) encrypting refresh tokens
-    # at rest — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Symmetric key (Fernet, urlsafe-base64, 32 bytes) — encrypts every Google
+    # OAuth refresh token at rest (Gmail, Calendar, Contacts all share it: same
+    # kind of secret, same trust boundary, no reason for three separate keys).
+    # generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     email_token_encryption_key: str = ""
     gmail_api_base_url: str = "https://gmail.googleapis.com"
     google_oauth_base_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
     google_token_url: str = "https://oauth2.googleapis.com/token"
+
+    # Google Calendar (Sprint 2) — reuses google_client_id/google_client_secret
+    # above (same OAuth app as Gmail; just register this redirect URI too in
+    # Google Cloud Console) and email_token_encryption_key for token storage.
+    # Its own domain, own connection, own opt-in — same shape as Gmail.
+    calendar_provider: str = "google"
+    google_calendar_redirect_uri: str = ""  # e.g. https://<domain>/api/gcalendar/oauth/callback
+    google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
+
+    # Google Contacts (People API, Sprint 2) — same reuse pattern as Calendar above.
+    contacts_provider: str = "google"
+    google_contacts_redirect_uri: str = ""  # e.g. https://<domain>/api/gcontacts/oauth/callback
+    google_people_api_base_url: str = "https://people.googleapis.com/v1"
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"

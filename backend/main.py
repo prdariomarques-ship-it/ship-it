@@ -22,6 +22,8 @@ from api.routes import (
 from api.whatsapp import router as whatsapp_router
 from auth.router import router as auth_router
 from chat.router import router as chat_router
+from gcalendar.router import router as gcalendar_router
+from gcontacts.router import router as gcontacts_router
 from jobs.router import router as jobs_router
 from jobs.worker import job_worker
 from mail.router import router as mail_router
@@ -45,6 +47,8 @@ OPENAPI_TAGS = [
     {"name": "workflows", "description": "Disparo de automações no n8n."},
     {"name": "jobs", "description": "Fila de trabalhos em background (admin)."},
     {"name": "mail", "description": "Integração Gmail (somente leitura) — conexão OAuth admin-only."},
+    {"name": "gcalendar", "description": "Integração Google Calendar — conexão OAuth admin-only."},
+    {"name": "gcontacts", "description": "Integração Google Contacts — conexão OAuth admin-only."},
     {"name": "health", "description": "Liveness e readiness."},
     {"name": "observability", "description": "Métricas Prometheus."},
 ]
@@ -154,6 +158,8 @@ def create_app() -> FastAPI:
     app.include_router(logs_router, prefix=prefix)
     app.include_router(dashboard_router, prefix=prefix)
     app.include_router(mail_router, prefix=prefix)
+    app.include_router(gcalendar_router, prefix=prefix)
+    app.include_router(gcontacts_router, prefix=prefix)
 
     return app
 

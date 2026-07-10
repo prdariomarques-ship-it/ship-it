@@ -14,6 +14,7 @@ Dois casos concretos, resolvidos com o mesmo princípio:
 
 - **WhatsApp (PROD-005)** — `send_whatsapp_message` e `find_contact` (`agents/tools/communication.py`) só podem agir sobre o contato ao qual a conversa atual está associada (`ToolContext.contact_id`, definido por `BaseAgent.run` a partir de estado da aplicação). Um argumento `to`/`query` apontando para outro contato é recusado antes de qualquer enfileiramento ou consulta — ver `tests/test_tool_isolation.py` (10 testes, incluindo tentativas de burlar o isolamento via formatação de telefone).
 - **E-mail / Gmail (Sprint 1)** — `_get_access_token` (`agents/tools/mail.py`) resolve o mailbox estritamente a partir de `ToolContext.user.id`. Nenhuma das quatro tools de e-mail tem um parâmetro de usuário/mailbox no schema — não existe argumento que um modelo manipulado possa fornecer para alcançar a caixa de entrada de outra pessoa. Ver `docs/EMAIL.md#segurança-e-isolamento-mesmos-princípios-do-prod-005` e `tests/test_mail_tools.py`.
+- **Google Calendar / Google Contacts (Sprint 2)** — mesmo princípio, mesma função (`_get_access_token`) replicada em `agents/tools/gcalendar.py`/`agents/tools/gcontacts.py`, resolvendo sempre a partir de `ToolContext.user.id`. Ver `docs/CALENDAR.md`, `docs/CONTACTS.md` e `tests/test_gcalendar_tools.py`/`tests/test_gcontacts_tools.py` (inclui a tentativa de um usuário editar o `resource_name`/`event_id` de outro, rejeitada porque a API do Google já escopa esses ids pelo access_token em uso).
 
 Ao adicionar um novo domínio que acesse dados de um usuário/contato específico, siga o mesmo padrão: um único ponto de resolução de identidade, alimentado só por `ToolContext`, nunca por um argumento do modelo.
 
@@ -34,7 +35,7 @@ Ao adicionar um novo domínio que acesse dados de um usuário/contato específic
 
 Gerar valores fortes: `openssl rand -hex 32`. Em desenvolvimento (`ENVIRONMENT=development`), os valores padrão continuam funcionando sem bloquear o boot — a checagem é específica de produção.
 
-`EMAIL_TOKEN_ENCRYPTION_KEY` (Gmail) **não** passa por essa validação de boot: o domínio de e-mail é opcional por instância, então sua ausência não impede o sistema de subir — apenas mantém `/api/mail/connect` indisponível (`503`) até ser configurada. Ver `docs/EMAIL.md#variáveis-de-ambiente`.
+`EMAIL_TOKEN_ENCRYPTION_KEY` (Gmail, Google Calendar e Google Contacts — mesma chave para os três) **não** passa por essa validação de boot: cada um desses domínios é opcional por instância, então sua ausência não impede o sistema de subir — apenas mantém `/api/mail/connect`/`/api/gcalendar/connect`/`/api/gcontacts/connect` indisponíveis (`503`) até serem configurados. Ver `docs/EMAIL.md#variáveis-de-ambiente`, `docs/CALENDAR.md#variáveis-de-ambiente`, `docs/CONTACTS.md#variáveis-de-ambiente`.
 
 ## Webhooks
 
@@ -45,12 +46,13 @@ Gerar valores fortes: `openssl rand -hex 32`. Em desenvolvimento (`ENVIRONMENT=d
 
 ## Credenciais de terceiros em repouso
 
-Nenhuma credencial de longa duração de um serviço externo é persistida em texto puro. Hoje isso se aplica ao refresh token OAuth do Gmail:
+Nenhuma credencial de longa duração de um serviço externo é persistida em texto puro. Hoje isso se aplica aos refresh tokens OAuth do Gmail, do Google Calendar e do Google Contacts:
 
-- Cifrado com **Fernet** (AES-128-CBC + HMAC autenticado, biblioteca `cryptography`) usando `EMAIL_TOKEN_ENCRYPTION_KEY` — uma chave que só existe em configuração, nunca no banco.
+- Cifrados com **Fernet** (AES-128-CBC + HMAC autenticado, biblioteca `cryptography`) usando `EMAIL_TOKEN_ENCRYPTION_KEY` — a mesma chave para os três domínios (mesma categoria de segredo, mesmo limite de confiança; nenhuma razão para três chaves separadas), que só existe em configuração, nunca no banco.
 - Sem a chave configurada (ou com uma chave inválida/trocada), `encrypt_token`/`decrypt_token` recusam operar (`TokenEncryptionNotConfigured`) em vez de cair para um caminho inseguro ou corromper silenciosamente um valor já cifrado.
-- Escopo mínimo solicitado ao provedor: só `gmail.readonly` — mesmo um bug futuro na aplicação não teria como usar esse token para enviar ou apagar e-mail, porque o Google nunca concedeu essa permissão.
-- Ver `services/token_crypto.py` e `docs/EMAIL.md` para o fluxo completo.
+- Escopo mínimo por domínio: Gmail pede só `gmail.readonly` (somente leitura, Sprint 1); Calendar e Contacts pedem `calendar`/`contacts` (leitura+escrita, escopo declarado explicitamente no Sprint 2, já que criar/editar/excluir fazem parte do escopo) — nenhum dos três pede mais do que a funcionalidade implementada realmente usa.
+- Cada domínio guarda seu próprio refresh token, numa tabela própria (`email_accounts`, `google_calendar_accounts`, `google_contacts_accounts`) — desconectar um não afeta os outros dois.
+- Ver `services/token_crypto.py`, `docs/EMAIL.md`, `docs/CALENDAR.md` e `docs/CONTACTS.md` para o fluxo completo.
 
 ## Rate limiting e proteção contra loop/flood
 
@@ -78,7 +80,7 @@ Ver `BACKUP.md`/`RESTORE.md` para a rotina de backup do Postgres e do Qdrant, e 
 - [ ] `JWT_SECRET` forte e único (`openssl rand -hex 32`)
 - [ ] `WEBHOOK_SECRET` forte e único, mesmo valor configurado no gateway de WhatsApp/n8n
 - [ ] `OFFICIAL_APP_SECRET` configurado, se usando o provider `official` (WhatsApp Cloud API)
-- [ ] `EMAIL_TOKEN_ENCRYPTION_KEY` gerada e preservada, se usando a integração de Gmail — trocá-la invalida todos os refresh tokens já armazenados
+- [ ] `EMAIL_TOKEN_ENCRYPTION_KEY` gerada e preservada, se usando Gmail, Google Calendar ou Google Contacts — trocá-la invalida todos os refresh tokens já armazenados dos três domínios
 - [ ] `CORS_ORIGINS` restrito aos domínios reais do frontend
 - [ ] Domínio real configurado no Caddy para HTTPS automático (não usar `localhost` em produção)
 - [ ] Backup diário agendado (`scripts/backup.sh` no cron)

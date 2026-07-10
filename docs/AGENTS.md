@@ -10,9 +10,9 @@ Um agente do Dario OS é uma classe que estende `agents.base.BaseAgent` e declar
 | `church` | `agents/church_agent.py` | Oração, escalas, cultos, avisos, membros | membros, pedidos de oração, eventos, memória |
 | `store` | `agents/store_agent.py` | Produtos, pedidos, clientes, orçamentos | clientes, contatos, memória, preferências |
 | `content` | `agents/content_agent.py` | Conteúdo para redes sociais, pesquisa, documentos | notas, memória |
-| `assistant` | `agents/assistant_agent.py` | Generalista — atende o WhatsApp, acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail) |
+| `assistant` | `agents/assistant_agent.py` | Generalista — atende o WhatsApp, acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail) + Google Calendar + Google Contacts |
 
-`assistant` é o **único gateway técnico para o domínio de e-mail** (Sprint 1 — Gmail, somente leitura): é o único agente cujas `tools` incluem `search_emails`/`read_email_thread`/`summarize_email_thread`/`detect_pending_email_actions`. Um agente especializado que precise de contexto de e-mail não recebe essas tools diretamente — a etapa correspondente do plano do Cognitive Planner é roteada para `assistant`. Detalhes completos: `docs/EMAIL.md`.
+`assistant` é o **único gateway técnico para os três domínios Google** (e-mail — Sprint 1 — e Google Calendar/Google Contacts — Sprint 2): é o único agente cujas `tools` incluem `search_emails`/`read_email_thread`/`summarize_email_thread`/`detect_pending_email_actions` (e-mail), `list_google_calendars`/`search_google_calendar_events`/`create_google_calendar_event`/`update_google_calendar_event`/`delete_google_calendar_event`/`check_google_calendar_availability` (Calendar) e `search_google_contacts`/`create_google_contact`/`update_google_contact`/`delete_google_contact` (Contacts). Um agente especializado que precise de qualquer um desses domínios não recebe as tools diretamente — a etapa correspondente do plano do Cognitive Planner é roteada para `assistant`. Detalhes completos: `docs/EMAIL.md`, `docs/CALENDAR.md`, `docs/CONTACTS.md`.
 
 `assistant` é o agente padrão usado como fallback: quando o Cognitive Planner nomeia um agente inexistente, ou quando a classificação de intenção degrada para a heurística sem um mapeamento intenção→agente, a etapa cai para `assistant`.
 
