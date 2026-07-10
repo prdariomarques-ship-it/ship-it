@@ -88,6 +88,7 @@ backend/
   database/       # Engine async + base declarativa
   models/         # users, contacts, messages, church_members, store_customers,
                   # notes, calendar, tasks, embeddings, logs, refresh_tokens, jobs
+  utils/          # Settings (config.py) + logging estruturado (logging.py)
   alembic/        # Migrações
   tests/          # 231 testes pytest
 ```
@@ -267,7 +268,7 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (125 testes; cobertura ~90%)
+# Testes (231 testes; cobertura ~91%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
 
