@@ -47,17 +47,33 @@ async def _get_access_token(context: ToolContext) -> str:
     except TokenEncryptionNotConfigured as exc:
         raise MailNotConnectedError(str(exc)) from exc
 
-    tokens = await provider.refresh_access_token(refresh_token)
+    try:
+        tokens = await provider.refresh_access_token(refresh_token)
+    except MailProviderError as exc:
+        # A revoked/expired refresh token (e.g. the user pulled access in
+        # myaccount.google.com/permissions) is functionally "not connected"
+        # from here on — surface the same actionable message instead of a
+        # raw provider error, so the model tells the owner how to fix it.
+        raise MailNotConnectedError(
+            "A conexão com o Gmail expirou ou foi revogada. Peça ao administrador para "
+            "reconectar em /api/mail/connect."
+        ) from exc
     return tokens.access_token
 
 
 def _parse_date(value: str | None) -> datetime | None:
+    """Accepts the documented date-only contract (YYYY-MM-DD, naive — gets
+    UTC attached) and, defensively, a full ISO datetime with its own offset
+    (converted to UTC instead of having that offset silently overwritten)."""
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 async def _search_emails(

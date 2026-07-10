@@ -41,6 +41,7 @@ Gerar valores fortes: `openssl rand -hex 32`. Em desenvolvimento (`ENVIRONMENT=d
 - **Segredo compartilhado** (`WEBHOOK_SECRET`): quando definido, toda entrada em `/api/webhooks/whatsapp` exige o header `X-Webhook-Token` com o mesmo valor.
 - **Assinatura real por provider**: `WhatsAppProvider.verify_signature(raw_body, headers)` permite que cada gateway valide seu próprio esquema. `OfficialProvider` (WhatsApp Cloud API) implementa HMAC-SHA256 real via `X-Hub-Signature-256` (`OFFICIAL_APP_SECRET`) — verificação criptográfica, não apenas um segredo compartilhado.
 - **Deduplicação**: mensagens são identificadas por `external_id` antes de processar; uma constraint única no banco cobre a corrida entre requisições concorrentes (mesma redelivery processada duas vezes em paralelo).
+- **Saída HTML sempre escapada em rotas que aceitam entrada não autenticada**: `mail/router.py::/oauth/callback` é chamado diretamente pelo Google (sem Bearer possível) e devolve uma página HTML de resultado — o parâmetro `error` da query string (não autenticado, controlável por qualquer um que monte a URL) é sempre passado por `html.escape` antes de entrar na resposta (`_result_page`), fechando um XSS refletido encontrado e corrigido na auditoria da Sprint 1.1 (`tests/test_mail_router.py::test_callback_escapes_the_error_param_against_reflected_xss`). Regra geral: qualquer rota que renderiza HTML a partir de um valor não autenticado escapa a saída, nunca confia no formato do valor de entrada.
 
 ## Credenciais de terceiros em repouso
 

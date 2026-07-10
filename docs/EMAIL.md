@@ -188,8 +188,8 @@ Enquanto o app OAuth estiver em modo de teste no Google Cloud (comum para uso pe
 | --- | --- |
 | `tests/test_mail_provider.py` | `GmailProvider` (OAuth, busca, thread, extração de corpo MIME, query builder), factory |
 | `tests/test_token_crypto.py` | Cifra/decifra Fernet, chave ausente/inválida, chave trocada |
-| `tests/test_mail_router.py` | `/connect`, `/oauth/callback` (sucesso, reconexão, sem refresh token, sem chave de cifra, erro do Google, state inválido/errado propósito), `/status`, `/disconnect`, admin-only |
-| `tests/test_mail_tools.py` | As 4 tools: rejeição sem conta conectada, sucesso, mapeamento de erro do provider, **isolamento entre dois usuários conectados** (nunca vaza mailbox de outro usuário, inclusive por `thread_id` de outro usuário) |
+| `tests/test_mail_router.py` | `/connect`, `/oauth/callback` (sucesso, reconexão, sem refresh token, sem chave de cifra, erro do Google, state inválido/errado propósito, **XSS refletido no parâmetro `error` escapado**, **corrida de duas conexões concorrentes recuperada sem duplicar/derrubar**), `/status`, `/disconnect`, admin-only |
+| `tests/test_mail_tools.py` | As 4 tools: rejeição sem conta conectada, sucesso, mapeamento de erro do provider, **refresh token revogado tratado como "não conectado"** (mensagem acionável, não um erro cru), parsing de data (`_parse_date`), **isolamento entre dois usuários conectados** (nunca vaza mailbox de outro usuário, inclusive por `thread_id` de outro usuário) |
 
 ## O que ainda depende do fundador
 

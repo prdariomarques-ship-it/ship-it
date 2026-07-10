@@ -93,7 +93,7 @@ backend/
                   # email_accounts
   utils/          # Settings (config.py) + logging estruturado (logging.py)
   alembic/        # Migrações
-  tests/          # 297 testes pytest
+  tests/          # 304 testes pytest
 ```
 
 ## Fluxo de execução (WhatsApp) — ponta a ponta, automático
@@ -278,7 +278,7 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (297 testes; cobertura ~92%)
+# Testes (304 testes; cobertura ~92%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
 

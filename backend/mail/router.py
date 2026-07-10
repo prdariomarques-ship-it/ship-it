@@ -7,6 +7,7 @@ it authenticates the caller a different way: a short-lived, signed `state`
 token minted by `/connect` and validated here (see `auth/jwt.py`).
 """
 from datetime import datetime, timezone
+from html import escape
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -96,25 +97,14 @@ async def oauth_callback(
 
     email_address = await _resolve_email_address(provider, tokens.access_token)
 
-    repository = EmailAccountRepository(db)
-    existing = await repository.get_by_user(user.id, provider.name)
-    if existing is not None:
-        await repository.update(
-            existing,
-            email_address=email_address,
-            encrypted_refresh_token=encrypted,
-            scopes=tokens.scope.split(),
-            connected_at=datetime.now(timezone.utc),
-        )
-    else:
-        await repository.create(
-            user_id=user.id,
-            provider=provider.name,
-            email_address=email_address,
-            encrypted_refresh_token=encrypted,
-            scopes=tokens.scope.split(),
-            connected_at=datetime.now(timezone.utc),
-        )
+    await EmailAccountRepository(db).upsert_for_user(
+        user.id,
+        provider.name,
+        email_address=email_address,
+        encrypted_refresh_token=encrypted,
+        scopes=tokens.scope.split(),
+        connected_at=datetime.now(timezone.utc),
+    )
 
     return _result_page(ok=True, message=f"Conta {email_address} conectada com sucesso.")
 
@@ -161,10 +151,14 @@ async def _resolve_email_address(provider, access_token: str) -> str:
 
 
 def _result_page(ok: bool, message: str) -> HTMLResponse:
+    """`/oauth/callback` takes unauthenticated, attacker-controllable query
+    params (Google's own `error` is reflected here verbatim by design) — the
+    message is always HTML-escaped, regardless of the caller, so a crafted
+    `?error=<script>...` can never execute in the visitor's browser."""
     color = "#2e7d32" if ok else "#c62828"
     title = "Conectado" if ok else "Falha na conexão"
     return HTMLResponse(
         f"<html><body style='font-family: sans-serif; text-align: center; padding: 4rem;'>"
-        f"<h2 style='color: {color}'>{title}</h2><p>{message}</p>"
+        f"<h2 style='color: {color}'>{title}</h2><p>{escape(message)}</p>"
         f"<p><a href='/'>Voltar ao painel</a></p></body></html>"
     )

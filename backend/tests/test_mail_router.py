@@ -5,6 +5,7 @@ chat surface); `/oauth/callback` is the one route Google itself calls, so it
 is authenticated differently — via the short-lived signed `state` token
 minted by `/connect` (see `auth/jwt.py::create_oauth_state_token`).
 """
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,15 +16,23 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from auth.jwt import create_access_token, create_oauth_state_token, decode_oauth_state_token
 from models.email_account import EmailAccount
 from providers.mail.base import MailProviderError, OAuthTokens
+from providers.mail.factory import get_mail_provider
+from repositories.email_account import EmailAccountRepository
 from utils.config import get_settings
 
 
 @pytest.fixture(autouse=True)
 def _configured_mail(monkeypatch):
+    # get_mail_provider() is lru_cache'd: without clearing it, a provider
+    # instance constructed by an earlier test (with different settings) can
+    # leak into this file's tests regardless of the monkeypatches below.
+    get_mail_provider.cache_clear()
     monkeypatch.setattr(get_settings(), "google_client_id", "client-id")
     monkeypatch.setattr(get_settings(), "google_client_secret", "client-secret")
     monkeypatch.setattr(get_settings(), "google_redirect_uri", "https://app.example.com/api/mail/oauth/callback")
     monkeypatch.setattr(get_settings(), "email_token_encryption_key", Fernet.generate_key().decode())
+    yield
+    get_mail_provider.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -110,6 +119,18 @@ async def test_callback_surfaces_google_error_param(client):
 
 
 @pytest.mark.asyncio
+async def test_callback_escapes_the_error_param_against_reflected_xss(client):
+    """`error` is an unauthenticated, attacker-controllable query param
+    (Google's own callback contract) reflected straight into the HTML
+    response — it must never reach the page unescaped."""
+    payload = "<script>alert(document.cookie)</script>"
+    response = await client.get("/api/mail/oauth/callback", params={"error": payload})
+    assert response.status_code == 200
+    assert "<script>" not in response.text
+    assert "&lt;script&gt;" in response.text
+
+
+@pytest.mark.asyncio
 async def test_callback_rejects_invalid_state(client):
     response = await client.get(
         "/api/mail/oauth/callback", params={"code": "abc", "state": "not-a-real-token"}
@@ -171,6 +192,69 @@ async def test_callback_reconnect_updates_the_existing_account_instead_of_duplic
     async with factory() as session:
         accounts = (await session.execute(select(EmailAccount))).scalars().all()
     assert len(accounts) == 1
+
+
+@pytest.mark.asyncio
+async def test_callback_recovers_when_two_concurrent_callbacks_race_on_create(
+    client, auth_headers, session_factory, db_engine, monkeypatch
+):
+    """Two concurrent OAuth callbacks completing for the same user (e.g. two
+    browser tabs) both check for an existing EmailAccount before either has
+    committed, so both see "not connected yet" and both attempt to create
+    one — the second must actually hit the real UNIQUE(user_id, provider)
+    constraint and recover via `EmailAccountRepository.upsert_for_user`'s
+    IntegrityError branch, not crash. (An earlier version of this test only
+    exercised the ordinary reconnect/update path — confirmed by coverage
+    showing the except-IntegrityError branch never ran — this one forces the
+    real race: both initial lookups return None, only the retry lookup
+    inside the except block sees the row the other task already committed.)
+    """
+    me = await client.get("/api/auth/me", headers=auth_headers)
+    user_id = me.json()["id"]
+
+    original_get_by_user = EmailAccountRepository.get_by_user
+    calls = {"count": 0}
+
+    async def racy_get_by_user(self, uid, provider):
+        calls["count"] += 1
+        if calls["count"] <= 2:
+            # Both tasks' initial check races before either commits.
+            return None
+        return await original_get_by_user(self, uid, provider)
+
+    monkeypatch.setattr(EmailAccountRepository, "get_by_user", racy_get_by_user)
+
+    async with session_factory() as session:
+        first = await EmailAccountRepository(session).upsert_for_user(
+            user_id,
+            "gmail",
+            email_address="racer@gmail.com",
+            encrypted_refresh_token="enc-1",
+            scopes=["gmail.readonly"],
+            connected_at=datetime.now(timezone.utc),
+        )
+    async with session_factory() as session:
+        second = await EmailAccountRepository(session).upsert_for_user(
+            user_id,
+            "gmail",
+            email_address="racer@gmail.com",
+            encrypted_refresh_token="enc-2",
+            scopes=["gmail.readonly"],
+            connected_at=datetime.now(timezone.utc),
+        )
+    assert calls["count"] == 3  # both initial checks (racing) + one recovery re-fetch
+
+    assert first.id == second.id  # same row, not a duplicate
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        rows = (await session.execute(select(EmailAccount))).scalars().all()
+    assert len(rows) == 1
+
+
+@pytest.fixture
+async def session_factory(db_engine):
+    return async_sessionmaker(db_engine, expire_on_commit=False)
 
 
 @pytest.mark.asyncio

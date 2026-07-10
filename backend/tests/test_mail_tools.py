@@ -18,6 +18,7 @@ from agents.tools.base import ToolContext
 from agents.tools.mail import (
     MailNotConnectedError,
     _get_access_token,
+    _parse_date,
     detect_pending_email_actions_tool,
     read_email_thread_tool,
     search_emails_tool,
@@ -143,11 +144,66 @@ async def test_get_access_token_resolves_strictly_from_context_user_id(session_f
     assert token_b == "access-for-rt-b"
 
 
+# --- _parse_date -----------------------------------------------------------------
+def test_parse_date_attaches_utc_to_a_naive_date():
+    assert _parse_date("2026-01-15") == datetime(2026, 1, 15, tzinfo=timezone.utc)
+
+
+def test_parse_date_converts_an_offset_aware_datetime_to_utc_instead_of_discarding_it():
+    assert _parse_date("2026-01-15T10:00:00-03:00") == datetime(2026, 1, 15, 13, 0, tzinfo=timezone.utc)
+
+
+def test_parse_date_returns_none_for_garbage():
+    assert _parse_date("not-a-date") is None
+    assert _parse_date(None) is None
+
+
 @pytest.mark.asyncio
 async def test_get_access_token_raises_when_user_has_no_connected_account(session_factory, user_a):
     async with session_factory() as session:
         with pytest.raises(MailNotConnectedError):
             await _get_access_token(ToolContext(db=session, user=user_a))
+
+
+@pytest.mark.asyncio
+async def test_get_access_token_treats_a_revoked_refresh_token_as_not_connected(
+    session_factory, user_a, monkeypatch
+):
+    """A refresh token the user revoked in their Google account (or that
+    simply expired) must surface the same actionable "reconnect" message as
+    never having connected — not a raw provider error the model can't act
+    on."""
+    await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
+
+    class _RevokedProvider(FakeMailProvider):
+        async def refresh_access_token(self, refresh_token):
+            raise MailProviderError("invalid_grant: token has been revoked")
+
+    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: _RevokedProvider())
+
+    async with session_factory() as session:
+        with pytest.raises(MailNotConnectedError, match="reconectar"):
+            await _get_access_token(ToolContext(db=session, user=user_a))
+
+
+@pytest.mark.asyncio
+async def test_search_emails_tool_surfaces_a_revoked_token_as_a_clean_tool_error(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
+
+    class _RevokedProvider(FakeMailProvider):
+        async def refresh_access_token(self, refresh_token):
+            raise MailProviderError("invalid_grant")
+
+    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: _RevokedProvider())
+
+    async with session_factory() as session:
+        result = await search_emails_tool.run(ToolContext(db=session, user=user_a), {})
+
+    payload = json.loads(result)
+    assert "error" in payload
+    assert "reconectar" in payload["error"]
 
 
 # --- authorization: tools reject cleanly when nothing is connected -------------
