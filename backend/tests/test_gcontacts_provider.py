@@ -133,6 +133,60 @@ async def test_get_contact_returns_etag_needed_for_updates(provider):
 
 
 @pytest.mark.asyncio
+async def test_get_contact_rejects_a_resource_name_with_a_path_traversal_attempt(provider):
+    """`resource_name` comes straight from a tool argument
+    (`update_google_contact`/`delete_google_contact`) and legitimately
+    contains a literal '/' (People API format is "people/<id>"), so it
+    can't be `quote()`d like Gmail's thread_id or Drive's file_id without
+    breaking the normal case — validated against an allowlist instead. A
+    value like "people/c1/../otherContacts/x" must be rejected before ever
+    reaching a URL, not silently sent to a different People API path."""
+    client = MagicMock()
+    client.request = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client):
+        with pytest.raises(ContactsProviderError):
+            await provider.get_contact("access-token", "people/c1/../otherContacts/x")
+    client.request.assert_not_awaited()  # rejected before any request was made
+
+
+@pytest.mark.asyncio
+async def test_delete_contact_rejects_an_invalid_resource_name(provider):
+    client = MagicMock()
+    client.request = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client):
+        with pytest.raises(ContactsProviderError):
+            await provider.delete_contact("access-token", "people/c1?admin=true")
+    client.request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_contact_rejects_an_invalid_resource_name_before_fetching_the_etag(provider):
+    client = MagicMock()
+    client.request = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client):
+        with pytest.raises(ContactsProviderError):
+            await provider.update_contact("access-token", "otherContacts/../people/c1", ContactUpdate(given_name="X"))
+    client.request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_contact_accepts_the_special_people_me_resource_name(provider):
+    """`gcontacts/router.py::_resolve_account_label` relies on this exact
+    value (a Google-documented special resource, not user input) staying
+    valid after the allowlist was introduced."""
+    patcher, _ = _patch_client(request_result=[_mock_response(_person("people/me", "Dario"))])
+    with patcher:
+        contact = await provider.get_contact("access-token", "people/me")
+    assert contact.given_name == "Dario"
+
+
+@pytest.mark.asyncio
 async def test_create_contact_sends_expected_body(provider):
     response_body = _person("people/new", "Carlos", emails=["c@example.com"], phones=["123"])
     patcher, client = _patch_client(request_result=[_mock_response(response_body)])

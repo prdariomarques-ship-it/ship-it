@@ -525,6 +525,89 @@ async def test_indexed_file_upsert_recovers_from_concurrent_race(session_factory
     assert calls["count"] == 3
 
 
+@pytest.mark.asyncio
+async def test_concurrent_reindexing_of_the_same_file_does_not_orphan_embeddings(
+    session_factory, user_a, monkeypatch
+):
+    """Two overlapping reindex calls for the *same* file (e.g. `index_google_drive_folder`
+    and `update_google_drive_index` racing, or the same request retried) must not leave
+    one call's freshly-embedded chunks referenced by nothing — a permanent leak in the
+    Knowledge Store that never gets cleaned up on a later reindex (which only forgets
+    whatever the *current* bookkeeping row points to).
+
+    Simulated deterministically: task A completes a full reindex first; task B's own
+    staleness check is forced to see the *pre-A* snapshot (as it would if B started
+    before A finished), while every other read sees real, current data — exactly what
+    true concurrent execution would produce, without relying on asyncio scheduling
+    order.
+    """
+    from types import SimpleNamespace
+
+    await _connect(session_factory, user_a, "rt-a", "a")
+    old_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    new_time = old_time + timedelta(days=1)
+
+    async with session_factory() as session:
+        await GoogleDriveIndexedFileRepository(session).create(
+            user_id=user_a.id,
+            file_id="f-a",
+            file_name="doc.txt",
+            mime_type="text/plain",
+            modified_time=old_time,
+            embedding_ids=[100, 101],
+            indexed_at=old_time,
+        )
+    stale_snapshot = SimpleNamespace(modified_time=old_time, embedding_ids=[100, 101], indexed_at=old_time)
+
+    provider = FakeDriveProvider({"access-for-rt-a": [_file("a", "f-a", modified=new_time)]}, {"f-a": "novo conteúdo"})
+    monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
+
+    created_ids = {"n": 200}
+    forgotten: list[list[int]] = []
+
+    async def fake_remember(db, content, source):
+        created_ids["n"] += 1
+        return created_ids["n"]
+
+    async def fake_forget(db, embedding_ids):
+        forgotten.append(list(embedding_ids))
+
+    monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", fake_remember)
+    monkeypatch.setattr("agents.tools.gdrive.memory_manager.forget", fake_forget)
+
+    from agents.tools.gdrive import _index_one
+
+    async with session_factory() as session:
+        await _index_one(ToolContext(db=session, user=user_a), provider, "access-for-rt-a", "f-a")
+
+    original_get = GoogleDriveIndexedFileRepository.get_by_user_and_file
+    calls = {"n": 0}
+
+    async def controlled_get(self, uid, fid):
+        calls["n"] += 1
+        # Task B's own staleness check (the first read _index_one performs) sees
+        # the state from before task A ran — exactly what a true race produces.
+        if calls["n"] == 1:
+            return stale_snapshot
+        return await original_get(self, uid, fid)
+
+    monkeypatch.setattr(GoogleDriveIndexedFileRepository, "get_by_user_and_file", controlled_get)
+
+    async with session_factory() as session:
+        await _index_one(ToolContext(db=session, user=user_a), provider, "access-for-rt-a", "f-a")
+
+    async with session_factory() as session:
+        final = await GoogleDriveIndexedFileRepository(session).get_by_user_and_file(user_a.id, "f-a")
+
+    all_forgotten = {embedding_id for batch in forgotten for embedding_id in batch}
+    task_a_ids = {201}  # single chunk, task A's remember() call
+    orphaned = task_a_ids - set(final.embedding_ids) - all_forgotten
+    assert orphaned == set(), (
+        f"task A's embeddings {task_a_ids} are neither referenced by the final row "
+        f"({final.embedding_ids}) nor forgotten ({all_forgotten}) — permanently orphaned"
+    )
+
+
 # --- summarize ---------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_summarize_document_tool_calls_the_llm(session_factory, user_a, monkeypatch):

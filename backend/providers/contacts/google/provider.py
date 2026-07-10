@@ -3,6 +3,7 @@
 
 Docs: https://developers.google.com/people/api/rest
 """
+import re
 from urllib.parse import urlencode
 
 import httpx
@@ -29,6 +30,23 @@ _PERSON_FIELDS = "names,emailAddresses,phoneNumbers"
 # People API list pagination is not implemented — a personal instance's
 # address book fits comfortably in one page at this size; see docs/CONTACTS.md.
 _MAX_LIST_PAGE_SIZE = 1000
+
+# `resource_name` legitimately contains a literal "/" (People API resource
+# names are "people/<id>", not an opaque single-segment id like Gmail's
+# thread_id or Drive's file_id) — it can't be `urllib.parse.quote`d the way
+# those are without breaking the normal case. Validated against an allowlist
+# instead: a model-supplied value with a stray "/" or "?" would otherwise
+# change which People API path gets requested (e.g. "people/c1/../otherContacts/x").
+_RESOURCE_NAME_RE = re.compile(r"^people/[A-Za-z0-9_-]+$")
+
+
+class InvalidResourceNameError(ContactsProviderError):
+    pass
+
+
+def _validate_resource_name(resource_name: str) -> None:
+    if not _RESOURCE_NAME_RE.match(resource_name):
+        raise InvalidResourceNameError(f"Invalid contact resource_name: {resource_name!r}")
 
 
 class GoogleContactsProvider(ContactsProvider):
@@ -124,6 +142,7 @@ class GoogleContactsProvider(ContactsProvider):
         return contacts[: query.limit]
 
     async def get_contact(self, access_token: str, resource_name: str) -> Contact:
+        _validate_resource_name(resource_name)
         raw = await self._request(
             "GET", access_token, f"/{resource_name}", params={"personFields": _PERSON_FIELDS}
         )
@@ -169,6 +188,7 @@ class GoogleContactsProvider(ContactsProvider):
         return _parse_person(raw)
 
     async def delete_contact(self, access_token: str, resource_name: str) -> None:
+        _validate_resource_name(resource_name)
         await self._request("DELETE", access_token, f"/{resource_name}:deleteContact")
 
 

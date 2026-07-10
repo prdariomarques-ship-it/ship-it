@@ -156,6 +156,21 @@ async def test_get_thread_parses_all_messages_and_extracts_plain_text_body(provi
     assert thread.messages[0].body == "Olá, tudo bem?"
 
 
+@pytest.mark.asyncio
+async def test_get_thread_url_encodes_the_thread_id(provider):
+    """`thread_id` comes straight from a tool argument (`read_email_thread`/
+    `summarize_email_thread`) — a model-supplied value containing `/` must
+    never change which Gmail API path segment gets requested (path
+    traversal within Gmail's own API surface, e.g. `.../threads/x/../drafts/y`
+    resolving to a completely different resource than "threads")."""
+    patcher, client = _patch_client(get_result=[_mock_response({"messages": []})])
+    with patcher:
+        await provider.get_thread("access-token", "abc/../../drafts/xyz")
+    requested_url = client.get.call_args.args[0]
+    assert "/threads/abc%2F..%2F..%2Fdrafts%2Fxyz" in requested_url
+    assert "/threads/abc/../../drafts/xyz" not in requested_url
+
+
 def test_extract_body_prefers_text_plain_over_html_fallback():
     import base64
 

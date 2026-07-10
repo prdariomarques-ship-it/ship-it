@@ -163,6 +163,11 @@ async def _index_one(context: ToolContext, provider, access_token: str, file_id:
     if existing is not None and metadata.modified_time and _up_to_date(existing.modified_time, metadata.modified_time):
         return {"file_id": file_id, "file_name": metadata.name, "indexed": False, "reason": "sem alterações desde a última indexação"}
 
+    # Captured before the slow part (download + chunk + embed) so we can
+    # detect, right before writing, whether a concurrent call for this same
+    # file already finished in the meantime.
+    existing_indexed_at = existing.indexed_at if existing is not None else None
+
     text = await provider.read_file_text(access_token, file_id)
     chunks = _chunk_text(text)
     if not chunks:
@@ -176,6 +181,22 @@ async def _index_one(context: ToolContext, provider, access_token: str, file_id:
         content = _citation(metadata.name, metadata.modified_time, index, len(chunks)) + chunk
         embedding_id = await memory_manager.remember(context.db, content=content, source=KNOWLEDGE_SOURCE)
         embedding_ids.append(embedding_id)
+
+    # Race guard: if another concurrent call for this same file already
+    # committed a newer result while we were downloading/chunking/embedding,
+    # blindly overwriting it here would permanently orphan the chunks we
+    # just created — never referenced by the bookkeeping row, never cleaned
+    # up by a future reindex (which only forgets whatever the row currently
+    # points to). Self-clean instead of winning the write.
+    current = await repository.get_by_user_and_file(context.user.id, file_id)
+    if current is not None and current.indexed_at != existing_indexed_at:
+        await memory_manager.forget(context.db, embedding_ids)
+        return {
+            "file_id": file_id,
+            "file_name": metadata.name,
+            "indexed": False,
+            "reason": "atualizado por outra indexação concorrente",
+        }
 
     await repository.upsert_for_user_and_file(
         context.user.id,

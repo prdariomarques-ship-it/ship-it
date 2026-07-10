@@ -8,7 +8,7 @@ Docs: https://developers.google.com/gmail/api/reference/rest
 """
 import base64
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -126,7 +126,7 @@ class GmailProvider(MailProvider):
         for item in result.get("messages", []):
             detail = await self._get(
                 access_token,
-                f"/gmail/v1/users/me/messages/{item['id']}",
+                f"/gmail/v1/users/me/messages/{quote(item['id'], safe='')}",
                 params={"format": "metadata", "metadataHeaders": _METADATA_HEADERS},
             )
             summaries.append(_parse_message(detail, include_body=False))
@@ -134,7 +134,7 @@ class GmailProvider(MailProvider):
 
     async def get_thread(self, access_token: str, thread_id: str) -> EmailThread:
         result = await self._get(
-            access_token, f"/gmail/v1/users/me/threads/{thread_id}", params={"format": "full"}
+            access_token, f"/gmail/v1/users/me/threads/{quote(thread_id, safe='')}", params={"format": "full"}
         )
         messages = [_parse_message(raw, include_body=True) for raw in result.get("messages", [])]
         subject = messages[0].subject if messages else ""
