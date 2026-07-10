@@ -1,17 +1,17 @@
 # Dario OS v1.0 — Production Approval Report
 
 **Papel**: Comitê de Release (Principal Engineer) — auditoria final antes do congelamento de arquitetura.
-**Data**: 2026-07-10
-**Branch auditada**: `claude/dario-os-platform-gcg6i2` @ `6ba7e95`
-**Escopo**: auditoria e validação apenas — nenhuma funcionalidade nova, nenhuma mudança de arquitetura, nenhum módulo novo foi introduzido durante esta etapa.
+**Data**: 2026-07-10 (auditoria original) — atualizado em 2026-07-10 após a correção dos bloqueadores PROD-004 e PROD-005.
+**Branch auditada**: `claude/dario-os-platform-gcg6i2` (auditoria original @ `6ba7e95`; correções aplicadas em commit posterior — ver `PRODUCTION_BLOCKERS_RESOLVED.md`).
+**Escopo**: auditoria e validação; a correção dos dois bloqueadores foi feita como tarefa isolada e mínima (sem funcionalidade nova, sem mudança de arquitetura, sem módulo novo) — ver `PRODUCTION_BLOCKERS_RESOLVED.md` para o detalhe exato do que mudou.
 
 ---
 
 ## 1. Resumo Executivo
 
-O Dario OS chega a este gate com uma base técnica sólida: 231 testes automatizados passando, cobertura de 91%, arquitetura consolidada em torno de Agent Registry, Tool Registry, Event Bus, AI Orchestrator e Memory Manager, um Cognitive Pipeline funcional que classifica intenção/prioridade, planeja e valida antes de responder, e uma camada de Providers de WhatsApp totalmente desacoplada da tecnologia específica do gateway. A engenharia de confiabilidade (fila de jobs durável, retry exponencial, degradação graciosa de Redis/Qdrant/WhatsApp, recuperação de jobs travados, idempotência de mensagens) está madura e comprovada por teste, não apenas documentada.
+O Dario OS chega a este gate com uma base técnica sólida: 246 testes automatizados passando, cobertura de 92%, arquitetura consolidada em torno de Agent Registry, Tool Registry, Event Bus, AI Orchestrator e Memory Manager, um Cognitive Pipeline funcional que classifica intenção/prioridade, planeja e valida antes de responder, e uma camada de Providers de WhatsApp totalmente desacoplada da tecnologia específica do gateway. A engenharia de confiabilidade (fila de jobs durável, retry exponencial, degradação graciosa de Redis/Qdrant/WhatsApp, recuperação de jobs travados, idempotência de mensagens) está madura e comprovada por teste, não apenas documentada.
 
-Esta auditoria, no entanto, encontrou **dois bloqueadores de segurança reais e concretos** na camada de entrada/execução (webhook do WhatsApp e escopo das ferramentas de contato/envio) que existiam antes desta release mas nunca haviam sido avaliados sob uma lente adversarial rigorosa. Ambos são exploráveis com esforço mínimo e têm impacto direto sobre a privacidade dos contatos do usuário e a integridade do canal de WhatsApp. Por essa razão, apesar da qualidade de engenharia elevada em todos os outros critérios, **este release está REPROVADO para produção** até que os dois bloqueadores sejam corrigidos.
+A auditoria original encontrou **dois bloqueadores de segurança reais e concretos** na camada de entrada/execução (webhook do WhatsApp e escopo das ferramentas de contato/envio) que existiam antes desta release mas nunca haviam sido avaliados sob uma lente adversarial rigorosa. Ambos foram corrigidos em uma etapa dedicada e mínima, com testes específicos comprovando o fechamento de cada um (`PRODUCTION_BLOCKERS_RESOLVED.md`), sem introduzir nenhuma funcionalidade nova ou mudança arquitetural. Com as duas correções verificadas — suíte completa passando, isolamento técnico confirmado por teste, boot em produção agora recusado sem `WEBHOOK_SECRET` forte —, **este release está APROVADO para produção**.
 
 ## 2. Arquitetura Final
 
@@ -41,9 +41,9 @@ Diagramas completos (Cognitive Pipeline, fluxo do Planner, fluxo de memória, fl
 
 | Métrica | Valor |
 | --- | --- |
-| Linhas de código (backend, aprox.) | ~5.500 (medidas via coverage) |
-| Testes automatizados | 231 |
-| Cobertura de linha total | 91% |
+| Linhas de código (backend, aprox.) | ~5.660 (medidas via coverage) |
+| Testes automatizados | 246 (231 da auditoria original + 15 dos bloqueadores corrigidos) |
+| Cobertura de linha total | 92% |
 | Cobertura dos módulos do Cognitive Pipeline | 92–100% |
 | Lint (`ruff check .`) | limpo, zero violações |
 | Migrações Alembic | 3, sem drift de schema (`alembic check` limpo) |
@@ -56,7 +56,7 @@ Diagramas completos (Cognitive Pipeline, fluxo do Planner, fluxo de memória, fl
 
 ## 4. Cobertura de Testes
 
-Suíte completa executada nesta auditoria: **231 passed, 0 failed, 3 warnings** (`pytest -q`, ambiente limpo). Cobertura por área:
+Suíte completa executada após as correções: **246 passed, 0 failed, 3 warnings** (`pytest -q`, ambiente limpo) — 15 testes novos (`test_audit_fixes.py` para PROD-004, `test_tool_isolation.py` para PROD-005), nenhum teste pré-existente quebrado. Cobertura por área:
 
 | Área | Cobertura |
 | --- | --- |
@@ -76,7 +76,7 @@ Categorias de teste confirmadas presentes e passando: unitários (engines, plann
 **Verificado e aprovado**:
 - Hashing de senha PBKDF2-HMAC-SHA256 (390k iterações), salt aleatório por usuário, comparação `hmac.compare_digest`, timing equalizado para e-mail inexistente (`_DUMMY_HASH`).
 - JWT HS256 com expiração curta; refresh token opaco, armazenado como hash SHA-256, rotativo, reuso de token revogado rejeitado.
-- Boot em produção recusado com `JWT_SECRET` ausente/fraco/padrão (`main.py::_validate_production_settings`).
+- Boot em produção recusado com `JWT_SECRET` ausente/fraco/padrão **e agora também com `WEBHOOK_SECRET` ausente/fraco** (`main.py::_validate_production_settings` — ver PROD-004 abaixo).
 - RBAC (`require_admin`) genuinamente aplicado em `/api/jobs` e `/api/logs` (confirmado no código, não apenas na documentação).
 - CORS com allow-list explícita de origem (não `*`), apesar de `allow_credentials=True`.
 - Rate limiting por IP genuinamente conectado ao middleware HTTP global, com namespace separado reaproveitado para o freio de loop/flood do auto-reply do WhatsApp.
@@ -85,14 +85,13 @@ Categorias de teste confirmadas presentes e passando: unitários (engines, plann
 - Segredos não vazam em log (checado especificamente nos caminhos de auth e webhook); `.env` corretamente ignorado pelo git.
 - Deduplicação de webhook (idempotência por `external_id` + constraint única no banco) resiliente a corrida entre requisições concorrentes.
 - Frontend sem `dangerouslySetInnerHTML` e sem segredo embutido no bundle além da URL pública da API.
+- **Isolamento técnico de contato nas ferramentas de envio/consulta** (ver PROD-005 abaixo) — decisão de autorização inteiramente em código, não em prompt.
 
-**BLOQUEADOR 1 — Webhook do WhatsApp não exige autenticação por padrão, e isso não é impedido no boot de produção.**
-`backend/webhooks/router.py`, `backend/providers/whatsapp/base.py::verify_signature` (default no-op), `backend/utils/config.py::webhook_secret` (default `""`), `backend/main.py::_validate_production_settings` (verifica só `JWT_SECRET`, não `WEBHOOK_SECRET`).
-`WhatsAppProvider.verify_signature` só é implementado de verdade pelo provider `official` (HMAC-SHA256 da Meta), e mesmo assim só quando `OFFICIAL_APP_SECRET` está configurado. O provider padrão (`openwa`) e os demais (`baileys`, `evolution`) não têm nenhum esquema de assinatura — a única proteção possível para eles é o `WEBHOOK_SECRET` compartilhado, que é **opcional**. Diferente do `JWT_SECRET`, que impede o boot em produção se estiver fraco/ausente, o `WEBHOOK_SECRET` não tem nenhuma verificação equivalente. Uma instalação em produção que simplesmente não configurar essa variável (o valor padrão, e o `docker-compose.yml` não a exige com `:?`) fica com `/api/webhooks/whatsapp` completamente aberto a qualquer requisição da internet, que aciona o pipeline cognitivo completo com privilégios do usuário admin.
+**PROD-004 — CORRIGIDO. Webhook do WhatsApp agora exige `WEBHOOK_SECRET` forte em produção.**
+`backend/main.py::_validate_production_settings` recusa o boot em produção se `WEBHOOK_SECRET` estiver ausente ou tiver menos de 32 caracteres — mesmo padrão já aplicado a `JWT_SECRET`. `docker/docker-compose.yml` passou a exigir a variável (`${WEBHOOK_SECRET:?...}`, antes `${WEBHOOK_SECRET:-}`), e `scripts/setup.sh` passa a gerá-la automaticamente junto com `JWT_SECRET`. Coberto por 5 testes dedicados (`tests/test_audit_fixes.py`) cobrindo dev, prod, secret ausente, inválido e válido, mais 1 teste de não-regressão garantindo que a checagem de `JWT_SECRET` continua funcionando de forma independente. Validado operacionalmente: `docker compose config` confirmado recusando subir sem a variável. Detalhes completos: `PRODUCTION_BLOCKERS_RESOLVED.md`.
 
-**BLOQUEADOR 2 — Ferramentas de contato/envio não têm escopo técnico, só uma instrução de prompt.**
-`backend/agents/tools/communication.py::_send_whatsapp` (parâmetro `to: str` livre, sem checagem contra o contato da conversa atual), `_find_contact` (busca qualquer contato por nome/telefone, sem escopo), `backend/orchestrator/planning.py` (`needs_confirmation` é decidido pelo LLM, não uma barreira técnica).
-Combinado com o Bloqueador 1 (mas também explorável por um contato legítimo, via engenharia social ou prompt injection na própria mensagem de WhatsApp): qualquer pessoa que converse com o número de WhatsApp do sistema pode, através do agente, (a) consultar dados de outro contato (telefone, resumo, preferências, tags) por nome, e (b) fazer o sistema enviar mensagens de WhatsApp arbitrárias para qualquer número, sob a identidade do negócio. Não existe nenhuma barreira técnica que restrinja essas ferramentas ao contato que está conversando — a única defesa hoje é uma instrução no system prompt pedindo confirmação para ações "consequentes", o que não é uma fronteira de segurança confiável contra prompt injection.
+**PROD-005 — CORRIGIDO. Ferramentas de contato/envio agora têm isolamento técnico, não dependem de prompt.**
+`ToolContext` (`backend/agents/tools/base.py`) ganhou o campo `contact_id`, preenchido pela aplicação (`BaseAgent.run`) a partir do estado da conversa — nunca pelo LLM. `_send_whatsapp` (`backend/agents/tools/communication.py`) agora só permite enviar para o telefone do contato da conversa atual quando há um contato associado, ou para um contato já conhecido pelo backend quando não há (nunca um número inventado pelo modelo). `_find_contact` só resolve para o contato da conversa atual quando há um contato associado; sem conversa associada, o comportamento de busca aberta (uso administrativo) é preservado. Coberto por 10 testes dedicados (`tests/test_tool_isolation.py`) simulando tentativas de acesso indevido (enviar/consultar outro contato, tentar burlar via formatação de telefone, número desconhecido sem escopo) — todas as tentativas negadas, nenhum job de envio enfileirado nas tentativas bloqueadas. Detalhes completos: `PRODUCTION_BLOCKERS_RESOLVED.md`.
 
 **Riscos documentados, não classificados como bloqueadores** (ver §11): auto-registro aberto em `/api/auth/register` (afeta só o dashboard, não o canal de WhatsApp); ausência de detecção de reuso de refresh token roubado; tokens de acesso em `localStorage` no frontend (sem vetor de XSS identificado hoje); senha padrão do Postgres fraca (mitigado por não ser exposta externamente); `next@14.2.21` com CVEs conhecidas (sem vetor de exploração identificado nesta aplicação, sem `middleware.ts`).
 
@@ -120,15 +119,15 @@ Nenhum teste de carga formal (k6, locust) foi executado nesta auditoria — não
 | --- | --- |
 | Build do backend (`pip install -r requirements.txt`) | ✅ verificado (dependências resolvidas, testes rodam) |
 | Lint (`ruff check .`) | ✅ limpo |
-| Testes (`pytest -q`) | ✅ 231 passed |
+| Testes (`pytest -q`) | ✅ 246 passed |
 | Migrações (`alembic upgrade head` / `downgrade base` / roundtrip) | ✅ verificado nesta auditoria |
 | Drift de schema (`alembic check`) | ✅ nenhuma operação pendente detectada |
 | Build do frontend (`npm run build`) | ⚠️ não executado nesta auditoria (sem acesso de rede ao registry npm completo no ambiente de sandbox para todas as dependências transitivas do Next.js); `next build` já roda no CI a cada PR |
-| `docker compose config` (sintaxe/interpolação) | ✅ válido, com `JWT_SECRET` obrigatório confirmado (`:?`) |
+| `docker compose config` (sintaxe/interpolação) | ✅ válido, com `JWT_SECRET` **e `WEBHOOK_SECRET`** obrigatórios confirmados (`:?`) |
 | `docker build` das imagens | ❌ não executado (registry do Docker Hub bloqueado neste sandbox — ver §4) |
 | `docker compose up` (inicialização completa) | ❌ não executado (mesma limitação) |
 | Health checks (`/health`, `/health/ready`) | ✅ lógica verificada por leitura direta do código e por teste (`test_observability.py`) — Postgres obrigatório, Redis/Qdrant/WhatsApp degradam sem derrubar |
-| `WEBHOOK_SECRET` obrigatório em produção | ❌ **não implementado** — Bloqueador 1 |
+| `WEBHOOK_SECRET` obrigatório em produção | ✅ **implementado (PROD-004)** — boot recusado sem um valor forte; `scripts/setup.sh` gera automaticamente |
 | Variáveis de ambiente documentadas em `.env.example` | ✅ presentes (exceto `LLM_FALLBACK_PROVIDER`, opcional, default seguro) |
 | CI (lint + testes + migrações + build frontend) | ✅ configurado e cobrindo o essencial; não constrói imagens Docker |
 
@@ -159,43 +158,42 @@ Nenhum teste de carga formal (k6, locust) foi executado nesta auditoria — não
 
 ## 11. Limitações Conhecidas
 
-1. **Bloqueador 1 e Bloqueador 2** (§5) — impedem a aprovação desta build.
-2. **Auto-registro aberto** (`/api/auth/register` sem autenticação) — qualquer pessoa pode criar uma conta de dashboard com papel `user`. Não afeta o canal de WhatsApp diretamente, mas amplia a superfície de quem pode chamar `/api/chat`/`/api/agents/*/run` com acesso a ferramentas.
-3. **`next@14.2.21`** tem CVEs conhecidas (incluindo uma classificada como crítica pelo advisory do Next.js); nenhum vetor de exploração foi identificado nesta aplicação especificamente (sem `middleware.ts`), mas é dívida de dependência a resolver.
-4. **Cache/rate-limit em memória não é compartilhado entre réplicas** do backend — só relevante se o backend rodar com múltiplas instâncias e Redis cair ao mesmo tempo.
-5. **Sem detecção de reuso de refresh token roubado** — reuso é rejeitado, mas não aciona revogação das demais sessões ativas do usuário.
-6. **Backup não foi testado ponta a ponta** (dump + restore) nesta auditoria.
-7. **Sem teste de carga formal** — capacidade sob concorrência real não foi medida.
-8. **Build/execução Docker não verificados nesta auditoria** — limitação do ambiente de sandbox (sem acesso ao Docker Hub), não do projeto; recomenda-se verificação manual antes do deploy.
-9. **Sem type-checking estático no backend** (nenhum mypy/pyright configurado) — mitigado por Pydantic em runtime e 91% de cobertura de teste, mas é uma lacuna de processo.
-10. **Composição de resposta multi-etapa é concatenação simples**, não uma síntese fluida via LLM (`docs/fase4.2-relatorio.md` §8).
-11. **`needs_confirmation` não tem mecanismo de retomada** — o pipeline pergunta e para, mas a próxima mensagem do contato não retoma automaticamente o plano pausado.
+1. **Auto-registro aberto** (`/api/auth/register` sem autenticação) — qualquer pessoa pode criar uma conta de dashboard com papel `user`. Não afeta o canal de WhatsApp diretamente, mas amplia a superfície de quem pode chamar `/api/chat`/`/api/agents/*/run` com acesso a ferramentas.
+2. **`next@14.2.21`** tem CVEs conhecidas (incluindo uma classificada como crítica pelo advisory do Next.js); nenhum vetor de exploração foi identificado nesta aplicação especificamente (sem `middleware.ts`), mas é dívida de dependência a resolver.
+3. **Cache/rate-limit em memória não é compartilhado entre réplicas** do backend — só relevante se o backend rodar com múltiplas instâncias e Redis cair ao mesmo tempo.
+4. **Sem detecção de reuso de refresh token roubado** — reuso é rejeitado, mas não aciona revogação das demais sessões ativas do usuário.
+5. **Backup não foi testado ponta a ponta** (dump + restore) nesta auditoria.
+6. **Sem teste de carga formal** — capacidade sob concorrência real não foi medida.
+7. **Build/execução Docker não verificados nesta auditoria** — limitação do ambiente de sandbox (sem acesso ao Docker Hub), não do projeto; recomenda-se verificação manual antes do deploy.
+8. **Sem type-checking estático no backend** (nenhum mypy/pyright configurado) — mitigado por Pydantic em runtime e 92% de cobertura de teste, mas é uma lacuna de processo.
+9. **Composição de resposta multi-etapa é concatenação simples**, não uma síntese fluida via LLM (`docs/fase4.2-relatorio.md` §8).
+10. **`needs_confirmation` não tem mecanismo de retomada** — o pipeline pergunta e para, mas a próxima mensagem do contato não retoma automaticamente o plano pausado.
+11. **Isolamento de contato (PROD-005) não cobre `search_memory`/`store_memory`/`update_contact_preference`** — apenas `send_whatsapp_message` e `find_contact` foram escopadas, por serem as duas ferramentas explicitamente identificadas na auditoria como capazes de vazar dados para fora da conversa atual ou agir sobre um destinatário arbitrário; as demais ferramentas de memória recebem `contact_id` explicitamente como argumento (já sob controle de quem monta o prompt/chamada), não como um alvo livre escolhido pelo modelo.
 
 ## 12. Roadmap da versão 1.1
 
-Com a arquitetura congelada a partir deste gate, a v1.1 deve priorizar, nesta ordem:
+Com a arquitetura congelada a partir deste gate (PROD-004 e PROD-005 já corrigidos), a v1.1 deve priorizar, nesta ordem:
 
-1. **Corrigir os dois bloqueadores de segurança** (§5) — pré-requisito para qualquer deploy real.
-2. Fechar o gap de auto-registro aberto (exigir convite/aprovação de admin, ou desativar por padrão).
-3. Atualizar `next` para uma versão sem as CVEs conhecidas.
-4. Testar backup/restore ponta a ponta e documentar a política de retenção.
-5. Adicionar `docker build`/`docker compose up` como etapa de CI (hoje não existe).
-6. Detecção de reuso de refresh token com revogação de sessão.
-7. Mecanismo de retomada de plano pendente de confirmação no Cognitive Pipeline.
-8. Avaliar combinar intenção+prioridade+planejamento em uma única chamada LLM, se o volume de produção justificar.
-9. Pipeline de ingestão de documentos para popular `knowledge_search` com conteúdo real.
-10. Teste de carga formal para estabelecer limites de capacidade conhecidos.
+1. Fechar o gap de auto-registro aberto (exigir convite/aprovação de admin, ou desativar por padrão).
+2. Atualizar `next` para uma versão sem as CVEs conhecidas.
+3. Testar backup/restore ponta a ponta e documentar a política de retenção.
+4. Adicionar `docker build`/`docker compose up` como etapa de CI (hoje não existe).
+5. Detecção de reuso de refresh token com revogação de sessão.
+6. Mecanismo de retomada de plano pendente de confirmação no Cognitive Pipeline.
+7. Avaliar combinar intenção+prioridade+planejamento em uma única chamada LLM, se o volume de produção justificar.
+8. Pipeline de ingestão de documentos para popular `knowledge_search` com conteúdo real.
+9. Teste de carga formal para estabelecer limites de capacidade conhecidos.
 
 ---
 
 ## DECISÃO FINAL
 
-### STATUS: REPROVADO PARA PRODUÇÃO
+### STATUS: APROVADO PARA PRODUÇÃO
 
-**Bloqueadores restantes** (exclusivamente estes dois; nenhuma melhoria opcional está listada como bloqueador):
+Os dois bloqueadores identificados na auditoria original foram corrigidos e verificados:
 
-1. **`WEBHOOK_SECRET` não é obrigatório em produção**, ao contrário de `JWT_SECRET` — o webhook `/api/webhooks/whatsapp` fica aberto a requisições não autenticadas quando essa variável não é configurada, e nada impede o boot de produção nesse estado. Isso permite que qualquer requisição externa não autenticada acione o pipeline cognitivo completo com privilégios do usuário admin.
+1. **PROD-004 — CORRIGIDO.** `WEBHOOK_SECRET` agora é obrigatório em produção, com o mesmo padrão fail-closed já aplicado a `JWT_SECRET` (`main.py::_validate_production_settings`), reforçado em `docker-compose.yml` (`:?`) e auto-provisionado por `scripts/setup.sh`. Coberto por 5 testes dedicados cobrindo exatamente os cenários exigidos (dev, prod, ausente, inválido, válido) mais 1 teste de não-regressão.
 
-2. **As ferramentas `send_whatsapp_message` e `find_contact` não têm escopo técnico** — nada impede que uma mensagem de um contato (legítimo ou malicioso) faça o agente enviar mensagens de WhatsApp para números arbitrários ou consultar dados de outros contatos. A única proteção existente é uma instrução de prompt (`needs_confirmation`), que não constitui uma fronteira de segurança confiável.
+2. **PROD-005 — CORRIGIDO.** `send_whatsapp_message` e `find_contact` agora aplicam isolamento técnico via `ToolContext.contact_id` — um valor definido pela aplicação a partir do estado real da conversa, nunca escolhido pelo LLM. Uma conversa só pode agir sobre o seu próprio contato; sem uma conversa associada, o envio exige um contato já conhecido pelo backend. Coberto por 10 testes dedicados simulando tentativas de acesso indevido, todas corretamente negadas.
 
-Ambos os bloqueadores são reais, confirmados por leitura direta do código-fonte (não apenas relatados por ferramenta automatizada), e exploráveis com esforço mínimo. Nenhum outro item desta auditoria — arquitetura, performance, escalabilidade, confiabilidade, cobertura de testes, qualidade de documentação — impede a aprovação; todos os demais critérios foram considerados satisfatórios para v1.0.
+Suíte completa (246 testes), lint e migrações verificados sem regressão após as correções — ver `PRODUCTION_BLOCKERS_RESOLVED.md` para o detalhamento exato do que mudou e da validação executada. Nenhum outro item desta auditoria — arquitetura, performance, escalabilidade, confiabilidade, cobertura de testes, qualidade de documentação — impede a aprovação. As limitações remanescentes (§11) são riscos aceitos ou itens de roadmap (§12), não bloqueadores.

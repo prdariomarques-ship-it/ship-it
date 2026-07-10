@@ -23,11 +23,48 @@ def test_production_requires_strong_jwt_secret():
     with pytest.raises(RuntimeError):
         _validate_production_settings(short)
 
-    strong = SimpleNamespace(environment="production", jwt_secret="x" * 64)
+    strong = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="y" * 32)
     _validate_production_settings(strong)  # must not raise
 
     dev = SimpleNamespace(environment="development", jwt_secret="change-me-in-production")
     _validate_production_settings(dev)  # dev keeps working with the default
+
+
+# --- PROD-004: production requires a strong WEBHOOK_SECRET ------------------
+def test_development_does_not_require_a_webhook_secret():
+    """Dev environment: no WEBHOOK_SECRET at all must not block boot."""
+    dev = SimpleNamespace(environment="development", jwt_secret="x" * 64, webhook_secret="")
+    _validate_production_settings(dev)  # must not raise
+
+
+def test_production_rejects_missing_webhook_secret():
+    """Prod environment, secret ausente."""
+    missing = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="")
+    with pytest.raises(RuntimeError, match="WEBHOOK_SECRET"):
+        _validate_production_settings(missing)
+
+
+def test_production_rejects_weak_webhook_secret():
+    """Prod environment, secret inválido (curto demais)."""
+    weak = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="short")
+    with pytest.raises(RuntimeError, match="WEBHOOK_SECRET"):
+        _validate_production_settings(weak)
+
+
+def test_production_accepts_strong_webhook_secret():
+    """Prod environment, secret válido."""
+    strong = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="z" * 32)
+    _validate_production_settings(strong)  # must not raise
+
+
+def test_production_still_checks_jwt_secret_before_webhook_secret():
+    """A weak JWT_SECRET is caught even with a strong WEBHOOK_SECRET present —
+    the two checks are independent, neither masks the other."""
+    both_set_but_jwt_weak = SimpleNamespace(
+        environment="production", jwt_secret="short", webhook_secret="z" * 32
+    )
+    with pytest.raises(RuntimeError, match="JWT_SECRET"):
+        _validate_production_settings(both_set_but_jwt_weak)
 
 
 # --- Webhook authentication --------------------------------------------------

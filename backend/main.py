@@ -62,12 +62,25 @@ async def lifespan(app: FastAPI):
 
 
 def _validate_production_settings(settings) -> None:
-    """Refuse to boot in production with the default/weak JWT secret."""
-    if settings.environment == "production" and (
-        settings.jwt_secret in ("", "change-me-in-production") or len(settings.jwt_secret) < 32
-    ):
+    """Refuse to boot in production with a missing/weak JWT secret or webhook secret.
+
+    WEBHOOK_SECRET is the only authentication most WhatsApp providers have
+    (OpenWA/Baileys/Evolution have no signature scheme of their own — see
+    `providers/whatsapp/base.py::verify_signature`), so an unset/weak value
+    here leaves /api/webhooks/whatsapp open to unauthenticated requests that
+    trigger the full Cognitive Pipeline. Same bar as JWT_SECRET (>= 32 chars),
+    same fail-closed behavior.
+    """
+    if settings.environment != "production":
+        return
+    if settings.jwt_secret in ("", "change-me-in-production") or len(settings.jwt_secret) < 32:
         raise RuntimeError(
             "JWT_SECRET must be set to a strong value (>= 32 chars) in production; "
+            "generate one with: openssl rand -hex 32"
+        )
+    if not settings.webhook_secret or len(settings.webhook_secret) < 32:
+        raise RuntimeError(
+            "WEBHOOK_SECRET must be set to a strong value (>= 32 chars) in production; "
             "generate one with: openssl rand -hex 32"
         )
 

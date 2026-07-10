@@ -3,7 +3,7 @@
 Data do gate final: 2026-07-10
 Branch: `claude/dario-os-platform-gcg6i2`
 
-Esta é a build candidata a v1.0, cobrindo tudo entregue desde a fundação da plataforma até o Cognitive Pipeline. Ver `PRODUCTION_APPROVAL.md` para o veredito formal da auditoria final — **este release está atualmente REPROVADO para produção**; as notas abaixo descrevem o que a versão contém, não uma declaração de prontidão.
+Esta é a build v1.0, cobrindo tudo entregue desde a fundação da plataforma até o Cognitive Pipeline. A auditoria final encontrou dois bloqueadores de segurança (PROD-004, PROD-005), ambos corrigidos e verificados em seguida — ver `PRODUCTION_APPROVAL.md` para o veredito formal (**STATUS: APROVADO PARA PRODUÇÃO**) e `PRODUCTION_BLOCKERS_RESOLVED.md` para o detalhamento das correções.
 
 ## Visão geral
 
@@ -50,8 +50,8 @@ Dario OS é um sistema operacional pessoal baseado em IA: centraliza WhatsApp, a
 
 | Métrica | Valor |
 | --- | --- |
-| Testes automatizados | 231 (100% passando) |
-| Cobertura de linha | 91% |
+| Testes automatizados | 246 (100% passando) |
+| Cobertura de linha | 92% |
 | Lint | limpo (`ruff check .`) |
 | Migrações Alembic | 3, roundtrip verificado, sem drift de schema (`alembic check`) |
 | Agentes | 5 |
@@ -75,9 +75,14 @@ Dario OS é um sistema operacional pessoal baseado em IA: centraliza WhatsApp, a
 
 Ver `README.md` para configuração completa de variáveis de ambiente, e `docs/architecture.md` para o desenho arquitetural detalhado.
 
-## Achados da auditoria final (bloqueadores)
+## Bloqueadores de segurança encontrados e corrigidos
 
-A auditoria de release encontrou dois bloqueadores de segurança reais que impedem a aprovação desta build para produção — ambos pré-existentes na arquitetura de Providers/ferramentas, não introduzidos por esta release, mas nunca antes formalmente auditados sob essa ótica. Ver a seção "Critérios de Segurança" e "Limitações Conhecidas" em `PRODUCTION_APPROVAL.md` para os detalhes técnicos completos e o que precisa ser corrigido antes do próximo gate.
+A auditoria de release encontrou dois bloqueadores de segurança reais — ambos pré-existentes na arquitetura de Providers/ferramentas, não introduzidos por esta release, mas nunca antes formalmente auditados sob essa ótica. Ambos foram corrigidos em uma etapa dedicada, mínima (sem funcionalidade nova, sem mudança de arquitetura) e coberta por 15 testes específicos:
+
+- **PROD-004**: `WEBHOOK_SECRET` agora é obrigatório em produção (mesmo padrão fail-closed do `JWT_SECRET`).
+- **PROD-005**: `send_whatsapp_message`/`find_contact` agora têm isolamento técnico de contato, decidido em código, nunca por instrução de prompt.
+
+Detalhes completos: `PRODUCTION_BLOCKERS_RESOLVED.md`. Veredito atualizado: `PRODUCTION_APPROVAL.md` — **STATUS: APROVADO PARA PRODUÇÃO**.
 
 ## Créditos
 

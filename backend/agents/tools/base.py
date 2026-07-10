@@ -16,10 +16,19 @@ from providers.llm.base import ToolSpec
 
 @dataclass
 class ToolContext:
-    """Everything a tool handler may need, injected by the executor."""
+    """Everything a tool handler may need, injected by the executor.
+
+    `contact_id` is the contact the current conversation is scoped to (set by
+    `BaseAgent.run`, sourced from application code — the webhook/DB layer,
+    never from the LLM). Tools that reach across contacts (sending a WhatsApp
+    message, looking up a contact) use it to enforce that a conversation can
+    only ever act on its own contact; `None` means the call isn't bound to a
+    specific conversation (e.g. an admin using the dashboard directly).
+    """
 
     db: AsyncSession
     user: User
+    contact_id: int | None = None
 
 
 ToolHandler = Callable[..., Awaitable[str]]

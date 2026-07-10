@@ -64,6 +64,6 @@ class BaseAgent(ABC):
 
         messages = self.planner.build_messages(self.system_prompt, message, memories, history=history)
         executor = AgentExecutor(get_llm_provider(), self.tools)
-        result = await executor.run(messages, ToolContext(db=db, user=user))
+        result = await executor.run(messages, ToolContext(db=db, user=user, contact_id=contact_id))
         result.memories_used = len(memories)
         return result

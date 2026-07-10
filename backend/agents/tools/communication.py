@@ -1,7 +1,15 @@
 """Tools over contacts, memory and WhatsApp sending."""
+import json
+
 from agents.tools.base import Tool, ToolContext, ok
 from memory.manager import memory_manager
 from repositories.contact import ContactRepository
+
+
+def _not_authorized(message: str) -> str:
+    """Denial envelope for the cross-contact isolation checks below — a
+    technical decision made in code, never left to the LLM's judgment."""
+    return json.dumps({"error": message})
 
 
 async def _find_contact(context: ToolContext, query: str) -> str:
@@ -10,6 +18,13 @@ async def _find_contact(context: ToolContext, query: str) -> str:
     if contact is None:
         matches = await repository.search_by_name(query, limit=1)
         contact = matches[0] if matches else None
+
+    # PROD-005: a conversation scoped to one contact can only ever look up
+    # that same contact — never another contact's PII, regardless of what
+    # the model asks for.
+    if context.contact_id is not None and (contact is None or contact.id != context.contact_id):
+        return _not_authorized("not authorized to look up a contact other than the current conversation")
+
     if contact is None:
         return ok(found=False)
     return ok(
@@ -50,6 +65,24 @@ async def _update_contact_preference(
 
 
 async def _send_whatsapp(context: ToolContext, to: str, message: str) -> str:
+    # PROD-005: technical isolation, enforced here (not by prompt instructions).
+    # A conversation scoped to a contact can only message that same contact;
+    # otherwise (no conversation scope — e.g. an admin using the dashboard
+    # directly) the recipient must already be a known contact, so the model
+    # can never invent an arbitrary destination number out of thin air.
+    from providers.whatsapp.base import normalize_phone
+
+    target = normalize_phone(to)
+    repository = ContactRepository(context.db)
+    if context.contact_id is not None:
+        contact = await repository.get(context.contact_id)
+        if contact is None or not contact.phone or normalize_phone(contact.phone) != target:
+            return _not_authorized("not authorized to message a recipient other than the current conversation")
+    else:
+        contact = await repository.get_by_phone(target)
+        if contact is None:
+            return _not_authorized("recipient is not a known contact")
+
     # Deliver through the job queue so sends survive provider hiccups (retry).
     from jobs.service import JobService
 

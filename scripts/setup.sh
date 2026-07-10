@@ -7,8 +7,10 @@ cd "$(dirname "$0")/../docker"
 if [ ! -f .env ]; then
   cp .env.example .env
   JWT_SECRET=$(openssl rand -hex 32)
+  WEBHOOK_SECRET=$(openssl rand -hex 32)
   sed -i "s/^JWT_SECRET=.*/JWT_SECRET=${JWT_SECRET}/" .env
-  echo "docker/.env criado com JWT_SECRET gerado automaticamente."
+  sed -i "s/^WEBHOOK_SECRET=.*/WEBHOOK_SECRET=${WEBHOOK_SECRET}/" .env
+  echo "docker/.env criado com JWT_SECRET e WEBHOOK_SECRET gerados automaticamente."
   echo "Edite docker/.env para configurar OPENAI_API_KEY, senha do banco e domínio."
 fi
 
