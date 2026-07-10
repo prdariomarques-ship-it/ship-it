@@ -118,6 +118,20 @@ class Settings(BaseSettings):
     # Event Bus (best-effort Redis fan-out; in-process delivery never depends on it)
     events_channel: str = "darioos:events"
 
+    # Mail (Gmail) — a domain independent of WhatsApp/Loja/Igreja/Investimentos/Agenda.
+    # Optional: unset means the Gmail integration simply isn't available (no boot
+    # failure) — only /api/mail/connect requires all three to be configured.
+    mail_provider: str = "gmail"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""  # e.g. https://<domain>/api/mail/oauth/callback
+    # Symmetric key (Fernet, urlsafe-base64, 32 bytes) encrypting refresh tokens
+    # at rest — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    email_token_encryption_key: str = ""
+    gmail_api_base_url: str = "https://gmail.googleapis.com"
+    google_oauth_base_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    google_token_url: str = "https://oauth2.googleapis.com/token"
+
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
 

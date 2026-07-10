@@ -90,6 +90,7 @@ Isso é auditabilidade real, não hipotética: `GET /api/chat` e `/api/agents/{n
 | `agents/tools/productivity.py` | `create_task`, `list_tasks`, `complete_task`, `create_event`, `list_events`, `create_note` |
 | `agents/tools/communication.py` | `send_whatsapp_message`, `find_contact`, `search_memory`, `store_memory`, `update_contact_preference` |
 | `agents/tools/domain.py` | `list_church_members`, `add_prayer_request`, `list_store_customers`, `add_store_customer` |
+| `agents/tools/mail.py` | `search_emails`, `read_email_thread`, `summarize_email_thread`, `detect_pending_email_actions` — registradas **só** em `assistant_agent.py`; ver `docs/EMAIL.md` |
 
 ## Adicionando uma ferramenta nova
 

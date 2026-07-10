@@ -77,9 +77,11 @@ backend/
   chat/           # Adaptação HTTP ↔ AI Orchestrator
   memory/         # Memory Manager (fachada) + memória por contato (Qdrant)
   jobs/           # Fila durável: agendamento, retry exponencial, eventos, worker
+  mail/           # Rotas OAuth do Gmail: connect/callback/status/disconnect (admin-only)
   providers/
     llm/          # openai / anthropic / glm / gemini / ollama  (contrato LLMProvider)
     whatsapp/     # openwa / baileys / evolution / official  (contrato WhatsAppProvider)
+    mail/         # gmail  (contrato MailProvider) — somente leitura, ver docs/EMAIL.md
   repositories/   # Repository pattern (genérico + especializados)
   observability/  # health/readiness, métricas Prometheus
   services/       # cache Redis, rate limit, auditoria
@@ -87,10 +89,11 @@ backend/
   workflows/      # Integração n8n
   database/       # Engine async + base declarativa
   models/         # users, contacts, messages, church_members, store_customers,
-                  # notes, calendar, tasks, embeddings, logs, refresh_tokens, jobs
+                  # notes, calendar, tasks, embeddings, logs, refresh_tokens, jobs,
+                  # email_accounts
   utils/          # Settings (config.py) + logging estruturado (logging.py)
   alembic/        # Migrações
-  tests/          # 231 testes pytest
+  tests/          # 297 testes pytest
 ```
 
 ## Fluxo de execução (WhatsApp) — ponta a ponta, automático
@@ -172,7 +175,7 @@ A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo 
 | `church` | Oração, escalas, cultos, avisos, versículos | membros, pedidos de oração, eventos, memória |
 | `store` | Produtos, pedidos, clientes, orçamentos | clientes, contatos, memória, preferências |
 | `content` | Conteúdo para redes sociais | notas, memória |
-| `assistant` | Atende o WhatsApp; acesso a todos os domínios | todas + envio de WhatsApp + preferências |
+| `assistant` | Atende o WhatsApp; acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail, somente leitura) |
 
 Cada agente possui **system prompt**, **tools** (function calling via Tool Registry), **memory** (Memory Manager — busca semântica injetada no contexto pelo planner), **planner** (monta o contexto) e **executor** (loop plan → act → observe com orçamento de iterações).
 
@@ -205,6 +208,7 @@ Ferramentas seguem o mesmo espírito: declare um `Tool(...)` em `agents/tools/`,
 
 - **LLM**: crie `providers/llm/<nome>/provider.py` implementando `LLMProvider` (`chat` com tools + `embed`), registre no dicionário de `providers/llm/factory.py` e selecione com `LLM_PROVIDER=<nome>`. Reaproveite `OpenAIProvider` por herança quando o vendor for compatível com a API da OpenAI (caso de GLM e Ollama).
 - **WhatsApp**: crie `providers/whatsapp/<nome>/provider.py` implementando `WhatsAppProvider` (5 métodos de envio + `parse_webhook` normalizando para `InboundMessage`), registre em `providers/whatsapp/factory.py` e selecione com `WHATSAPP_PROVIDER=<nome>`. Guia completo (contrato, exemplo mínimo, checklist de testes de compatibilidade): [`backend/providers/whatsapp/README.md`](backend/providers/whatsapp/README.md).
+- **E-mail**: crie `providers/mail/<nome>/provider.py` implementando `MailProvider` (OAuth + `search`/`get_thread`), registre em `providers/mail/factory.py` e selecione com `MAIL_PROVIDER=<nome>`. Hoje só `gmail` existe. Guia completo: [`docs/EMAIL.md`](docs/EMAIL.md).
 
 Nenhuma outra parte da aplicação muda — rotas, agentes e jobs dependem apenas dos contratos.
 
@@ -221,6 +225,12 @@ Nenhuma outra parte da aplicação muda — rotas, agentes e jobs dependem apena
 Trocar de modelo é só configuração: `LLM_PROVIDER=gemini` (ou `ollama`, `glm`, `anthropic`) — nenhum código muda.
 
 **Troca automática em caso de falha** (Fase 4.2): `LLM_FALLBACK_PROVIDER=<nome>` faz o `AgentExecutor` tentar esse provedor uma vez sempre que `LLM_PROVIDER` levantar uma exceção em vez de simplesmente degradar (ex.: rede fora do ar, chave expirada) — vazio por padrão, comportamento idêntico ao de antes da Fase 4.2.
+
+## E-mail (Gmail)
+
+Domínio novo e isolado (Sprint 1), somente leitura: buscar, ler, resumir e detectar pendências em e-mails do Gmail. Enviar, responder, mover, excluir e re-rotular estão fora do escopo. Só o agente `assistant` tem acesso direto às ferramentas de e-mail — qualquer outro agente que precise desse contexto passa pelo Cognitive Planner, que roteia a etapa para `assistant`, em vez de ganhar acesso próprio ao domínio.
+
+Configuração (`MAIL_PROVIDER`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `EMAIL_TOKEN_ENCRYPTION_KEY`) e o passo a passo completo de setup no Google Cloud Console: **[`docs/EMAIL.md`](docs/EMAIL.md)**.
 
 ## Autenticação
 
@@ -268,7 +278,7 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (231 testes; cobertura ~91%)
+# Testes (297 testes; cobertura ~92%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
 
@@ -289,11 +299,13 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - Mensagens duplicadas (redelivery de webhook) são detectadas e não reprocessadas; constraint única no banco cobre a corrida entre requisições concorrentes
 - Loop/flood breaker: limite de respostas automáticas por contato por minuto
 - `WHATSAPP_REQUEST_MAX_ATTEMPTS`/`WHATSAPP_REQUEST_BACKOFF_SECONDS`: retry com backoff exponencial para toda chamada HTTP de um Provider de WhatsApp ao seu gateway
-- Em produção o backend se recusa a subir com `JWT_SECRET` fraca/padrão
+- Em produção o backend se recusa a subir com `JWT_SECRET`/`WEBHOOK_SECRET` fraca/ausente
 - HTTPS automático + headers de segurança via Caddy
 - Rate limit por IP (Redis, com fallback em memória; probes de health/metrics isentos)
 - Senhas com PBKDF2-SHA256 salteado, verificadas fora do event loop e em tempo constante
 - Backup diário: agende `scripts/backup.sh` no cron (`0 3 * * *`)
+- Refresh token do Gmail cifrado em repouso (Fernet, `EMAIL_TOKEN_ENCRYPTION_KEY`); nenhuma credencial de terceiro é persistida em texto puro
+- Isolamento técnico entre usuários/contatos decidido em código, nunca só pelo prompt do LLM (WhatsApp: PROD-005; e-mail: Sprint 1) — ver [`SECURITY.md`](SECURITY.md) para o modelo de segurança completo
 
 ## Documentação
 
@@ -303,5 +315,7 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - [docs/TOOLS.md](docs/TOOLS.md) — ferramentas: contrato, Tool Registry, fluxo de seleção/execução, catálogo
 - [docs/MEMORY.md](docs/MEMORY.md) — os seis tipos de memória, ciclo de vida de uma mensagem, aprendizado
 - [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — fila de jobs, hand-off n8n, o Cognitive Pipeline como workflow do WhatsApp
+- [docs/EMAIL.md](docs/EMAIL.md) — integração Gmail: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
+- [SECURITY.md](SECURITY.md) — modelo de segurança consolidado (autenticação, isolamento, segredos, checklist de produção)
 - [docs/fase4.1-relatorio.md](docs/fase4.1-relatorio.md) — relatório técnico do fluxo ponta a ponta do WhatsApp
 - [docs/fase4.2-relatorio.md](docs/fase4.2-relatorio.md) — relatório técnico do Cognitive Pipeline

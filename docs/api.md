@@ -35,6 +35,19 @@ Todas as rotas usam o prefixo `/api` e exigem `Authorization: Bearer <access_tok
 | POST | `/api/whatsapp/send-audio` | Envia áudio |
 | POST | `/api/whatsapp/send-location` | Envia localização |
 
+## E-mail (Gmail)
+
+Somente leitura (Sprint 1); `/connect`, `/status` e `/disconnect` são admin-only. Guia completo (OAuth, isolamento, setup do Google Cloud): [`docs/EMAIL.md`](EMAIL.md).
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/api/mail/connect` | Retorna a URL de consentimento do Google (admin) |
+| GET | `/api/mail/oauth/callback` | Callback do Google (chamado pelo próprio Google, autenticado via `state` assinado) |
+| GET | `/api/mail/status` | Status da conexão do usuário autenticado (admin) |
+| DELETE | `/api/mail/disconnect` | Remove a conta conectada (admin) |
+
+As quatro ferramentas de leitura de e-mail (`search_emails`, `read_email_thread`, `summarize_email_thread`, `detect_pending_email_actions`) são acessadas via `/api/chat`/`/api/agents/assistant/run`, como qualquer outra tool — não têm rota HTTP própria.
+
 ## Automação e jobs
 
 | Método | Rota | Descrição |

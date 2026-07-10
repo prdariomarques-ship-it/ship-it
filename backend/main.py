@@ -24,6 +24,7 @@ from auth.router import router as auth_router
 from chat.router import router as chat_router
 from jobs.router import router as jobs_router
 from jobs.worker import job_worker
+from mail.router import router as mail_router
 from memory.router import router as memory_router
 from observability import health_router, metrics_middleware, metrics_router
 from services.rate_limit import rate_limiter
@@ -43,6 +44,7 @@ OPENAPI_TAGS = [
     {"name": "webhooks", "description": "Entrada de eventos externos (WhatsApp)."},
     {"name": "workflows", "description": "Disparo de automações no n8n."},
     {"name": "jobs", "description": "Fila de trabalhos em background (admin)."},
+    {"name": "mail", "description": "Integração Gmail (somente leitura) — conexão OAuth admin-only."},
     {"name": "health", "description": "Liveness e readiness."},
     {"name": "observability", "description": "Métricas Prometheus."},
 ]
@@ -151,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(store_router, prefix=prefix)
     app.include_router(logs_router, prefix=prefix)
     app.include_router(dashboard_router, prefix=prefix)
+    app.include_router(mail_router, prefix=prefix)
 
     return app
 

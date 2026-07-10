@@ -14,6 +14,12 @@ from agents.tools.domain import (
     list_church_members_tool,
     list_store_customers_tool,
 )
+from agents.tools.mail import (
+    detect_pending_email_actions_tool,
+    read_email_thread_tool,
+    search_emails_tool,
+    summarize_email_thread_tool,
+)
 from agents.tools.productivity import (
     complete_task_tool,
     create_event_tool,
@@ -70,4 +76,8 @@ class AssistantAgent(BaseAgent):
             add_prayer_request_tool,
             list_store_customers_tool,
             add_store_customer_tool,
+            search_emails_tool,
+            read_email_thread_tool,
+            summarize_email_thread_tool,
+            detect_pending_email_actions_tool,
         ]

@@ -332,6 +332,8 @@ providers/
     evolution/  Evolution API (message/sendText etc.)
     baileys/    gateway REST sobre a lib Baileys
     official/   WhatsApp Cloud API (Meta Graph)
+  mail/       base.py (MailProvider, EmailMessage, EmailThread, EmailSearchQuery, OAuthTokens)
+    gmail/      REST via httpx puro — OAuth 2.0 + Gmail API, somente leitura (Sprint 1)
 ```
 
 `LLM_PROVIDER` e `EMBEDDING_PROVIDER` são independentes porque nem todo vendor tem API de embeddings de dimensão previsível (Anthropic não tem API de embeddings; GLM e Ollama têm, mas com dimensão que não bate com a coleção Qdrant configurada — ambos levantam `EmbeddingsNotSupportedError` de propósito em vez de gravar vetores incompatíveis silenciosamente). Sem chave/endereço configurado, todo provider degrada para resposta stub — o sistema continua de pé.
@@ -384,6 +386,38 @@ exemplo mínimo, checklist de testes). Resumo arquitetural:
   `{"data": null}` — um payload malformado plausível de um gateway real).
 
 Gemini foi implementado com `httpx` puro (já era dependência, usada pelos providers de WhatsApp) em vez do SDK oficial do Google — zero dependência nova. A única particularidade de tradução: Gemini não dá um `id` para cada chamada de função (diferente de OpenAI/Anthropic), então o provider sintetiza um id e mantém um mapa local `id → nome` ao converter a conversa, para devolver o resultado da ferramenta no formato `functionResponse` correto.
+
+## Email (Gmail) — Sprint 1
+
+Domínio novo e deliberadamente isolado, com o mesmo padrão Strategy + Factory dos providers acima (`providers/mail/`), mas sem reaproveitar `LLMProvider`/`WhatsAppProvider` — a forma de um mailbox (OAuth, threads, mensagens) não tem nada em comum com chat ou mensageria instantânea. Guia completo (arquitetura, isolamento, setup OAuth passo a passo): **[`docs/EMAIL.md`](EMAIL.md)**.
+
+```mermaid
+flowchart TB
+    subgraph Gateway["Único gateway: assistant"]
+        Tools["agents/tools/mail.py\n(4 tools, function calling)"]
+    end
+    Others["personal / church / store / content\n(sem tools de e-mail)"]
+    Planner["Cognitive Planner"]
+    Access["_get_access_token(context)\nresolve SEMPRE por context.user.id"]
+    Repo["EmailAccountRepository"]
+    Crypto["token_crypto\n(Fernet, EMAIL_TOKEN_ENCRYPTION_KEY)"]
+    Provider["GmailProvider\n(httpx puro, escopo gmail.readonly)"]
+    Google[(Gmail API)]
+
+    Others -. "precisa de e-mail?" .-> Planner
+    Planner -- "roteia a etapa para" --> Tools
+    Tools --> Access
+    Access --> Repo
+    Access --> Crypto
+    Access --> Provider
+    Provider --> Google
+```
+
+- **Gateway único**: só `agents/assistant_agent.py` lista as quatro tools de e-mail. Um agente especializado que precise de contexto de e-mail não ganha acesso direto — a etapa correspondente do plano do Cognitive Planner é roteada para `assistant`, o mesmo mecanismo multi-etapa já existente (`orchestrator/planning.py`), sem nenhum canal novo de comunicação entre agentes.
+- **Autorização em código, não no prompt** (mesmo princípio do PROD-005 para contatos do WhatsApp — ver `SECURITY.md`): `_get_access_token` resolve o mailbox estritamente a partir de `ToolContext.user.id`; nenhuma tool de e-mail tem um parâmetro de usuário/mailbox no schema.
+- **Credenciais nunca em texto puro**: o refresh token OAuth é cifrado em repouso com Fernet antes de tocar o banco (`services/token_crypto.py`).
+- **Somente leitura**: escopo `gmail.readonly` solicitado ao Google — enviar/responder/mover/excluir não existem em nenhum ponto do código desta sprint.
+- **`mail/router.py`** expõe conexão/desconexão admin-only (`/api/mail/connect|status|disconnect`) e o callback OAuth (`/api/mail/oauth/callback`, autenticado por um `state` JWT de curta duração em vez de Bearer, porque é o Google — não o usuário — quem chama essa rota).
 
 ## Agentes
 
@@ -471,5 +505,6 @@ Alembic com `env.py` async lendo `DATABASE_URL` das settings. O container do bac
 - O auto-reply (`whatsapp.process_inbound`) e o hand-off legado ao n8n (`workflow.trigger`) rodam **em paralelo** por padrão — quem já usa n8n para gerar a resposta deve desativar `AUTO_REPLY_ENABLED` para o contato não receber duas respostas à mesma mensagem.
 - **Nota de transparência sobre cobertura de testes**: `webhooks/router.py` e os handlers de envio em `api/whatsapp.py` mostram uma cobertura de linha aparentemente baixa na ferramenta `coverage.py` (investigado a fundo: não é cache de bytecode, não é ordem de import, não é specífico do plugin `pytest-cov` — reproduz com `coverage run` puro). A correção comportamental dessas rotas está provada por asserções diretas em ~20 testes de integração (status HTTP correto por cenário, linhas exatas persistidas no banco, payloads exatos de job) — evidência mais forte que a métrica de linha para este caso específico. Ver `docs/fase4.1-relatorio.md` para os detalhes da investigação.
 - **Custo/latência do Cognitive Pipeline**: intenção, prioridade e planejamento são, cada um, uma chamada LLM independente (decisão real, não regra fixa) — até 3 chamadas antes mesmo da execução do agente escolhido. Deliberado (decisões independentes e testáveis > uma única chamada monolítica), mas é um custo real por mensagem; se o volume justificar, a Fase 4.3 pode combinar intenção+prioridade+planejamento numa única chamada de function calling sem mudar a interface pública de nenhum dos três componentes.
+- **E-mail como domínio isolado de gateway único** (Sprint 1): em vez de dar as tools de Gmail a todo agente que pudesse se beneficiar delas, só `assistant` as recebeu — qualquer outro agente que precise de contexto de e-mail passa pelo Cognitive Planner, que já sabia rotear uma etapa para outro agente. Menos superfície de ataque (só um agente pode tocar o domínio), ao custo de uma etapa extra de planejamento quando um agente especializado precisa de e-mail; aceitável porque isso ainda não acontece em nenhum fluxo real desta sprint.
 - **`AIOrchestrator.run` ganhou `memories`/`history` opcionais** em vez de um novo método paralelo — menos superfície de API, mas significa que qualquer chamador futuro pode, sem querer, pular o auto-fetch de memória passando `memories=[]`. Aceitável hoje (só o Cognitive Pipeline os usa); documentado para quem vier adicionar um terceiro chamador.
 - **Composição de resposta multi-etapa é concatenação simples** (`CognitivePipeline._compose_reply`), não uma síntese via LLM — mais barato e mais previsível, mas uma resposta de duas etapas pode soar como duas respostas coladas em vez de um texto único e fluido. Ver riscos remanescentes em `docs/fase4.2-relatorio.md`.

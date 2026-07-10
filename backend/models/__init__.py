@@ -1,6 +1,7 @@
 from models.calendar import CalendarEvent
 from models.church import ChurchMember
 from models.contact import Contact
+from models.email_account import EmailAccount
 from models.embedding import Embedding
 from models.job import Job, JobStatus
 from models.log import LogEntry
@@ -15,6 +16,7 @@ __all__ = [
     "CalendarEvent",
     "ChurchMember",
     "Contact",
+    "EmailAccount",
     "Embedding",
     "Job",
     "JobStatus",

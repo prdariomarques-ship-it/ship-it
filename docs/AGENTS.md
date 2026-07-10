@@ -10,7 +10,9 @@ Um agente do Dario OS é uma classe que estende `agents.base.BaseAgent` e declar
 | `church` | `agents/church_agent.py` | Oração, escalas, cultos, avisos, membros | membros, pedidos de oração, eventos, memória |
 | `store` | `agents/store_agent.py` | Produtos, pedidos, clientes, orçamentos | clientes, contatos, memória, preferências |
 | `content` | `agents/content_agent.py` | Conteúdo para redes sociais, pesquisa, documentos | notas, memória |
-| `assistant` | `agents/assistant_agent.py` | Generalista — atende o WhatsApp, acesso a todos os domínios | todas + envio de WhatsApp + preferências |
+| `assistant` | `agents/assistant_agent.py` | Generalista — atende o WhatsApp, acesso a todos os domínios | todas + envio de WhatsApp + preferências + e-mail (Gmail) |
+
+`assistant` é o **único gateway técnico para o domínio de e-mail** (Sprint 1 — Gmail, somente leitura): é o único agente cujas `tools` incluem `search_emails`/`read_email_thread`/`summarize_email_thread`/`detect_pending_email_actions`. Um agente especializado que precise de contexto de e-mail não recebe essas tools diretamente — a etapa correspondente do plano do Cognitive Planner é roteada para `assistant`. Detalhes completos: `docs/EMAIL.md`.
 
 `assistant` é o agente padrão usado como fallback: quando o Cognitive Planner nomeia um agente inexistente, ou quando a classificação de intenção degrada para a heurística sem um mapeamento intenção→agente, a etapa cai para `assistant`.
 
