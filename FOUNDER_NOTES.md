@@ -42,7 +42,7 @@ A dor mais inaceitável de continuar existindo era a perda da profundidade anal�
 
 Decisões neste sistema são filtradas por uma Curadoria de Elite: dados quantitativos puros, cruzamento macroeconômico com o mundo real e foco obsessivo em eficiência e margem. Só avança o que for disruptivo e trouxer ganho direto de produtividade ou faturamento.
 
-Sucesso para o Dario OS significa atingir a maturidade de uma infraestrutura onde os agentes de IA (Docker, APIs integradas e modelos de ponta como Claude Cowork, Gemini Spark e GPT-5.5) liquidem 100% da carga operacional e burocrática dos domínios. O sucesso é medido pela minha total liberdade de tempo para atuar exclusivamente no nível estratégico e na profundidade dos relacionamentos humanos.
+Sucesso para o Dario OS significa atingir a maturidade de uma infraestrutura onde agentes de IA, APIs e modelos de linguagem de última geração liquidem 100% da carga operacional e burocrática dos domínios. O sucesso é medido pela minha total liberdade de tempo para atuar exclusivamente no nível estratégico e na profundidade dos relacionamentos humanos.
 
 ### 6. O Que o Sistema Nunca Deverá Se Tornar
 
