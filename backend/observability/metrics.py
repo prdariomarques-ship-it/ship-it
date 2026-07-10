@@ -1,8 +1,8 @@
-"""Prometheus metrics: HTTP, agent runs and job execution."""
+"""Prometheus metrics: HTTP, agent runs, job execution and WhatsApp providers."""
 import time
 
 from fastapi import APIRouter, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 HTTP_REQUESTS = Counter(
     "darioos_http_requests_total",
@@ -50,6 +50,19 @@ JOB_DURATION = Histogram(
     "darioos_job_duration_seconds",
     "Job execution duration in seconds, per job name",
     labelnames=("name",),
+)
+
+WHATSAPP_PROVIDER_REQUESTS = Counter(
+    "darioos_whatsapp_provider_requests_total",
+    "Outbound HTTP calls made to a WhatsApp provider gateway",
+    labelnames=("provider", "status"),  # status: ok | error
+)
+
+WHATSAPP_SESSION_STATUS = Gauge(
+    "darioos_whatsapp_session_status",
+    "Last known connection status of a WhatsApp provider's session "
+    "(1=connected, 0=disconnected/auth_expired/reconnecting/unknown)",
+    labelnames=("provider",),
 )
 
 metrics_router = APIRouter(tags=["observability"])
@@ -100,3 +113,11 @@ def record_tool_call(tool_name: str) -> None:
 
 def record_job_duration(name: str, duration_seconds: float) -> None:
     JOB_DURATION.labels(name).observe(duration_seconds)
+
+
+def record_whatsapp_request(provider: str, status: str) -> None:
+    WHATSAPP_PROVIDER_REQUESTS.labels(provider, status).inc()
+
+
+def record_whatsapp_session_status(provider: str, connected: bool) -> None:
+    WHATSAPP_SESSION_STATUS.labels(provider).set(1 if connected else 0)

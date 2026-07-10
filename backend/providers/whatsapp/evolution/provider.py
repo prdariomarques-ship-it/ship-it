@@ -66,7 +66,9 @@ class EvolutionProvider(WhatsAppProvider):
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         # Evolution "messages.upsert" event: {event, instance, data: {key, pushName, message}}
         data = payload.get("data", payload)
-        key = data.get("key", {})
+        if not isinstance(data, dict):
+            return None  # malformed payload (e.g. "data": null) — not a crash
+        key = data.get("key") or {}
         remote_jid = key.get("remoteJid")
         if not remote_jid or key.get("fromMe"):
             return None

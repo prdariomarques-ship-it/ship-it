@@ -42,10 +42,27 @@ async def _check_qdrant() -> str:
     return "ok"
 
 
+class WhatsAppProviderUnhealthy(RuntimeError):
+    pass
+
+
+async def _check_whatsapp() -> str:
+    from observability.metrics import record_whatsapp_session_status
+    from providers.whatsapp.factory import get_whatsapp_provider
+
+    provider = get_whatsapp_provider()
+    healthy = await provider.health_check()
+    record_whatsapp_session_status(provider.name, connected=healthy)
+    if not healthy:
+        raise WhatsAppProviderUnhealthy(provider.name)
+    return "ok"
+
+
 @router.get("/health/ready")
 async def readiness(response: Response) -> dict:
-    """Database is required; Redis and Qdrant degrade gracefully, so they only
-    mark the service as 'degraded' instead of failing readiness."""
+    """Database is required; Redis, Qdrant and the WhatsApp provider degrade
+    gracefully, so they only mark the service as 'degraded' instead of
+    failing readiness."""
     checks: dict[str, str] = {}
 
     required_ok = True
@@ -53,6 +70,7 @@ async def readiness(response: Response) -> dict:
         ("database", _check_database, True),
         ("redis", _check_redis, False),
         ("qdrant", _check_qdrant, False),
+        ("whatsapp", _check_whatsapp, False),
     ):
         try:
             checks[name] = await asyncio.wait_for(check(), timeout=5)

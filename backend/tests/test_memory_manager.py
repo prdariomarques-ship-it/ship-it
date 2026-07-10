@@ -1,4 +1,6 @@
 """Memory Manager: facade for short-term, long-term, knowledge and preferences."""
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -39,6 +41,53 @@ async def test_short_term_returns_recent_messages_oldest_first(session_factory, 
     async with session_factory() as session:
         history = await memory_manager.short_term(session, contact.id, limit=10)
     assert [m.content for m in history] == ["primeira", "segunda", "terceira"]
+
+
+@pytest.mark.asyncio
+async def test_short_term_orders_by_provider_timestamp_not_arrival_order(session_factory, contact):
+    """A webhook redelivery or network jitter can insert an older message
+    after a newer one; conversation history must stay chronological by the
+    provider's own event time, not by insertion order."""
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    async with session_factory() as session:
+        # Inserted out of chronological order: "terceira" (t+2) arrives first,
+        # then "primeira" (t+0), then "segunda" (t+1).
+        for text, offset in (("terceira", 2), ("primeira", 0), ("segunda", 1)):
+            session.add(
+                Message(
+                    contact_id=contact.id,
+                    direction=MessageDirection.INBOUND,
+                    media_type=MessageMediaType.TEXT,
+                    content=text,
+                    provider_timestamp=base + timedelta(minutes=offset),
+                )
+            )
+        await session.commit()
+
+    async with session_factory() as session:
+        history = await memory_manager.short_term(session, contact.id, limit=10)
+    assert [m.content for m in history] == ["primeira", "segunda", "terceira"]
+
+
+@pytest.mark.asyncio
+async def test_short_term_falls_back_to_arrival_order_without_provider_timestamp(session_factory, contact):
+    """Providers that don't report an event timestamp still get a sane,
+    stable ordering (insertion order) via the coalesce to created_at/id."""
+    async with session_factory() as session:
+        for text in ("um", "dois", "tres"):
+            session.add(
+                Message(
+                    contact_id=contact.id,
+                    direction=MessageDirection.INBOUND,
+                    media_type=MessageMediaType.TEXT,
+                    content=text,
+                )
+            )
+        await session.commit()
+
+    async with session_factory() as session:
+        history = await memory_manager.short_term(session, contact.id, limit=10)
+    assert [m.content for m in history] == ["um", "dois", "tres"]
 
 
 @pytest.mark.asyncio

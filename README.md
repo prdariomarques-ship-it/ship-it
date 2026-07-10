@@ -139,10 +139,15 @@ A cada N mensagens (configurável) um job `contact.summarize` atualiza o resumo 
 
 - **Assinatura do webhook**: `WEBHOOK_SECRET` (token compartilhado, qualquer provider) e `OFFICIAL_APP_SECRET` (HMAC-SHA256 real via `X-Hub-Signature-256`, WhatsApp Cloud API).
 - **Mensagens duplicadas**: dedup por `external_id` antes de processar, mais constraint única no banco (recupera de corrida entre requisições concorrentes).
+- **Mensagens fora de ordem**: histórico ordenado pelo timestamp do próprio evento do gateway (`InboundMessage.timestamp`), não pela ordem de chegada do webhook — uma redelivery atrasada não bagunça o contexto do agente.
+- **Retry com backoff exponencial**: toda chamada HTTP de um Provider ao seu gateway passa por um helper compartilhado (`WhatsAppProvider._request`) com retry automático — nenhum provider duplica essa lógica.
+- **Sessão e reconexão**: mudanças de estado da sessão do gateway (conectado, deslogado, reconectando) são normalizadas (`ConnectionEvent`) e registradas (log + métrica + Event Bus `whatsapp.session_changed`); uma sessão deslogada (`AUTH_EXPIRED`) emite um log de erro pedindo re-pareamento humano — o sistema não finge uma reconexão automática que a tecnologia (WhatsApp Web) não oferece.
+- **Confirmação de entrega**: quando o gateway suporta, `DeliveryAck` normalizado atualiza o status da mensagem enviada (`sent`/`delivered`/`read`/`failed`) e publica `whatsapp.message_delivery_ack`.
 - **Loop/flood**: no máximo `AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE` respostas automáticas por contato por minuto.
 - **Timeout**: `AGENT_RUN_TIMEOUT_SECONDS` limita cada execução de agente; excedido, o Orchestrator publica `agent.failed` e a fila tenta de novo.
-- **Retry**: herdado da fila de jobs (backoff exponencial) — nada de lógica de retry nova.
+- **Retry (auto-reply)**: herdado da fila de jobs (backoff exponencial) — nada de lógica de retry nova.
 - **Nunca fica em silêncio**: falha definitiva no auto-reply dispara uma mensagem de desculpas via assinatura do Event Bus em `job.failed`.
+- **Testes de compatibilidade**: `tests/test_whatsapp_provider_compatibility.py` garante que qualquer Provider que implemente a interface (inclusive um novo, nunca visto antes) funciona automaticamente com o webhook e o envio, sem alterar código de aplicação.
 
 ## Agentes
 
@@ -184,7 +189,7 @@ Ferramentas seguem o mesmo espírito: declare um `Tool(...)` em `agents/tools/`,
 ### Como adicionar um novo provedor
 
 - **LLM**: crie `providers/llm/<nome>/provider.py` implementando `LLMProvider` (`chat` com tools + `embed`), registre no dicionário de `providers/llm/factory.py` e selecione com `LLM_PROVIDER=<nome>`. Reaproveite `OpenAIProvider` por herança quando o vendor for compatível com a API da OpenAI (caso de GLM e Ollama).
-- **WhatsApp**: crie `providers/whatsapp/<nome>/provider.py` implementando `WhatsAppProvider` (5 métodos de envio + `parse_webhook` normalizando para `InboundMessage`), registre em `providers/whatsapp/factory.py` e selecione com `WHATSAPP_PROVIDER=<nome>`.
+- **WhatsApp**: crie `providers/whatsapp/<nome>/provider.py` implementando `WhatsAppProvider` (5 métodos de envio + `parse_webhook` normalizando para `InboundMessage`), registre em `providers/whatsapp/factory.py` e selecione com `WHATSAPP_PROVIDER=<nome>`. Guia completo (contrato, exemplo mínimo, checklist de testes de compatibilidade): [`backend/providers/whatsapp/README.md`](backend/providers/whatsapp/README.md).
 
 Nenhuma outra parte da aplicação muda — rotas, agentes e jobs dependem apenas dos contratos.
 
@@ -226,13 +231,14 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 ## Observabilidade
 
 - `GET /health` / `GET /health/live` — liveness.
-- `GET /health/ready` — readiness com verificação de Postgres (obrigatório), Redis e Qdrant (degradam sem derrubar).
+- `GET /health/ready` — readiness com verificação de Postgres (obrigatório), Redis, Qdrant e o Provider de WhatsApp configurado (degradam sem derrubar).
 - `GET /metrics` — Prometheus:
   - `darioos_http_requests_total` / `darioos_http_request_duration_seconds` — por rota.
   - `darioos_agent_runs_total{agent,provider,status}` e `darioos_agent_run_duration_seconds{agent}` — execuções de agente (tempo total por agente).
   - `darioos_agent_tool_calls_total{tool}` — ferramentas mais usadas.
   - `darioos_agent_tokens_total{provider,kind}` e `darioos_agent_cost_usd_total{provider}` — tokens consumidos e custo estimado (tabela de preços aproximada em `providers/llm/base.py`).
   - `darioos_job_duration_seconds{name}` — tempo de execução por tipo de job.
+  - `darioos_whatsapp_provider_requests_total{provider,status}` e `darioos_whatsapp_session_status{provider}` — disponibilidade do gateway de WhatsApp (chamadas HTTP e estado da sessão).
 - Tempo por etapa: cada `ExecutedStep` (chamada de ferramenta) carrega seu próprio `duration_ms`, visível em `steps` na resposta de `/api/chat` e `/api/agents/{name}/run`.
 - `LOG_JSON=true` — logs estruturados em JSON (padrão no Docker Compose).
 
@@ -262,6 +268,7 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - `OFFICIAL_APP_SECRET`: verificação real de assinatura HMAC-SHA256 (`X-Hub-Signature-256`) para o provider `official` (WhatsApp Cloud API)
 - Mensagens duplicadas (redelivery de webhook) são detectadas e não reprocessadas; constraint única no banco cobre a corrida entre requisições concorrentes
 - Loop/flood breaker: limite de respostas automáticas por contato por minuto
+- `WHATSAPP_REQUEST_MAX_ATTEMPTS`/`WHATSAPP_REQUEST_BACKOFF_SECONDS`: retry com backoff exponencial para toda chamada HTTP de um Provider de WhatsApp ao seu gateway
 - Em produção o backend se recusa a subir com `JWT_SECRET` fraca/padrão
 - HTTPS automático + headers de segurança via Caddy
 - Rate limit por IP (Redis, com fallback em memória; probes de health/metrics isentos)

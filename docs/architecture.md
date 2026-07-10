@@ -188,7 +188,7 @@ providers/
     glm/        endpoint OpenAI-compatível da Zhipu (reaproveita OpenAIProvider por herança)
     gemini/     REST direto via httpx — sem SDK novo; function calling + embeddings próprios
     ollama/     endpoint OpenAI-compatível local (reaproveita OpenAIProvider por herança)
-  whatsapp/   base.py (WhatsAppProvider, InboundMessage)
+  whatsapp/   base.py (WhatsAppProvider, InboundMessage, ConnectionEvent, DeliveryAck)
     openwa/     wa-automate easy-api
     evolution/  Evolution API (message/sendText etc.)
     baileys/    gateway REST sobre a lib Baileys
@@ -196,6 +196,53 @@ providers/
 ```
 
 `LLM_PROVIDER` e `EMBEDDING_PROVIDER` são independentes porque nem todo vendor tem API de embeddings de dimensão previsível (Anthropic não tem API de embeddings; GLM e Ollama têm, mas com dimensão que não bate com a coleção Qdrant configurada — ambos levantam `EmbeddingsNotSupportedError` de propósito em vez de gravar vetores incompatíveis silenciosamente). Sem chave/endereço configurado, todo provider degrada para resposta stub — o sistema continua de pé.
+
+### WhatsApp Provider: contrato, confiabilidade e como adicionar um novo
+
+Ver **`providers/whatsapp/README.md`** para o guia completo (contrato,
+exemplo mínimo, checklist de testes). Resumo arquitetural:
+
+- **Só tradução e transporte.** Um Provider nunca acessa banco, nunca
+  enfileira job, nunca publica no Event Bus, nunca conhece regra de negócio —
+  ele só converte o payload cru do gateway para um dos três modelos internos
+  únicos (`InboundMessage`, `ConnectionEvent`, `DeliveryAck`) e envia mensagens
+  através da interface padronizada. Depois dessa tradução, nenhum outro
+  componente do sistema (webhook route, jobs, Memory Manager, AI Orchestrator)
+  sabe qual gateway está configurado.
+- **`WhatsAppProvider._request`** é o único caminho para chamadas HTTP ao
+  gateway: dá retry com backoff exponencial, métricas de disponibilidade
+  (`darioos_whatsapp_provider_requests_total{provider,status}`) e tradução de
+  erro uniforme para os 4 providers de graça (nenhum duplica essa lógica). Um
+  `max_attempts` override permite chamadas single-shot (usado por
+  `health_check`, que não pode bloquear um readiness probe atrás de um
+  gateway fora do ar).
+- **Sessão e reconexão**: `parse_connection_event` normaliza mudanças de
+  estado da sessão do gateway (`CONNECTED`/`AUTH_EXPIRED`/`RECONNECTING`/...).
+  Uma sessão deslogada em um gateway baseado em WhatsApp Web genuinamente
+  exige um humano re-escaneando o QR code — o sistema não finge uma
+  reconexão automática que a tecnologia não oferece; em vez disso, registra o
+  evento (log + métrica `darioos_whatsapp_session_status{provider}` + Event
+  Bus `whatsapp.session_changed`) e, em `AUTH_EXPIRED`, emite um log de erro
+  claro pedindo a intervenção.
+- **Confirmação de entrega**: `parse_delivery_ack` normaliza acks de
+  entrega/leitura quando o gateway suporta; o webhook atualiza
+  `Message.delivery_status` e publica `whatsapp.message_delivery_ack`.
+- **Ordem de mensagens**: `InboundMessage.timestamp` carrega a hora do evento
+  reportada pelo próprio gateway; `MessageRepository.recent_for_contact`
+  ordena por esse campo (com fallback para a ordem de chegada quando ausente),
+  então uma redelivery de webhook fora de ordem não bagunça o histórico de
+  conversa nem o contexto do agente.
+- **Testes de compatibilidade** (`tests/test_whatsapp_provider_compatibility.py`,
+  36+ casos): uma bateria parametrizada roda os mesmos testes de contrato
+  contra os 4 providers registrados (nunca lançar exceção com payload
+  malformado, `verify_signature`/`health_check` sempre devolvem `bool`, os 5
+  métodos de envio existem, o provider está registrado na factory pelo seu
+  próprio nome) — mais um `_FakeProvider` inédito, registrado só no teste, que
+  prova concretamente a regra central: a rota de webhook e o envio funcionam
+  através dele sem alterar uma linha de `webhooks/router.py` ou
+  `api/whatsapp.py`. Essa suíte encontrou e corrigiu 3 bugs reais de robustez
+  (OpenWA/Baileys/Evolution derrubavam com `AttributeError` ao receber
+  `{"data": null}` — um payload malformado plausível de um gateway real).
 
 Gemini foi implementado com `httpx` puro (já era dependência, usada pelos providers de WhatsApp) em vez do SDK oficial do Google — zero dependência nova. A única particularidade de tradução: Gemini não dá um `id` para cada chamada de função (diferente de OpenAI/Anthropic), então o provider sintetiza um id e mantém um mapa local `id → nome` ao converter a conversa, para devolver o resultado da ferramenta no formato `functionResponse` correto.
 
@@ -251,8 +298,8 @@ Alembic com `env.py` async lendo `DATABASE_URL` das settings. O container do bac
 
 ## Observabilidade
 
-- **Liveness** `/health`, **readiness** `/health/ready` (Postgres obrigatório; Redis/Qdrant marcam `degraded`).
-- **Métricas** `/metrics` (Prometheus): HTTP (`darioos_http_requests_total`/`_duration_seconds`), agentes (`darioos_agent_runs_total{agent,provider,status}`, `_run_duration_seconds`, `_tool_calls_total`, `_tokens_total`, `_cost_usd_total`) e jobs (`darioos_job_duration_seconds{name}`) — todas com o template da rota/nome, não a URL/id bruto, para manter a cardinalidade baixa; probes isentos de rate limit.
+- **Liveness** `/health`, **readiness** `/health/ready` (Postgres obrigatório; Redis/Qdrant/WhatsApp marcam `degraded` — um gateway de WhatsApp fora do ar não derruba a API).
+- **Métricas** `/metrics` (Prometheus): HTTP (`darioos_http_requests_total`/`_duration_seconds`), agentes (`darioos_agent_runs_total{agent,provider,status}`, `_run_duration_seconds`, `_tool_calls_total`, `_tokens_total`, `_cost_usd_total`), jobs (`darioos_job_duration_seconds{name}`) e WhatsApp (`darioos_whatsapp_provider_requests_total{provider,status}`, `darioos_whatsapp_session_status{provider}`) — todas com o template da rota/nome, não a URL/id bruto, para manter a cardinalidade baixa; probes isentos de rate limit.
 - **Tempo por etapa**: cada chamada de ferramenta (`ExecutedStep.duration_ms`) e cada execução de agente (`AgentResult.duration_ms`) carregam sua própria medição, visível na resposta da API sem precisar consultar o Prometheus.
 - **Logs estruturados** em JSON (`LOG_JSON=true`), um objeto por linha, prontos para Loki/ELK.
 - **Auditoria** na tabela `logs` (webhooks, eventos de jobs) e no Event Bus (`agent.selected`/`agent.replied`/`agent.failed`, base para o futuro AI Console).

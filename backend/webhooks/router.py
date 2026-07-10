@@ -24,8 +24,9 @@ from database.session import get_db
 from events.bus import event_bus
 from jobs.service import JobService
 from memory.contact_memory import contact_memory_service
-from models.message import Message, MessageDirection, MessageMediaType
-from providers.whatsapp.base import WhatsAppProvider
+from models.message import Message, MessageDeliveryStatus, MessageDirection, MessageMediaType
+from observability.metrics import record_whatsapp_session_status
+from providers.whatsapp.base import ConnectionStatus, DeliveryStatus, WhatsAppProvider
 from providers.whatsapp.factory import get_whatsapp_provider
 from repositories.contact import ContactRepository
 from repositories.message import MessageRepository
@@ -40,10 +41,67 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _MEDIA_TYPES = {media.value for media in MessageMediaType}
 
+_DELIVERY_STATUS_MAP = {
+    DeliveryStatus.SENT: MessageDeliveryStatus.SENT,
+    DeliveryStatus.DELIVERED: MessageDeliveryStatus.DELIVERED,
+    DeliveryStatus.READ: MessageDeliveryStatus.READ,
+    DeliveryStatus.FAILED: MessageDeliveryStatus.FAILED,
+}
+
 
 class WebhookAck(BaseModel):
     status: str = "received"
     message_id: int | None = None
+
+
+async def _handle_connection_event(
+    db: AsyncSession, provider: WhatsAppProvider, payload: dict
+) -> WebhookAck | None:
+    """Session state change (connected/disconnected/logged out). The provider
+    only reports what happened; deciding to log/alert/record is the app's job."""
+    event = provider.parse_connection_event(payload)
+    if event is None:
+        return None
+
+    record_whatsapp_session_status(provider.name, connected=event.status == ConnectionStatus.CONNECTED)
+    level = "warning" if event.status != ConnectionStatus.CONNECTED else "info"
+    await record_log(
+        db,
+        source=f"whatsapp:{provider.name}",
+        message=f"Session {event.status.value} ({event.detail})",
+        level=level,
+        payload={"provider": provider.name, "status": event.status.value, "detail": event.detail},
+    )
+    await event_bus.publish(
+        "whatsapp.session_changed",
+        {"provider": provider.name, "status": event.status.value, "detail": event.detail},
+    )
+    if event.status == ConnectionStatus.AUTH_EXPIRED:
+        logger.error(
+            "WhatsApp session for provider %s needs re-authentication (%s) — "
+            "a human needs to re-pair the device (e.g. re-scan the QR code).",
+            provider.name, event.detail,
+        )
+    return WebhookAck(status="session_event")
+
+
+async def _handle_delivery_ack(
+    db: AsyncSession, provider: WhatsAppProvider, payload: dict
+) -> WebhookAck | None:
+    """Delivery/read receipt for a message this app sent."""
+    ack = provider.parse_delivery_ack(payload)
+    if ack is None:
+        return None
+
+    message = await MessageRepository(db).get_by_external_id(ack.external_id)
+    if message is not None:
+        await MessageRepository(db).update(message, delivery_status=_DELIVERY_STATUS_MAP[ack.status])
+
+    await event_bus.publish(
+        "whatsapp.message_delivery_ack",
+        {"provider": provider.name, "external_id": ack.external_id, "status": ack.status.value},
+    )
+    return WebhookAck(status="delivery_ack")
 
 
 def _verify_webhook_security(provider: WhatsAppProvider, raw_body: bytes, headers) -> None:
@@ -85,6 +143,12 @@ async def whatsapp_webhook(
         ) from exc
     inbound = provider.parse_webhook(payload)
     if inbound is None:
+        connection_ack = await _handle_connection_event(db, provider, payload)
+        if connection_ack is not None:
+            return connection_ack
+        delivery_ack = await _handle_delivery_ack(db, provider, payload)
+        if delivery_ack is not None:
+            return delivery_ack
         return WebhookAck(status="ignored")
 
     # Idempotency: a provider redelivering the same message (a common webhook
@@ -107,6 +171,7 @@ async def whatsapp_webhook(
         media_type=MessageMediaType(media_type),
         content=inbound.text,
         external_id=inbound.external_id or None,
+        provider_timestamp=inbound.timestamp,
     )
     db.add(message)
     try:

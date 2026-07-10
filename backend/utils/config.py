@@ -70,6 +70,10 @@ class Settings(BaseSettings):
 
     # WhatsApp providers ("openwa", "baileys", "evolution" or "official")
     whatsapp_provider: str = "openwa"
+    # Shared by every provider (base._request): retry with exponential
+    # backoff for transient HTTP failures (network blips, 5xx from gateway).
+    whatsapp_request_max_attempts: int = 3
+    whatsapp_request_backoff_seconds: float = 1.0
 
     openwa_base_url: str = "http://localhost:8002"
     openwa_api_key: str = ""

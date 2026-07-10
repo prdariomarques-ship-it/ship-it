@@ -5,6 +5,11 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite://"
 os.environ["JWT_SECRET"] = "test-secret-key-with-enough-bytes-for-hs256"
 os.environ["OPENAI_API_KEY"] = ""
+# Unmocked provider calls in tests hit an unreachable localhost gateway by
+# design (no real WhatsApp/n8n running); keep retry/backoff from adding
+# multi-second delays to every one of those expected failures.
+os.environ["WHATSAPP_REQUEST_MAX_ATTEMPTS"] = "1"
+os.environ["WHATSAPP_REQUEST_BACKOFF_SECONDS"] = "0"
 
 import pytest
 import pytest_asyncio

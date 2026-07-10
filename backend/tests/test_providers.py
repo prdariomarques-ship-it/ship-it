@@ -98,6 +98,64 @@ def test_official_webhook_ignores_status_updates():
     assert OfficialProvider().parse_webhook({"entry": [{"changes": [{"value": {}}]}]}) is None
 
 
+# --- OpenWA: session state and delivery ack normalization -------------------
+@pytest.mark.parametrize(
+    "state, expected_status",
+    [
+        ("CONNECTED", "connected"),
+        ("UNPAIRED", "auth_expired"),
+        ("UNPAIRED_IDLE", "auth_expired"),
+        ("TIMEOUT", "reconnecting"),
+        ("CONFLICT", "reconnecting"),
+        ("SOME_FUTURE_STATE", "unknown"),
+    ],
+)
+def test_openwa_connection_event_maps_known_states(state, expected_status):
+    event = OpenWAProvider().parse_connection_event({"event": "onStateChanged", "data": state})
+    assert event is not None
+    assert event.status.value == expected_status
+    assert event.detail == state
+
+
+def test_openwa_connection_event_ignores_non_state_events():
+    assert OpenWAProvider().parse_connection_event({"event": "onMessage", "data": {}}) is None
+
+
+def test_openwa_connection_event_handles_nested_state_shape():
+    event = OpenWAProvider().parse_connection_event(
+        {"event": "onStateChanged", "data": {"state": "CONNECTED"}}
+    )
+    assert event is not None
+    assert event.status.value == "connected"
+
+
+@pytest.mark.parametrize(
+    "ack, expected_status",
+    [
+        (0, "failed"),
+        (-1, "failed"),
+        (1, "sent"),
+        (2, "delivered"),
+        (3, "read"),
+        (4, "read"),
+    ],
+)
+def test_openwa_delivery_ack_maps_ack_levels(ack, expected_status):
+    result = OpenWAProvider().parse_delivery_ack({"event": "onAck", "data": {"id": "wamid-1", "ack": ack}})
+    assert result is not None
+    assert result.external_id == "wamid-1"
+    assert result.status.value == expected_status
+
+
+def test_openwa_delivery_ack_ignores_other_events():
+    assert OpenWAProvider().parse_delivery_ack({"event": "onMessage", "data": {}}) is None
+
+
+def test_openwa_delivery_ack_requires_both_id_and_ack():
+    assert OpenWAProvider().parse_delivery_ack({"event": "onAck", "data": {"id": "wamid-1"}}) is None
+    assert OpenWAProvider().parse_delivery_ack({"event": "onAck", "data": {"ack": 1}}) is None
+
+
 def test_baileys_webhook_normalization():
     inbound = BaileysProvider().parse_webhook(
         {
@@ -360,3 +418,118 @@ def test_estimate_cost_usd_unknown_provider_is_zero():
 def test_estimate_cost_usd_self_hosted_providers_are_free():
     usage = TokenUsage(prompt_tokens=1_000_000, completion_tokens=1_000_000)
     assert estimate_cost_usd("ollama", usage) == 0.0
+
+
+# --- WhatsApp provider transport: retry with exponential backoff ------------
+def _json_response(body: dict) -> MagicMock:
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.headers = {"content-type": "application/json"}
+    response.json = MagicMock(return_value=body)
+    return response
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_request_retries_transient_failures_then_succeeds(monkeypatch):
+    """Two transient connection failures followed by a success must still
+    return the successful result, having tried exactly three times."""
+    import httpx as httpx_module
+
+    from observability.metrics import WHATSAPP_PROVIDER_REQUESTS
+    from utils.config import get_settings
+
+    provider = OpenWAProvider()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "whatsapp_request_max_attempts", 3)
+    monkeypatch.setattr(settings, "whatsapp_request_backoff_seconds", 0)
+
+    class _FlakyClient:
+        attempts = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def request(self, method, url, json=None, headers=None):
+            _FlakyClient.attempts += 1
+            if _FlakyClient.attempts < 3:
+                raise httpx_module.ConnectError("connection refused")
+            return _json_response({"status": "ok"})
+
+    before = WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "ok")._value.get()
+    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=_FlakyClient()):
+        result = await provider._request("GET", "http://example.test/ping")
+
+    assert result == {"status": "ok"}
+    assert _FlakyClient.attempts == 3
+    assert WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "ok")._value.get() == before + 1
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_request_raises_after_exhausting_all_retries(monkeypatch):
+    import httpx as httpx_module
+
+    from observability.metrics import WHATSAPP_PROVIDER_REQUESTS
+    from providers.whatsapp.base import WhatsAppProviderError
+    from utils.config import get_settings
+
+    provider = OpenWAProvider()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "whatsapp_request_max_attempts", 2)
+    monkeypatch.setattr(settings, "whatsapp_request_backoff_seconds", 0)
+
+    class _AlwaysFailingClient:
+        attempts = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def request(self, method, url, json=None, headers=None):
+            _AlwaysFailingClient.attempts += 1
+            raise httpx_module.ConnectError("gateway is down")
+
+    before = WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "error")._value.get()
+    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=_AlwaysFailingClient()):
+        with pytest.raises(WhatsAppProviderError):
+            await provider._request("GET", "http://example.test/ping")
+
+    assert _AlwaysFailingClient.attempts == 2
+    assert WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "error")._value.get() == before + 1
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_request_max_attempts_override_skips_retry(monkeypatch):
+    """health_check() passes max_attempts=1 so a down gateway fails fast
+    instead of blocking a readiness probe through the full backoff."""
+    import httpx as httpx_module
+
+    from utils.config import get_settings
+
+    provider = OpenWAProvider()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "whatsapp_request_max_attempts", 5)
+    monkeypatch.setattr(settings, "whatsapp_request_backoff_seconds", 0)
+
+    class _FailingClient:
+        attempts = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def request(self, method, url, json=None, headers=None):
+            _FailingClient.attempts += 1
+            raise httpx_module.ConnectError("down")
+
+    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=_FailingClient()):
+        with pytest.raises(Exception):
+            await provider._request("GET", "http://example.test/ping", max_attempts=1)
+
+    assert _FailingClient.attempts == 1

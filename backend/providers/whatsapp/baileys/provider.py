@@ -58,9 +58,13 @@ class BaileysProvider(WhatsAppProvider):
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         # Baileys "messages.upsert": {key: {remoteJid, fromMe, id}, pushName, message}
         data = payload.get("data", payload)
+        if not isinstance(data, dict):
+            return None  # malformed payload (e.g. "data": null) — not a crash
         if isinstance(data.get("messages"), list) and data["messages"]:
             data = data["messages"][0]
-        key = data.get("key", {})
+        if not isinstance(data, dict):
+            return None
+        key = data.get("key") or {}
         remote_jid = key.get("remoteJid")
         if not remote_jid or key.get("fromMe"):
             return None

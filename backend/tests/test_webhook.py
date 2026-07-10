@@ -2,7 +2,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from events.bus import event_bus
 from models.job import Job
+from models.message import Message
 
 
 @pytest.mark.asyncio
@@ -63,3 +65,75 @@ async def test_webhook_ignores_non_message_events(client):
     response = await client.post("/api/webhooks/whatsapp", json={"event": "battery", "data": {}})
     assert response.status_code == 200
     assert response.json()["status"] == "ignored"
+
+
+# --- Delivery acks: a receipt for a message this app previously sent --------
+@pytest.mark.asyncio
+async def test_webhook_delivery_ack_updates_message_status(client, db_engine):
+    inbound = await client.post(
+        "/api/webhooks/whatsapp",
+        json={"from": "5511900001234@c.us", "body": "oi", "notifyName": "Ack", "id": "wamid-ack-1"},
+    )
+    message_id = inbound.json()["message_id"]
+
+    received = []
+
+    async def on_ack(event):
+        received.append(event.payload)
+
+    event_bus.subscribe("whatsapp.message_delivery_ack", on_ack)
+
+    response = await client.post(
+        "/api/webhooks/whatsapp",
+        json={"event": "onAck", "data": {"id": "wamid-ack-1", "ack": 2}},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "delivery_ack"
+    assert received == [{"provider": "openwa", "external_id": "wamid-ack-1", "status": "delivered"}]
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        message = await session.get(Message, message_id)
+    assert message.delivery_status.value == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_webhook_delivery_ack_for_unknown_message_still_acks(client):
+    """An ack for a message we never persisted (e.g. sent before this
+    feature existed) must not 500 — just publish the event and move on."""
+    response = await client.post(
+        "/api/webhooks/whatsapp",
+        json={"event": "onAck", "data": {"id": "unknown-external-id", "ack": 1}},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "delivery_ack"
+
+
+# --- Connection/session events: state changes reported by the gateway ------
+@pytest.mark.asyncio
+async def test_webhook_connection_event_publishes_session_changed(client):
+    received = []
+
+    async def on_session_changed(event):
+        received.append(event.payload)
+
+    event_bus.subscribe("whatsapp.session_changed", on_session_changed)
+
+    response = await client.post(
+        "/api/webhooks/whatsapp", json={"event": "onStateChanged", "data": "CONNECTED"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "session_event"
+    assert received == [{"provider": "openwa", "status": "connected", "detail": "CONNECTED"}]
+
+
+@pytest.mark.asyncio
+async def test_webhook_connection_event_reports_auth_expired(client):
+    from observability.metrics import WHATSAPP_SESSION_STATUS
+
+    response = await client.post(
+        "/api/webhooks/whatsapp", json={"event": "onStateChanged", "data": "UNPAIRED"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "session_event"
+    assert WHATSAPP_SESSION_STATUS.labels("openwa")._value.get() == 0

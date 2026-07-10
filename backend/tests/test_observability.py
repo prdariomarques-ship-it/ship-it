@@ -13,8 +13,8 @@ async def test_liveness(client):
 async def test_readiness_reports_dependency_status(client):
     response = await client.get("/health/ready")
     body = response.json()
-    assert set(body["checks"]) == {"database", "redis", "qdrant"}
-    # Redis/Qdrant are optional: without them the service is degraded, not down.
+    assert set(body["checks"]) == {"database", "redis", "qdrant", "whatsapp"}
+    # Redis/Qdrant/WhatsApp are optional: without them the service is degraded, not down.
     assert body["status"] in {"ok", "degraded", "unavailable"}
 
 
