@@ -2,6 +2,100 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [1.2.0] - 2026-07-11
+
+Dashboard Administrativo e Production Hardening — sem novas funcionalidades
+de usuário, sem alteração de regras de negócio.
+
+### Adicionado
+
+- **Dashboard Administrativo** (`/admin`, exclusivo `role=admin`): status dos
+  sistemas, agentes e tools registrados, timeline de execuções, memória
+  (Qdrant/embeddings), Google Workspace, WhatsApp, usuários, logs, métricas e
+  informações de sistema. Construído inteiramente sobre dados que já
+  existiam (Agent/Tool Registry, métricas Prometheus). 12 rotas somente
+  leitura em `/api/admin/*`. Detalhes: `docs/DASHBOARD.md`.
+- **Correlation/Request ID**: `X-Request-ID` gerado ou ecoado em toda
+  requisição/resposta, propagado a todo log emitido durante ela.
+- **Tracing distribuído (OpenTelemetry)**: opcional, desligado por padrão
+  (zero overhead); auto-instrumenta FastAPI, SQLAlchemy e httpx quando
+  ligado.
+- **Suíte E2E (Playwright)**: 23 testes cobrindo login, responsividade,
+  acessibilidade (`@axe-core/playwright`), navegação por teclado,
+  loading/error states e performance.
+- Bundle analyzer do frontend sob demanda (`ANALYZE=true npm run build`).
+
+### Corrigido
+
+- `MemoryService.search()` chamava um método (`AsyncQdrantClient.search()`)
+  removido do `qdrant-client` a partir da 1.18 — toda busca semântica de
+  memória quebrava com `AttributeError` em produção. Substituído por
+  `query_points()`.
+- Login com credenciais erradas não mostrava o erro inline: `apiFetch`
+  tratava qualquer 401 (inclusive o de uma tentativa de login sem token)
+  como sessão expirada e redirecionava para `/login` antes do erro
+  renderizar.
+- `favicon.ico` ausente (404 em toda carga de página).
+- 3 violações WCAG 2 AA de contraste de cor e 1 região rolável sem foco por
+  teclado no Dashboard Administrativo.
+- Overflow horizontal em telas mobile (sidebar principal sem media query).
+
+### Testes
+
+555 testes de backend (94% de cobertura), 108 testes de frontend, 23
+testes E2E (Playwright).
+
+### Observações
+
+Ver `SPRINT5_REPORT.md` (Production Hardening) e `DASHBOARD_REPORT.md`
+(Dashboard Administrativo) para os relatórios completos.
+
+## [1.1.2] - 2026-07-10
+
+### Corrigido
+
+- Migrations do Alembic dependiam do `CREATE TYPE` implícito do
+  SQLAlchemy/asyncpg para os `ENUM` do Postgres, que só é emitido pela
+  *primeira* migration que referencia cada tipo — uma migration posterior
+  que reutilizasse o mesmo `ENUM` (ex.: `messagedeliverystatus`) falhava
+  com `UndefinedObjectError` em qualquer banco que ainda não tivesse
+  aplicado a revisão original. Migrations passaram a criar os tipos `ENUM`
+  do Postgres explicitamente. Ver `MIGRATION_FIX_REPORT.md`.
+
+## [1.1.1] - 2026-07-10
+
+Google Workspace: Gmail, Google Calendar, Google Contacts e Google Drive
+como base de conhecimento — quatro domínios novos e isolados, cada um
+com seu próprio fluxo OAuth, acessíveis apenas pelo agente `assistant`
+(gateway único).
+
+### Adicionado
+
+- **E-mail (Gmail)** — Sprint 1: leitura, busca, resumo e detecção de
+  pendências em e-mails; somente leitura (enviar/responder/mover/excluir
+  fora do escopo).
+- **Google Calendar** e **Google Contacts** — Sprint 2: leitura e escrita
+  (listar, buscar, criar, editar, excluir, verificar disponibilidade);
+  domínios completamente separados da agenda/contatos internos do Dario OS.
+- **Google Drive** — Sprint 3: base de conhecimento — lista, busca, lê
+  (PDF, DOCX, TXT, Markdown, CSV) e indexa arquivos na mesma coleção Qdrant
+  já existente (`source="knowledge"`); `MemoryManager.forget` novo,
+  genérico, usado pela reindexação para substituir pedaços obsoletos.
+- Reaproveitamento do mesmo app OAuth do Google Cloud entre os quatro
+  domínios (só muda a URI de redirecionamento e o escopo por domínio).
+
+### Corrigido
+
+- XSS refletido e corrida de conexão na integração Gmail (auditoria
+  Sprint 1.1).
+- Vetores órfãos no Qdrant e uma vulnerabilidade de path traversal na
+  plataforma Google, encontrados na auditoria final antes do code freeze.
+
+### Observações
+
+Aprovado para produção (code freeze v1.1.1). Ver `GOOGLE_PLATFORM_AUDIT.md`
+e `SPRINT_1_1_VALIDATION.md`.
+
 ## [1.0.0] - 2026-07-10
 
 Primeira versão do Dario OS — sistema operacional pessoal baseado em IA (WhatsApp, agenda, tarefas, loja, igreja e memória permanente).

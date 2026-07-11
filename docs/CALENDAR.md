@@ -15,12 +15,12 @@ Domínio novo, isolado do resto do Dario OS: leitura e escrita no Google Calenda
 
 ## Não confundir com o calendário interno do Dario OS
 
-Dario OS já tinha, desde antes desta sprint, um calendário **próprio e interno** — `models.calendar.CalendarEvent`, as tools `create_event`/`list_events` (`agents/tools/productivity.py`), a rota `/api/calendar` (CRUD genérico). Essa é a agenda de tarefas/lembretes do próprio sistema, sem nenhuma dependência do Google.
+Dario OS já tinha, desde antes desta sprint, um calendário **próprio e interno** — `models.calendar.CalendarEvent`, as tools `create_calendar_event`/`list_calendar_events` (`agents/tools/productivity.py`), a rota `/api/calendar` (CRUD genérico). Essa é a agenda de tarefas/lembretes do próprio sistema, sem nenhuma dependência do Google.
 
 Esta sprint adiciona um domínio **completamente separado**: o **Google Calendar real** do usuário, acessado via OAuth. Por isso:
 
 - Modelos, tools, rotas e pacotes usam o prefixo `gcalendar`/`google_calendar`/`Google Calendar` em vez de `calendar`, evitando qualquer colisão de nome com o domínio interno já existente.
-- As tools se chamam `list_google_calendars`, `search_google_calendar_events`, etc. — nunca `list_events`/`create_event` (esses nomes já pertencem ao calendário interno e continuam funcionando exatamente como antes, sem nenhuma mudança).
+- As tools se chamam `list_google_calendars`, `search_google_calendar_events`, etc. — nunca `list_calendar_events`/`create_calendar_event` (esses nomes já pertencem ao calendário interno e continuam funcionando exatamente como antes, sem nenhuma mudança).
 - A rota é `/api/gcalendar/*`, não `/api/calendar/*` (que já existe e continua servindo o CRUD interno).
 - Os dois domínios nunca compartilham dados: o agente pode ter uma tarefa interna E um evento no Google Calendar sobre o mesmo assunto, mas são registros independentes.
 

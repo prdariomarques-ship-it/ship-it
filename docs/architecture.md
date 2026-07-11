@@ -453,7 +453,7 @@ flowchart TB
     ConTools --> ConAccess --> ConProvider --> GPeople
 ```
 
-- **Não confundir com domínios internos já existentes**: `models.calendar.CalendarEvent`/`create_event`/`/api/calendar` são a agenda **interna** do Dario OS (tarefas/lembretes, sem Google); `models.contact.Contact`/`find_contact`/`/api/contacts` são os contatos **de WhatsApp** (isolamento PROD-005). Os domínios Google desta sprint são deliberadamente nomeados `gcalendar`/`gcontacts` em todo lugar (modelos, tools, rotas) para nunca colidir com esses dois domínios pré-existentes, nem confundir qual é qual — ver a seção "Não confundir" em cada um dos dois novos documentos.
+- **Não confundir com domínios internos já existentes**: `models.calendar.CalendarEvent`/`create_calendar_event`/`/api/calendar` são a agenda **interna** do Dario OS (tarefas/lembretes, sem Google); `models.contact.Contact`/`find_contact`/`/api/contacts` são os contatos **de WhatsApp** (isolamento PROD-005). Os domínios Google desta sprint são deliberadamente nomeados `gcalendar`/`gcontacts` em todo lugar (modelos, tools, rotas) para nunca colidir com esses dois domínios pré-existentes, nem confundir qual é qual — ver a seção "Não confundir" em cada um dos dois novos documentos.
 - **Consolidação de ferramentas**: 12 capacidades pedidas para Calendar viraram 6 tools (e 7 para Contacts viraram 4) parametrizando em vez de duplicar — mesmo padrão já usado pelo `search_emails` do Gmail (um `since`/`until` cobre "hoje", "amanhã", "esta semana", "próximos compromissos" em vez de uma tool por variação).
 - **Um único app OAuth do Google Cloud para os três domínios**: Calendar e Contacts reaproveitam `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` já configurados para o Gmail — só precisam de mais uma URI de redirecionamento e mais um escopo cada, cadastrados no mesmo app.
 - **`state` OAuth com propósito por domínio**: `auth/jwt.py::create_oauth_state_token`/`decode_oauth_state_token` ganharam um parâmetro `purpose` (Sprint 2) — cada domínio usa o seu (`gmail_oauth_state`, `gcalendar_oauth_state`, `gcontacts_oauth_state`, `gdrive_oauth_state` desde a Sprint 3), então um `state` válido para um callback nunca é aceito por outro, mesmo com os quatro reutilizando o mesmo helper e o mesmo `JWT_SECRET`. Extensão aditiva com valor padrão — nenhum chamador existente do Gmail mudou.
@@ -566,8 +566,12 @@ Alembic com `env.py` async lendo `DATABASE_URL` das settings. O container do bac
 - **Liveness** `/health`, **readiness** `/health/ready` (Postgres obrigatório; Redis/Qdrant/WhatsApp marcam `degraded` — um gateway de WhatsApp fora do ar não derruba a API).
 - **Métricas** `/metrics` (Prometheus): HTTP (`darioos_http_requests_total`/`_duration_seconds`), agentes (`darioos_agent_runs_total{agent,provider,status}`, `_run_duration_seconds`, `_tool_calls_total`, `_tokens_total`, `_cost_usd_total`), jobs (`darioos_job_duration_seconds{name}`) e WhatsApp (`darioos_whatsapp_provider_requests_total{provider,status}`, `darioos_whatsapp_session_status{provider}`) — todas com o template da rota/nome, não a URL/id bruto, para manter a cardinalidade baixa; probes isentos de rate limit.
 - **Tempo por etapa**: cada chamada de ferramenta (`ExecutedStep.duration_ms`) e cada execução de agente (`AgentResult.duration_ms`) carregam sua própria medição, visível na resposta da API sem precisar consultar o Prometheus.
-- **Logs estruturados** em JSON (`LOG_JSON=true`), um objeto por linha, prontos para Loki/ELK.
+- **Logs estruturados** em JSON (`LOG_JSON=true`), um objeto por linha, prontos para Loki/ELK — cada linha carrega o `request_id` da requisição em curso, quando houver.
+- **Correlation/Request ID** (`X-Request-ID`): gerado por requisição (ou ecoado do cliente) pelo middleware mais externo, propagado via `ContextVar` para qualquer log emitido durante aquela requisição — permite filtrar todos os logs de um incidente específico por um único ID. Sprint 5.
+- **Tracing distribuído (OpenTelemetry)**: opcional, desligado por padrão (`OTEL_ENABLED=false`, zero overhead); quando ligado, auto-instrumenta FastAPI, SQLAlchemy e httpx e exporta via OTLP (ou para o console, sem endpoint configurado). Sprint 5.
 - **Auditoria** na tabela `logs` (webhooks, eventos de jobs) e no Event Bus (`agent.selected`/`agent.replied`/`agent.failed`, base para o futuro AI Console).
+
+Detalhes de configuração e uso: [`OBSERVABILITY_GUIDE.md`](../OBSERVABILITY_GUIDE.md).
 
 ## Dashboard Administrativo — Sprint 4
 

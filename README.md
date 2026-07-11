@@ -292,7 +292,9 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
   - `darioos_intent_classifications_total{intent}` e `darioos_priority_classifications_total{priority}` — distribuição de intenções e prioridades classificadas.
   - `darioos_pipeline_validation_retries_total` e `darioos_pipeline_memory_lookups_total{kind}` — quantas vezes a validação pediu uma nova tentativa, e quais tipos de memória foram consultados.
 - Tempo por etapa: cada `ExecutedStep` (chamada de ferramenta) carrega seu próprio `duration_ms`, visível em `steps` na resposta de `/api/chat` e `/api/agents/{name}/run`; o Cognitive Pipeline expõe o mesmo detalhamento por etapa em `stage_durations_ms`, além de registrar tudo (intenção, prioridade, agentes usados, tempos) em um log estruturado (`source=cognitive_pipeline`) por conversa.
-- `LOG_JSON=true` — logs estruturados em JSON (padrão no Docker Compose).
+- `LOG_JSON=true` — logs estruturados em JSON (padrão no Docker Compose), com `request_id` em toda linha emitida durante uma requisição (Sprint 5).
+- **Correlation/Request ID**: toda resposta HTTP carrega `X-Request-ID` (gerado ou ecoado do cliente) — permite filtrar todos os logs de um incidente por um único ID. Sprint 5.
+- **Tracing (OpenTelemetry)**: opcional, `OTEL_ENABLED=false` por padrão (zero overhead); auto-instrumenta FastAPI, SQLAlchemy e httpx quando ligado. Sprint 5. Detalhes: [`OBSERVABILITY_GUIDE.md`](OBSERVABILITY_GUIDE.md).
 
 ## Dashboard Administrativo
 
@@ -312,13 +314,17 @@ code do WhatsApp nesta versão): **[`docs/DASHBOARD.md`](docs/DASHBOARD.md)**.
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes backend (540 testes; cobertura ~93%)
+# Testes backend (555 testes; cobertura ~94%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
 
-# Testes frontend (106 testes; cobertura ~95% em components/admin, lib e hooks)
+# Testes frontend (108 testes; cobertura ~95% em components/admin, lib e hooks)
 cd frontend && npm test
 npm run test:coverage               # com cobertura
+
+# Testes E2E (Playwright — 23 testes: login, responsividade, acessibilidade,
+# navegação por teclado, loading/error states, performance) — Sprint 5
+cd frontend && npm run e2e
 
 # CI: GitHub Actions roda lint + testes + migrações (backend) e build (frontend) em cada PR
 
@@ -361,3 +367,7 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - [SECURITY.md](SECURITY.md) — modelo de segurança consolidado (autenticação, isolamento, segredos, checklist de produção)
 - [docs/fase4.1-relatorio.md](docs/fase4.1-relatorio.md) — relatório técnico do fluxo ponta a ponta do WhatsApp
 - [docs/fase4.2-relatorio.md](docs/fase4.2-relatorio.md) — relatório técnico do Cognitive Pipeline
+- [OBSERVABILITY_GUIDE.md](OBSERVABILITY_GUIDE.md) — Correlation ID, logging estruturado, tracing OpenTelemetry (Sprint 5)
+- [OPERATIONS_RUNBOOK.md](OPERATIONS_RUNBOOK.md) / [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) — operação contínua, backup/restore, resposta a incidentes
+- [VERSION_HISTORY.md](VERSION_HISTORY.md) / [PROJECT_STATUS.md](PROJECT_STATUS.md) / [ROADMAP_v2.md](ROADMAP_v2.md) — linha do tempo, status atual e planejamento futuro
+- [CONTRIBUTING.md](CONTRIBUTING.md) — padrões do projeto, como criar Agents/Providers/Tools, testes e migrations

@@ -118,6 +118,25 @@ Somente leitura:
 | Logs | `/api/logs?source=&level=` | admin |
 | Dashboard | `/api/dashboard/summary` | autenticado (cache 30s) |
 
+## Admin (Sprint 4)
+
+Somente leitura, todas exigem `require_admin` (role `admin`). Ver [`DASHBOARD.md`](DASHBOARD.md).
+
+| Rota | Descrição |
+| --- | --- |
+| `GET /api/admin` | Índice do dashboard |
+| `GET /api/admin/status` | Status dos componentes |
+| `GET /api/admin/system` | CPU/RAM/disco, metadados de build |
+| `GET /api/admin/agents` | Agents registrados |
+| `GET /api/admin/tools` | Tools registradas |
+| `GET /api/admin/logs` | Logs (mesma tabela de `/api/logs`) |
+| `GET /api/admin/google` | Status das integrações Google |
+| `GET /api/admin/memory` | Estatísticas de memória (Qdrant/Postgres) |
+| `GET /api/admin/executions` | Execuções recentes de agente (a partir do Event Bus) |
+| `GET /api/admin/users` | Usuários |
+| `GET /api/admin/metrics` | Snapshot filtrado das métricas Prometheus |
+| `GET /api/admin/whatsapp` | Status do provider de WhatsApp |
+
 ## Observabilidade
 
 | Rota | Descrição |
@@ -125,3 +144,6 @@ Somente leitura:
 | `/health`, `/health/live` | Liveness |
 | `/health/ready` | Readiness (Postgres obrigatório; Redis/Qdrant degradam) |
 | `/metrics` | Métricas Prometheus |
+
+Toda resposta HTTP carrega o header `X-Request-ID` (gerado ou ecoado do
+cliente) — ver [`../OBSERVABILITY_GUIDE.md`](../OBSERVABILITY_GUIDE.md).

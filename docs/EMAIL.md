@@ -10,7 +10,7 @@ Domínio novo, isolado do resto do Dario OS: leitura de e-mail via Gmail. Soment
 | Ler o conteúdo completo de uma conversa (thread) | ✅ |
 | Resumir uma conversa longa | ✅ (via LLM) |
 | Detectar pendências (responder, enviar proposta, agendar reunião) | ✅ (via function calling) |
-| Criar tarefa/evento a partir de um e-mail | ✅ — mas só quando o dono pede na conversa; reaproveita `create_task`/`create_event` já existentes, este domínio nunca os chama sozinho |
+| Criar tarefa/evento a partir de um e-mail | ✅ — mas só quando o dono pede na conversa; reaproveita `create_task`/`create_calendar_event` já existentes, este domínio nunca os chama sozinho |
 | Enviar, responder, mover, excluir, re-rotular | ❌ fora do escopo |
 
 ## Gateway único: o agente `assistant`
