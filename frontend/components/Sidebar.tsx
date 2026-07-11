@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "/analytics", label: "Analytics" },
   { href: "/logs", label: "Logs" },
   { href: "/configuracoes", label: "Configurações" },
+  { href: "/admin", label: "Admin" },
 ];
 
 export default function Sidebar() {

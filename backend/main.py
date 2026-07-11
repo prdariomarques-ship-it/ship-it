@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import jobs.handlers  # noqa: F401 - register the built-in job handlers
+from admin.router import router as admin_router
 from agents.router import router as agents_router
 from jobs.handlers import register_event_subscribers
 from api.routes import (
@@ -53,6 +54,7 @@ OPENAPI_TAGS = [
     {"name": "gdrive", "description": "Integração Google Drive (base de conhecimento) — conexão OAuth admin-only."},
     {"name": "health", "description": "Liveness e readiness."},
     {"name": "observability", "description": "Métricas Prometheus."},
+    {"name": "admin", "description": "Dashboard administrativo (somente leitura) — admin-only."},
 ]
 
 
@@ -163,6 +165,7 @@ def create_app() -> FastAPI:
     app.include_router(gcalendar_router, prefix=prefix)
     app.include_router(gcontacts_router, prefix=prefix)
     app.include_router(gdrive_router, prefix=prefix)
+    app.include_router(admin_router, prefix=prefix)
 
     return app
 

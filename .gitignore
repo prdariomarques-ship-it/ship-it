@@ -29,6 +29,8 @@ node_modules/
 .next/
 next-env.d.ts
 npm-debug.log*
+tsconfig.tsbuildinfo
+coverage/
 
 # Ambiente
 .env

@@ -569,6 +569,31 @@ Alembic com `env.py` async lendo `DATABASE_URL` das settings. O container do bac
 - **Logs estruturados** em JSON (`LOG_JSON=true`), um objeto por linha, prontos para Loki/ELK.
 - **Auditoria** na tabela `logs` (webhooks, eventos de jobs) e no Event Bus (`agent.selected`/`agent.replied`/`agent.failed`, base para o futuro AI Console).
 
+## Dashboard Administrativo — Sprint 4
+
+Camada de leitura pura sobre tudo descrito acima — não introduz nenhum
+mecanismo novo de coleta de dados, apenas expõe o que já existia por um
+namespace HTTP dedicado e um painel Next.js:
+
+- **Backend**: `admin/router.py` (12 rotas, prefixo `/admin`, `require_admin`
+  em todas), `admin/service.py` (helpers só-leitura: `psutil` para CPU/RAM/
+  disco, `git rev-parse`/`describe` para metadados de build, e
+  `prometheus_snapshot()` — um `REGISTRY.collect()` filtrado por prefixo,
+  serializado para JSON). Registrado em `main.py` como qualquer outro router,
+  sem tocar nenhuma rota existente.
+- **Frontend**: grupo de rotas `app/admin/` isolado do restante do app (não
+  compartilha layout com `app/(dashboard)/`), tema Tailwind próprio
+  (`.admin-theme`, `preflight` desligado) para nunca alterar visualmente as
+  páginas pré-existentes, guarda de acesso client-side sobre `GET /auth/me`
+  (a garantia real continua sendo o `require_admin` do backend).
+- **Sem tabela de auditoria de execução por agente/tool**: os contadores
+  Prometheus são cumulativos e não persistem por execução individual — as
+  páginas Agents/Tools/Executions foram deliberadamente desenhadas para expor
+  isso com honestidade (campos `null`/"não disponível" em vez de zeros
+  fabricados) em vez de adicionar uma tabela nova ou instrumentar o
+  Orchestrator, que estava fora do escopo autorizado desta sprint. Detalhes
+  completos: [`docs/DASHBOARD.md`](DASHBOARD.md).
+
 ## Decisões e trade-offs
 
 - Worker de jobs no mesmo processo da API por padrão (simplicidade); a fila durável e o claim atômico já permitem extrair para container dedicado quando a carga justificar, sem mudar nenhum código de enfileiramento.
@@ -576,7 +601,7 @@ Alembic com `env.py` async lendo `DATABASE_URL` das settings. O container do bac
 - O provider Baileys pressupõe um gateway REST na frente da lib Node; o layout de endpoints é configurável via `BAILEYS_BASE_URL`.
 - O Event Bus é aditivo: a maior parte dos fluxos ainda é chamada direta (síncrona) por decisão — reescrever tudo para "só eventos" trocaria simplicidade e rastreabilidade por um desacoplamento que ninguém está pedindo hoje. Ver `docs/fase3-relatorio.md` para a justificativa completa dessa fronteira.
 - O auto-reply (`whatsapp.process_inbound`) e o hand-off legado ao n8n (`workflow.trigger`) rodam **em paralelo** por padrão — quem já usa n8n para gerar a resposta deve desativar `AUTO_REPLY_ENABLED` para o contato não receber duas respostas à mesma mensagem.
-- **Nota de transparência sobre cobertura de testes**: `webhooks/router.py` e os handlers de envio em `api/whatsapp.py` mostram uma cobertura de linha aparentemente baixa na ferramenta `coverage.py` (investigado a fundo: não é cache de bytecode, não é ordem de import, não é specífico do plugin `pytest-cov` — reproduz com `coverage run` puro). A correção comportamental dessas rotas está provada por asserções diretas em ~20 testes de integração (status HTTP correto por cenário, linhas exatas persistidas no banco, payloads exatos de job) — evidência mais forte que a métrica de linha para este caso específico. Ver `docs/fase4.1-relatorio.md` para os detalhes da investigação.
+- **Nota de transparência sobre cobertura de testes**: `webhooks/router.py` e os handlers de envio em `api/whatsapp.py` mostram uma cobertura de linha aparentemente baixa na ferramenta `coverage.py` (investigado a fundo: não é cache de bytecode, não é ordem de import, não é specífico do plugin `pytest-cov` — reproduz com `coverage run` puro). A correção comportamental dessas rotas está provada por asserções diretas em ~20 testes de integração (status HTTP correto por cenário, linhas exatas persistidas no banco, payloads exatos de job) — evidência mais forte que a métrica de linha para este caso específico. Ver `docs/fase4.1-relatorio.md` para os detalhes da investigação. `admin/router.py` (Sprint 4) tem exatamente o mesmo padrão (79% de linha isolado, 90% quando combinado com `admin/service.py`) pelo mesmo motivo — toda linha "faltando" fica logo depois de um `await db.execute(...)` dentro do handler da rota; os 61 testes de `tests/test_admin.py` exercitam esses caminhos de verdade (incluindo dois testes de regressão que capturaram um bug real via chamada de ponta a ponta).
 - **Custo/latência do Cognitive Pipeline**: intenção, prioridade e planejamento são, cada um, uma chamada LLM independente (decisão real, não regra fixa) — até 3 chamadas antes mesmo da execução do agente escolhido. Deliberado (decisões independentes e testáveis > uma única chamada monolítica), mas é um custo real por mensagem; se o volume justificar, a Fase 4.3 pode combinar intenção+prioridade+planejamento numa única chamada de function calling sem mudar a interface pública de nenhum dos três componentes.
 - **E-mail como domínio isolado de gateway único** (Sprint 1): em vez de dar as tools de Gmail a todo agente que pudesse se beneficiar delas, só `assistant` as recebeu — qualquer outro agente que precise de contexto de e-mail passa pelo Cognitive Planner, que já sabia rotear uma etapa para outro agente. Menos superfície de ataque (só um agente pode tocar o domínio), ao custo de uma etapa extra de planejamento quando um agente especializado precisa de e-mail; aceitável porque isso ainda não acontece em nenhum fluxo real desta sprint.
 - **Calendar/Contacts como contas Google separadas do Gmail** (Sprint 2): em vez de estender `EmailAccount` para guardar três escopos numa linha só (um único consentimento, um único refresh token para tudo), cada domínio Google tem seu próprio modelo/tabela/refresh token, exatamente como o Gmail já tinha o seu. Custo: até três consentimentos OAuth separados se o dono quiser os três domínios (mitigado por reaproveitar o mesmo app/credenciais do Google Cloud — só muda a URI de redirecionamento e o escopo por domínio). Ganho: cada domínio pode ser conectado/desconectado independentemente, sem risco de uma mudança num afetar o token dos outros dois, e sem introduzir uma tabela "genérica" de contas OAuth que a instrução desta sprint pediu para evitar.

@@ -1,0 +1,100 @@
+/* Admin Dashboard (Sprint 4) design tokens + Tailwind layers.
+   Scoped under `.admin-theme` (applied by app/admin/layout.tsx) so these
+   custom properties never leak into — or get shadowed by — the rest of the
+   app's existing styles/globals.css. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.admin-theme {
+  --admin-background: 222 22% 6%;
+  --admin-foreground: 210 20% 92%;
+
+  --admin-card: 222 20% 9%;
+  --admin-card-foreground: 210 20% 92%;
+
+  --admin-border: 222 16% 17%;
+  --admin-input: 222 16% 17%;
+  --admin-ring: 217 91% 60%;
+
+  --admin-primary: 217 91% 60%;
+  --admin-primary-foreground: 210 40% 98%;
+
+  --admin-secondary: 222 18% 13%;
+  --admin-secondary-foreground: 210 20% 88%;
+
+  --admin-muted: 222 16% 13%;
+  --admin-muted-foreground: 215 14% 58%;
+
+  --admin-accent: 222 18% 15%;
+  --admin-accent-foreground: 210 20% 92%;
+
+  --admin-success: 142 71% 45%;
+  --admin-success-foreground: 210 40% 98%;
+
+  --admin-destructive: 0 72% 51%;
+  --admin-destructive-foreground: 210 40% 98%;
+
+  --admin-warning: 38 92% 50%;
+  --admin-warning-foreground: 222 22% 6%;
+
+  --admin-radius: 0.625rem;
+
+  background-color: hsl(var(--admin-background));
+  color: hsl(var(--admin-foreground));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  min-height: 100vh;
+}
+
+.admin-theme ::selection {
+  background-color: hsl(var(--admin-primary) / 0.35);
+}
+
+/* `:where()` keeps these resets at zero added specificity — same trick
+   Tailwind's own preflight uses — so any Tailwind utility class (all
+   single-class, specificity 0,1,0) on a real component always wins over
+   this baseline, instead of a compound `.admin-theme button` selector
+   (specificity 0,1,1) silently overriding e.g. the Button component's
+   `px-4`/`bg-primary` utilities.
+
+   `border-width: 0` + `border-style: solid` here reproduces exactly what
+   Tailwind's preflight normally sets up: with preflight off, a `.border`
+   utility (which only sets `border-width: 1px`) would render an invisible
+   border, because the browser's own initial `border-style` is `none`. */
+:where(.admin-theme) *,
+:where(.admin-theme) *::before,
+:where(.admin-theme) *::after {
+  box-sizing: border-box;
+  border-width: 0;
+  border-style: solid;
+  border-color: hsl(var(--admin-border));
+}
+
+:where(.admin-theme) a {
+  color: inherit;
+  text-decoration: none;
+}
+
+:where(.admin-theme) button {
+  font: inherit;
+  color: inherit;
+  background-color: transparent;
+  background-image: none;
+  padding: 0;
+  appearance: none;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+/* Thin, unobtrusive scrollbars for the log viewer / long tables. */
+.admin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.admin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.admin-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--admin-border));
+  border-radius: 999px;
+}

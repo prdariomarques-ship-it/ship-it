@@ -294,15 +294,31 @@ Handlers do fluxo do WhatsApp: `memory.embed`, `contact.summarize`, `whatsapp.se
 - Tempo por etapa: cada `ExecutedStep` (chamada de ferramenta) carrega seu próprio `duration_ms`, visível em `steps` na resposta de `/api/chat` e `/api/agents/{name}/run`; o Cognitive Pipeline expõe o mesmo detalhamento por etapa em `stage_durations_ms`, além de registrar tudo (intenção, prioridade, agentes usados, tempos) em um log estruturado (`source=cognitive_pipeline`) por conversa.
 - `LOG_JSON=true` — logs estruturados em JSON (padrão no Docker Compose).
 
+## Dashboard Administrativo
+
+Painel administrativo (Sprint 4), somente leitura, em `/admin` — status dos
+sistemas, agentes e tools registrados, timeline de execuções, memória (Qdrant/
+embeddings), Google Workspace, WhatsApp, usuários, logs, métricas e
+informações de sistema, no estilo de LangSmith/Grafana/Datadog. Exclusivo para
+`role=admin`. Construído inteiramente sobre dados que já existiam (Agent/Tool
+Registry, tabelas já existentes, métricas Prometheus já expostas) — nenhuma
+regra de negócio foi alterada. Detalhes completos, incluindo as limitações de
+dados assumidas explicitamente (não há auditoria de execução por tool nem QR
+code do WhatsApp nesta versão): **[`docs/DASHBOARD.md`](docs/DASHBOARD.md)**.
+
 ## Desenvolvimento
 
 ```bash
 # Backend + frontend com hot reload, sem Docker
 ./scripts/dev.sh
 
-# Testes (473 testes; cobertura ~93%)
+# Testes backend (540 testes; cobertura ~93%)
 cd backend && pip install -r requirements-dev.txt && pytest
 pytest --cov=. --cov-report=term    # com cobertura
+
+# Testes frontend (106 testes; cobertura ~95% em components/admin, lib e hooks)
+cd frontend && npm test
+npm run test:coverage               # com cobertura
 
 # CI: GitHub Actions roda lint + testes + migrações (backend) e build (frontend) em cada PR
 
@@ -341,6 +357,7 @@ alembic revision --autogenerate -m "..."    # criar a partir dos models
 - [docs/CALENDAR.md](docs/CALENDAR.md) — integração Google Calendar: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
 - [docs/CONTACTS.md](docs/CONTACTS.md) — integração Google Contacts: arquitetura, isolamento, ferramentas, setup OAuth passo a passo
 - [docs/DRIVE.md](docs/DRIVE.md) — Google Drive como base de conhecimento: arquitetura, integração com o Memory Manager existente, isolamento, ferramentas, setup OAuth passo a passo
+- [docs/DASHBOARD.md](docs/DASHBOARD.md) — Dashboard Administrativo: arquitetura, endpoints e a fonte real de cada dado, limitações assumidas, segurança, testes
 - [SECURITY.md](SECURITY.md) — modelo de segurança consolidado (autenticação, isolamento, segredos, checklist de produção)
 - [docs/fase4.1-relatorio.md](docs/fase4.1-relatorio.md) — relatório técnico do fluxo ponta a ponta do WhatsApp
 - [docs/fase4.2-relatorio.md](docs/fase4.2-relatorio.md) — relatório técnico do Cognitive Pipeline
