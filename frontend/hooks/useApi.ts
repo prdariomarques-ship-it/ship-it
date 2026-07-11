@@ -66,8 +66,11 @@ export async function apiFetch<T>(
   };
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
 
-  if (response.status === 401 && typeof window !== "undefined") {
+  if (response.status === 401 && typeof window !== "undefined" && token) {
     // Access token expired: rotate the refresh token once, then retry.
+    // Only applies to requests that carried a token — an anonymous 401
+    // (e.g. a failed /auth/login attempt) is a normal error the caller
+    // should handle, not a session expiry to redirect away from.
     if (!retried && (await tryRefresh())) {
       return apiFetch<T>(path, options, true);
     }

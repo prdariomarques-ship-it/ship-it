@@ -32,6 +32,12 @@ npm-debug.log*
 tsconfig.tsbuildinfo
 coverage/
 
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/.auth/
+frontend/blob-report/
+
 # Ambiente
 .env
 .env.local

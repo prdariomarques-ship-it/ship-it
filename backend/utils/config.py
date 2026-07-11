@@ -156,6 +156,12 @@ class Settings(BaseSettings):
     # recusado antes de baixar, nunca lido parcialmente na memória.
     gdrive_max_file_size_bytes: int = 20_000_000
 
+    # OpenTelemetry tracing (Sprint 5) — off by default; no collector exists
+    # in every environment this runs in. When enabled with no endpoint set,
+    # spans print to stdout (console exporter) instead of failing to export.
+    otel_enabled: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
 

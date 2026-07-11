@@ -66,7 +66,9 @@ a {
 
 .sidebar a.active {
   background: var(--accent-soft);
-  color: var(--accent);
+  /* Lighter than --accent: #4f8cff on this tinted background is 4.41:1,
+     just under the WCAG AA 4.5:1 text minimum. */
+  color: #6fa0ff;
   font-weight: 600;
 }
 
@@ -74,6 +76,39 @@ a {
   flex: 1;
   padding: 2rem 2.5rem;
   max-width: 1200px;
+  min-width: 0;
+}
+
+/* Below this width the fixed 230px sidebar no longer fits alongside
+   content without causing horizontal overflow — turn it into a
+   horizontally-scrollable top bar instead of a stacked column. */
+@media (max-width: 860px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    padding: 0.65rem 0.75rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar .brand {
+    padding: 0 0.75rem;
+    flex-shrink: 0;
+  }
+
+  .sidebar a {
+    white-space: nowrap;
+  }
+
+  .content {
+    padding: 1.25rem 1rem;
+  }
 }
 
 .page-title {

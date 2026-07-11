@@ -39,7 +39,9 @@ function GuardScreen({ children }: { children: React.ReactNode }) {
       <AdminSidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <AdminHeader userEmail={state.user.email} />
-        <main className="admin-scroll flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="admin-scroll flex-1 overflow-y-auto p-6" tabIndex={0}>
+          {children}
+        </main>
       </div>
     </div>
   );

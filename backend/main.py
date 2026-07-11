@@ -30,7 +30,7 @@ from jobs.router import router as jobs_router
 from jobs.worker import job_worker
 from mail.router import router as mail_router
 from memory.router import router as memory_router
-from observability import health_router, metrics_middleware, metrics_router
+from observability import RequestIDMiddleware, health_router, metrics_middleware, metrics_router, setup_tracing
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
 from utils.logging import configure_logging, get_logger
@@ -139,6 +139,18 @@ def create_app() -> FastAPI:
 
     # Registered after (= outermost), so 429s from the rate limiter are counted too.
     app.middleware("http")(metrics_middleware)
+
+    # Outermost of all: the request id must be set before CORS/rate-limit/
+    # metrics run, so their own log lines (and an early 429/403 response)
+    # already carry it too.
+    app.add_middleware(RequestIDMiddleware)
+
+    setup_tracing(
+        app,
+        enabled=settings.otel_enabled,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+        service_name=settings.app_name,
+    )
 
     app.include_router(health_router)
     app.include_router(metrics_router)

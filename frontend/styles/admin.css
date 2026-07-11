@@ -17,7 +17,9 @@
   --admin-input: 222 16% 17%;
   --admin-ring: 217 91% 60%;
 
-  --admin-primary: 217 91% 60%;
+  /* 64% lightness (not the original 60%): text-primary on a bg-primary/15
+     tint was 4.17:1, just under the WCAG AA 4.5:1 minimum for text. */
+  --admin-primary: 217 91% 64%;
   --admin-primary-foreground: 210 40% 98%;
 
   --admin-secondary: 222 18% 13%;
@@ -32,7 +34,9 @@
   --admin-success: 142 71% 45%;
   --admin-success-foreground: 210 40% 98%;
 
-  --admin-destructive: 0 72% 51%;
+  /* 61% lightness (not the original 51%): text-destructive on the card
+     background was 3.8:1, below the WCAG AA 4.5:1 minimum for text. */
+  --admin-destructive: 0 72% 61%;
   --admin-destructive-foreground: 210 40% 98%;
 
   --admin-warning: 38 92% 50%;

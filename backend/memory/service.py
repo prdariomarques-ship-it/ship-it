@@ -100,9 +100,9 @@ class MemoryService:
                 must=[FieldCondition(key="contact_id", match=MatchValue(value=contact_id))]
             )
 
-        results = await self.client.search(
+        response = await self.client.query_points(
             collection_name=self._settings.qdrant_collection,
-            query_vector=vector,
+            query=vector,
             limit=limit,
             query_filter=query_filter,
         )
@@ -113,7 +113,7 @@ class MemoryService:
                 "contact_id": point.payload.get("contact_id") if point.payload else None,
                 "score": point.score,
             }
-            for point in results
+            for point in response.points
         ]
 
 
