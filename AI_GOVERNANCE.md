@@ -106,5 +106,5 @@ consolidação pós-release v1.2.0, e esta própria sessão de arquitetura).
   de governança protege
 - `ARCHITECTURE_MIGRATION_PLAN.md` — fases de execução, cada uma sujeita
   ao mesmo fluxo de aprovação descrito aqui
-- `docs/governance/ENGINEERING_GUIDE.md` — práticas de engenharia que
+- `docs/architecture/MODULE_PATTERNS.md` — práticas de engenharia que
   Claude Code e Qwen Coder seguem na implementação

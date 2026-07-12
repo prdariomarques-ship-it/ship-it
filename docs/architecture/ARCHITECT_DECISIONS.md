@@ -58,7 +58,7 @@ monolito acoplado e irreversível.
 
 **Produção**: candidato a lint de importação em CI (não implementado —
 nomeado como item de trabalho futuro em
-`docs/governance/ENGINEERING_GUIDE.md`).
+`docs/architecture/MODULE_PATTERNS.md`).
 
 **Status**: decidido.
 

@@ -23,7 +23,7 @@ These are the single source of truth for platform and core architecture:
 | Document | Purpose | Status |
 |---|---|---|
 | **CONTRIBUTING.md** | Development conventions and processes (agents, tools, providers, testing, CI/CD) | ✅ Authoritative |
-| **docs/governance/ENGINEERING_GUIDE.md** | Platform-level engineering practices extending CONTRIBUTING.md | ✅ Authoritative |
+| **docs/architecture/MODULE_PATTERNS.md** | Platform-level engineering practices extending CONTRIBUTING.md | ✅ Authoritative |
 | **docs/roadmap/ROADMAP_24_MONTHS.md** | 24-month platform evolution roadmap (8 trimesters, module sequencing) | ✅ Authoritative |
 | **ROADMAP_v2.md** | Core (Dario OS) roadmap v1.2.1 → v2.0.0 | ✅ Authoritative (Core only) |
 | **PROJECT_STATUS.md** | Current production status, 555+ test suite, known issues | ✅ Authoritative |
@@ -79,7 +79,7 @@ These documents are kept in the repository as historical record but **are no lon
 1. ARCHITECTURE_FINAL.md (vision, topology, principles)
 2. MODULE_CATALOG.md (module specifications)
 3. ARCHITECTURE_MIGRATION_PLAN.md (implementation phases)
-4. docs/governance/ENGINEERING_GUIDE.md (practices)
+4. docs/architecture/MODULE_PATTERNS.md (practices)
 5. CONTRIBUTING.md (conventions)
 
 **Looking for a decision?** Check:
@@ -87,7 +87,7 @@ These documents are kept in the repository as historical record but **are no lon
 2. ARCHITECTURE_REVIEW.md (issues that led to decisions)
 
 **Setting up or deploying?** See:
-1. docs/governance/ENGINEERING_GUIDE.md (practices)
+1. docs/architecture/MODULE_PATTERNS.md (practices)
 2. CONTRIBUTING.md (conventions)
 3. docs/roadmap/ROADMAP_24_MONTHS.md (current phase context)
 
@@ -95,7 +95,7 @@ These documents are kept in the repository as historical record but **are no lon
 1. MODULE_CATALOG.md (module spec)
 2. ARCHITECTURE_FINAL.md (communication channels, dependency rules)
 3. CONTRIBUTING.md (conventions to follow)
-4. docs/governance/ENGINEERING_GUIDE.md (platform practices)
+4. docs/architecture/MODULE_PATTERNS.md (platform practices)
 
 ---
 

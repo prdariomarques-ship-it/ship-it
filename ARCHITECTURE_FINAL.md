@@ -36,7 +36,7 @@ comunicação entre módulos, ou modelo de dado compartilhado, responde
 antes de ser tomada: **"esta alteração aproxima ou afasta a Dario
 Platform da visão de longo prazo?"** Esta é a única formulação oficial
 da pergunta — não repetida em nenhum outro documento além deste e de
-`docs/governance/ENGINEERING_GUIDE.md`, que a aplica operacionalmente.
+`docs/architecture/MODULE_PATTERNS.md`, que a aplica operacionalmente.
 
 ## Topologia: monolito modular
 

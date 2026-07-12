@@ -51,7 +51,7 @@ Toda decisão de arquitetura futura se testa contra a mesma pergunta:
 **"esta alteração aproxima ou afasta a Dario Platform da visão de longo
 prazo?"** Se afastar, não implementa. Se aproximar, explica por quê antes
 de começar — formalizado como critério de aceite de RFC em
-`docs/governance/ENGINEERING_GUIDE.md`.
+`docs/architecture/MODULE_PATTERNS.md`.
 
 ## Decisão de topologia: monolito modular
 
@@ -107,7 +107,7 @@ ordem de preferência:
 - `docs/architecture/ARCHITECT_DECISIONS.md` — decisões arquiteturais registradas, com justificativa e status
 - `docs/modulos/MODULE_CATALOG.md` — árvore de diretórios, contrato de módulo, catálogo de eventos, mapa de dados
 - `docs/roadmap/ROADMAP_24_MONTHS.md` — sequenciamento, riscos, oportunidades
-- `docs/governance/ENGINEERING_GUIDE.md` — práticas de engenharia de produção para todo módulo novo
+- `MODULE_PATTERNS.md` — práticas de engenharia de produção para todo módulo novo
 - `../architecture.md` — arquitetura do Core (Dario OS), inalterada
 - `../../ROADMAP_v2.md` — roadmap do Core (v1.2.1 → v2.0.0)
 - `../../CONTRIBUTING.md` — convenções de Agent/Tool/Provider que todo módulo reaplica

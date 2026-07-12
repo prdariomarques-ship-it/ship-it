@@ -45,7 +45,7 @@ All deprecated documents have a clear deprecation notice at the top pointing to 
 
 All references to deprecated documents have been updated to point to authoritative sources:
 
-1. **docs/governance/ENGINEERING_GUIDE.md**
+1. **docs/architecture/MODULE_PATTERNS.md**
    - Changed `docs/architecture/ARCHITECT_DECISIONS.md` → `ARCHITECTURE_DECISIONS.md` (raiz)
    - Changed `AD-005` reference → `DEC-5` reference
    - Changed `docs/modulos/MODULE_CATALOG.md` → `MODULE_CATALOG.md` (raiz)
@@ -81,7 +81,7 @@ The following files remain unchanged because they are either:
 - ARCHITECTURE_MIGRATION_PLAN.md ✓
 - docs/architecture.md ✓
 - CONTRIBUTING.md ✓
-- docs/governance/ENGINEERING_GUIDE.md (references updated only, content unchanged)
+- docs/architecture/MODULE_PATTERNS.md (references updated only, content unchanged)
 - docs/roadmap/ROADMAP_24_MONTHS.md (references updated only, content unchanged)
 
 **Historical records (unchanged)**:
@@ -140,8 +140,10 @@ Repository Root
     ├── architecture/
     │   ├── MASTER_CONTEXT.md (DEPRECATED: see ARCHITECTURE_FINAL.md)
     │   └── ARCHITECT_DECISIONS.md (DEPRECATED: see ARCHITECTURE_DECISIONS.md in root)
+    ├── architecture/
+    │   └── MODULE_PATTERNS.md (authoritative: platform practices)
     ├── governance/
-    │   └── ENGINEERING_GUIDE.md (authoritative: platform practices)
+    │   └── ENGINEERING_GUIDE.md (DEPRECATED: see MODULE_PATTERNS.md)
     ├── modulos/
     │   └── MODULE_CATALOG.md (DEPRECATED: see MODULE_CATALOG.md in root)
     └── roadmap/
@@ -198,7 +200,7 @@ Phase 0 directly resolves the risks identified in ARCHITECTURE_REVIEW.md:
 ### Modified (References Updated)
 | File | Changes |
 |---|---|
-| docs/governance/ENGINEERING_GUIDE.md | 3 references updated to root-level documents |
+| docs/architecture/MODULE_PATTERNS.md | 3 references updated to root-level documents |
 | docs/roadmap/ROADMAP_24_MONTHS.md | 4 references updated to root-level documents |
 
 ### Marked Deprecated (Content Preserved)
@@ -263,7 +265,7 @@ grep -l "⚠️ DEPRECATED" PLATFORM_ARCHITECTURE.md docs/modulos/MODULE_CATALOG
 
 **All reference updates** (search for updated citations):
 ```bash
-grep -n "ARCHITECTURE_FINAL.md\|MODULE_CATALOG.md\|ARCHITECTURE_DECISIONS.md" docs/governance/ENGINEERING_GUIDE.md docs/roadmap/ROADMAP_24_MONTHS.md
+grep -n "ARCHITECTURE_FINAL.md\|MODULE_CATALOG.md\|ARCHITECTURE_DECISIONS.md" docs/architecture/MODULE_PATTERNS.md docs/roadmap/ROADMAP_24_MONTHS.md
 ```
 
 **Link validation** (no output means no broken links):

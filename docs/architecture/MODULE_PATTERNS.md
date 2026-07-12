@@ -1,11 +1,3 @@
-# DEPRECATED
-
-Este documento foi substituído por:
-
-docs/architecture/MODULE_PATTERNS.md
-
----
-
 # Dario Platform — Engineering Guide
 
 Práticas de engenharia de produção para todo módulo novo da Dario
