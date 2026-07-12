@@ -114,6 +114,7 @@ class Settings(BaseSettings):
     jobs_default_max_attempts: int = 3
     jobs_retry_backoff_seconds: int = 30  # base for exponential backoff
     jobs_stale_after_seconds: int = 300  # running longer than this = crashed worker
+    jobs_max_concurrent_workers: int = 5  # max jobs executing concurrently per worker
 
     # Event Bus (best-effort Redis fan-out; in-process delivery never depends on it)
     events_channel: str = "darioos:events"

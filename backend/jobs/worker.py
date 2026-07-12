@@ -33,6 +33,7 @@ class JobWorker:
         self._settings = get_settings()
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
+        self._semaphore = asyncio.Semaphore(self._settings.jobs_max_concurrent_workers)
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -77,11 +78,17 @@ class JobWorker:
             # attributes accessed directly, which would crash with
             # MissingGreenlet on the first implicit attribute refresh.
             job_ids = [job.id for job in claimed]
-            for job_id in job_ids:
-                job = await repository.get(job_id)
-                if job is None:
-                    continue
-                await self._execute(session, repository, job)
+
+            async def execute_with_semaphore(job_id: int) -> None:
+                async with self._semaphore:
+                    job = await repository.get(job_id)
+                    if job is None:
+                        return
+                    await self._execute(session, repository, job)
+
+            if job_ids:
+                await asyncio.gather(*(execute_with_semaphore(job_id) for job_id in job_ids))
+
             return len(job_ids)
 
     async def _claim_due(
