@@ -65,4 +65,4 @@ class TestLoggingIntegration:
         record = logging.LogRecord("test", logging.INFO, __file__, 1, "hello", None, None)
         RequestIDFilter().filter(record)
         rendered = logging.Formatter(TEXT_FORMAT).format(record)
-        assert "[-]" in rendered
+        assert "[-:-]" in rendered
