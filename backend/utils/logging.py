@@ -4,7 +4,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-TEXT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | [%(request_id)s] | %(message)s"
+TEXT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | [%(request_id)s:%(trace_id)s] | %(message)s"
 
 
 class RequestIDFilter(logging.Filter):
@@ -16,9 +16,10 @@ class RequestIDFilter(logging.Filter):
         # Deferred import: observability.request_context has no dependency on
         # this module, so this can't cycle — kept local since logging is
         # configured before the rest of the app finishes importing.
-        from observability.request_context import get_request_id
+        from observability.request_context import get_request_id, get_trace_id
 
         record.request_id = get_request_id() or "-"
+        record.trace_id = get_trace_id() or "-"
         return True
 
 
@@ -35,6 +36,9 @@ class JsonFormatter(logging.Formatter):
         request_id = getattr(record, "request_id", "-")
         if request_id != "-":
             entry["request_id"] = request_id
+        trace_id = getattr(record, "trace_id", "-")
+        if trace_id != "-":
+            entry["trace_id"] = trace_id
         if record.exc_info:
             entry["exception"] = self.formatException(record.exc_info)
         extra = getattr(record, "context", None)

@@ -13,7 +13,13 @@ FastAPI (one span per HTTP request), SQLAlchemy (one span per query) and
 httpx (one span per outbound call — LLM providers, WhatsApp gateways, Google
 APIs). No manual span creation was added anywhere else in the codebase —
 those three cover the request lifecycle without touching business logic.
+
+Includes sampling (configurable strategies), log-to-trace correlation (trace_id
+in logs), Prometheus exemplars for metric-to-trace linking, and operational
+metrics for tracing health monitoring.
 """
+from typing import Optional
+
 from fastapi import FastAPI
 
 from utils.logging import get_logger
@@ -21,16 +27,32 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 _tracing_configured = False
+_meter_provider = None
 
 
-def setup_tracing(app: FastAPI, *, enabled: bool, otlp_endpoint: str, service_name: str) -> None:
-    global _tracing_configured
+def setup_tracing(
+    app: FastAPI,
+    *,
+    enabled: bool,
+    otlp_endpoint: str,
+    service_name: str,
+    sampling: Optional[str] = None,
+    prometheus_metrics: bool = False,
+) -> None:
+    """Set up OpenTelemetry tracing with sampling, metrics, and log correlation.
+
+    Args:
+        app: FastAPI application
+        enabled: Enable tracing
+        otlp_endpoint: OTLP/HTTP exporter endpoint
+        service_name: Service name for resource
+        sampling: Sampling strategy ("always", "never", "fixed:0.1", "parent-fixed:0.1", "error:0.05")
+        prometheus_metrics: Enable Prometheus metrics reader
+    """
+    global _tracing_configured, _meter_provider
     if not enabled:
         return
     if _tracing_configured:
-        # Re-entrant safety: create_app() can run more than once in a test
-        # session (each test module importing main fresh); instrumenting
-        # the same SQLAlchemy engine/httpx client twice raises.
         return
 
     try:
@@ -46,11 +68,23 @@ def setup_tracing(app: FastAPI, *, enabled: bool, otlp_endpoint: str, service_na
         logger.warning("OTEL_ENABLED=true but opentelemetry packages are not installed; tracing disabled")
         return
 
+    from observability.sampling import get_sampler_from_env
+    from observability.operational_metrics import setup_operational_metrics, set_sampling_rate
+
     resource = Resource.create({SERVICE_NAME: service_name})
-    provider = TracerProvider(resource=resource)
+
+    # Initialize sampling strategy
+    sampler_strategy = get_sampler_from_env(sampling)
+    sampler = sampler_strategy.get_sampler()
+    set_sampling_rate(sampler_strategy.get_rate())
+
+    provider = TracerProvider(resource=resource, sampler=sampler)
     exporter = OTLPSpanExporter(endpoint=otlp_endpoint) if otlp_endpoint else ConsoleSpanExporter()
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
+
+    # Initialize operational metrics
+    _meter_provider = setup_operational_metrics(prometheus_metrics)
 
     FastAPIInstrumentor.instrument_app(app)
     HTTPXClientInstrumentor().instrument()
@@ -60,7 +94,9 @@ def setup_tracing(app: FastAPI, *, enabled: bool, otlp_endpoint: str, service_na
 
     _tracing_configured = True
     logger.info(
-        "OpenTelemetry tracing enabled (service=%s, exporter=%s)",
+        "OpenTelemetry tracing enabled (service=%s, exporter=%s, sampling=%s, metrics=%s)",
         service_name,
         "otlp" if otlp_endpoint else "console",
+        sampling or "default",
+        "prometheus" if prometheus_metrics else "memory",
     )

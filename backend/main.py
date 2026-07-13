@@ -160,6 +160,8 @@ def create_app() -> FastAPI:
         enabled=settings.otel_enabled,
         otlp_endpoint=settings.otel_exporter_otlp_endpoint,
         service_name=settings.app_name,
+        sampling=settings.otel_sampling,
+        prometheus_metrics=settings.otel_prometheus_metrics,
     )
 
     app.include_router(health_router)
