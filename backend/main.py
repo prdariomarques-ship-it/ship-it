@@ -30,6 +30,9 @@ from jobs.router import router as jobs_router
 from jobs.worker import job_worker
 from mail.router import router as mail_router
 from memory.router import router as memory_router
+from middleware.error_sanitization import ErrorSanitizationMiddleware
+from middleware.request_size_limit import RequestSizeLimitMiddleware
+from middleware.security_headers import SecurityHeadersMiddleware
 from observability import RequestIDMiddleware, health_router, metrics_middleware, metrics_router, setup_tracing
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
@@ -144,6 +147,11 @@ def create_app() -> FastAPI:
     # metrics run, so their own log lines (and an early 429/403 response)
     # already carry it too.
     app.add_middleware(RequestIDMiddleware)
+
+    # P7 Security hardening middleware (in reverse order of execution):
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestSizeLimitMiddleware)
+    app.add_middleware(ErrorSanitizationMiddleware)
 
     setup_tracing(
         app,
