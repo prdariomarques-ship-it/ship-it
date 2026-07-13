@@ -71,9 +71,10 @@ completed_capabilities:
       - 14f9567
 
 current_capability: OBS-003
-current_phase: QUALITY_ASSURANCE
-current_status: APPROVED
-current_owner: qa-engineer
+current_phase: CAPABILITY_CLOSEOUT
+current_status: CLOSED
+current_owner: chief-architect
+closure_date: 2026-07-13
 
 completed_gates:
   - gate: QUALITY_ASSURANCE
@@ -89,6 +90,27 @@ completed_gates:
     status: APPROVED
     completion_date: 2026-07-13
     description: "Code review passed. Specification compliance verified, code quality acceptable, security posture verified."
+
+  - gate: INFRASTRUCTURE_VALIDATION
+    capability: OBS-003
+    owner: tech-lead
+    status: PASSED
+    completion_date: 2026-07-13
+    description: "Infrastructure validation passed. Alert rules validated, dashboard configured, OTEL integration verified, Docker compatible."
+
+  - gate: CAPABILITY_CLOSEOUT
+    capability: OBS-003
+    owner: chief-architect
+    status: CLOSED
+    completion_date: 2026-07-13
+    description: "OBS-003 CLOSED per AOM v3.1. All gates completed, all ACs satisfied, all documentation archived, production deployment ready."
+    closure_document: OBS-003_CAPABILITY_CLOSEOUT.md
+    tests_discovered: 62
+    code_files: 15
+    infrastructure_files: 3
+    acceptance_criteria_satisfied: 20
+    architecture_status: FROZEN
+    governance_status: LOCKED
 
 
   - gate: MERGE_AUTHORIZATION
