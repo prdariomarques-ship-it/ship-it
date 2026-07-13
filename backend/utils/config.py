@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     cache_default_ttl_seconds: int = 60
 
+    # Performance Optimization (OBS-003)
+    cache_enabled: bool = True
+    cache_ttl_default: int = 300  # 5 minutes
+    cache_ttl_short: int = 60  # 1 minute
+    cache_ttl_long: int = 3600  # 1 hour
+    cache_max_entries: int = 10000
+    cache_jitter_range: float = 0.2  # ±20% to prevent cache stampede
+    performance_sla_latency_ms: int = 200  # p95 target
+    performance_middleware_enabled: bool = True
+
     # Rate limiting
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60

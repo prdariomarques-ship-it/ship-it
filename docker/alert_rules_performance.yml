@@ -1,0 +1,136 @@
+# Prometheus Alert Rules for OBS-003 Performance Monitoring
+# Complements existing alert_rules.yml with performance-specific alerts
+
+groups:
+  - name: performance_monitoring
+    interval: 15s
+    rules:
+      # P95 Latency SLA Violation
+      - alert: P95LatencyViolation
+        expr: histogram_quantile(0.95, rate(api_response_time_ms_bucket[5m])) > 200
+        for: 2m
+        labels:
+          severity: critical
+          service: backend
+          metric: latency
+        annotations:
+          summary: "P95 API latency exceeds SLA threshold ({{ $value | humanize }}ms > 200ms)"
+          description: "API p95 latency is {{ $value | humanize }}ms, exceeding the 200ms SLA target for service {{ $labels.job }}"
+          runbook_url: "https://docs.example.com/runbooks/latency"
+
+      # Cache Hit Ratio Low
+      - alert: CacheHitRatioLow
+        expr: cache_hit_ratio < 0.7
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+          metric: cache
+        annotations:
+          summary: "Cache hit ratio below target ({{ $value | humanizePercentage }} < 70%)"
+          description: "Cache hit ratio is {{ $value | humanizePercentage }}, below the 70% target. Check cache configuration and TTL settings."
+          runbook_url: "https://docs.example.com/runbooks/cache"
+
+      # Frontend Bundle Size Regression
+      - alert: BundleSizeRegression
+        expr: frontend_bundle_size_bytes > 550000
+        for: 5m
+        labels:
+          severity: warning
+          service: frontend
+          metric: bundle_size
+        annotations:
+          summary: "Frontend bundle size exceeds threshold ({{ $value | humanize }} bytes > 550KB)"
+          description: "Bundle size is {{ $value | humanize1024 }}, exceeding the 550KB warning threshold. Review dependency updates and code splitting."
+          runbook_url: "https://docs.example.com/runbooks/bundle"
+
+      # Database Query Performance Degradation
+      - alert: DatabaseQuerySpike
+        expr: rate(db_query_duration_ms_sum[5m]) / rate(db_query_duration_ms_count[5m]) > 100
+        for: 3m
+        labels:
+          severity: warning
+          service: backend
+          metric: database
+        annotations:
+          summary: "Average database query time exceeds baseline ({{ $value | humanize }}ms > 100ms)"
+          description: "Average query duration is {{ $value | humanize }}ms. Check for N+1 queries or missing indexes."
+          runbook_url: "https://docs.example.com/runbooks/database"
+
+      # Query Count Increase (possible N+1)
+      - alert: QueryCountIncrease
+        expr: increase(db_query_total[5m]) > 1000
+        for: 3m
+        labels:
+          severity: warning
+          service: backend
+          metric: database
+        annotations:
+          summary: "Database query count spike detected"
+          description: "Query count increased by {{ $value }} in 5 minutes. Check for N+1 query patterns or missing eager loading."
+          runbook_url: "https://docs.example.com/runbooks/queries"
+
+      # Span Export Failures
+      - alert: OTELSpanExportFailure
+        expr: rate(otel_spans_dropped_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: observability
+          metric: tracing
+        annotations:
+          summary: "OpenTelemetry span export failures"
+          description: "Span export dropped {{ $value | humanizePercentage }} of spans. Check Jaeger connectivity and OTLP endpoint."
+          runbook_url: "https://docs.example.com/runbooks/tracing"
+
+      # Cache Memory Pressure
+      - alert: RedisMemoryPressure
+        expr: redis_used_memory_bytes / redis_maxmemory_bytes > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+          metric: memory
+        annotations:
+          summary: "Redis memory usage high ({{ $value | humanizePercentage }})"
+          description: "Redis is using {{ $value | humanizePercentage }} of available memory. Consider increasing max memory or reducing cache TTL."
+          runbook_url: "https://docs.example.com/runbooks/redis"
+
+      # SLA Compliance Below Target
+      - alert: SLAComplianceLow
+        expr: (1 - (count(api_response_time_ms_bucket{le="200"}) / count(api_response_time_ms_bucket{le="+Inf"}))) * 100 > 5
+        for: 10m
+        labels:
+          severity: critical
+          service: backend
+          metric: sla
+        annotations:
+          summary: "SLA compliance below 95% target"
+          description: "More than 5% of requests violating p95 latency SLA. Immediate investigation required."
+          runbook_url: "https://docs.example.com/runbooks/sla"
+
+      # Frontend Performance Metric Missing
+      - alert: FrontendMetricsNotReporting
+        expr: absent(frontend_bundle_size_bytes) == 1
+        for: 5m
+        labels:
+          severity: warning
+          service: frontend
+          metric: monitoring
+        annotations:
+          summary: "Frontend performance metrics not reporting"
+          description: "No frontend bundle size metrics received in the last 5 minutes. Check RUM instrumentation."
+          runbook_url: "https://docs.example.com/runbooks/rum"
+
+      # Backend Performance Middleware Overhead
+      - alert: PerformanceMiddlewareOverhead
+        expr: rate(performance_middleware_duration_ms_sum[5m]) / rate(performance_middleware_duration_ms_count[5m]) > 10
+        for: 5m
+        labels:
+          severity: info
+          service: backend
+          metric: instrumentation
+        annotations:
+          summary: "Performance middleware overhead above 10ms"
+          description: "Instrumentation is adding {{ $value | humanize }}ms per request. May impact baseline performance."
+          runbook_url: "https://docs.example.com/runbooks/instrumentation"
