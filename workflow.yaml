@@ -5,7 +5,7 @@
 current_program:
   id: OBS-002
   name: "Distributed Tracing"
-  status: IN_PROGRESS
+  status: PRODUCTION
   architecture_state: FROZEN
   governance_state: FROZEN
 
@@ -54,15 +54,23 @@ capabilities:
       - 14f9567
 
 current_capability: OBS-002
-current_phase: MERGE_AUTHORIZATION
-current_status: FINAL_REVIEW_APPROVED
+current_phase: INFRASTRUCTURE_VALIDATION
+current_status: MERGED_TO_MAIN
 
-pending_approvals:
+completed_gates:
   - gate: MERGE_AUTHORIZATION
     capability: OBS-002
     owner: cto
-    status: PENDING
-    description: "Merge all OBS-002 commits to main (3 phases complete)"
+    status: APPROVED
+    completion_date: 2026-07-13
+    merge_commit: d9332ba
+
+pending_approvals:
+  - gate: INFRASTRUCTURE_VALIDATION
+    capability: OBS-002
+    owner: tech-lead
+    status: IN_PROGRESS
+    description: "Validate Docker (Jaeger), OTLP/HTTP, Prometheus, Grafana, external backends"
     deadline: 2026-07-14
 
 next_capability: null
@@ -84,6 +92,6 @@ approval_chain:
   implementation: ✅ APPROVED (2026-07-13, Impl Engineer, 771 tests)
   validation: ✅ COMPLETED (2026-07-13, QA, 89% coverage)
   final_review: ✅ APPROVED (2026-07-13, Chief Architect)
-  merge: ⏳ PENDING (CTO, awaiting authorization)
-  infrastructure: ⏳ DEFERRED (Tech Lead, after merge)
-  production: ⏳ DEFERRED (DevOps, after infrastructure)
+  merge: ✅ APPROVED (2026-07-13, CTO, commit d9332ba)
+  infrastructure: ⏳ IN_PROGRESS (Tech Lead)
+  production: ⏳ PENDING (DevOps, after infrastructure)
