@@ -44,9 +44,12 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: int = logging.INFO, json_output: bool = False) -> None:
+    from services.log_redaction import LogRedactionFilter
+
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter() if json_output else logging.Formatter(TEXT_FORMAT))
     handler.addFilter(RequestIDFilter())
+    handler.addFilter(LogRedactionFilter())
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level)

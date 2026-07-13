@@ -14,5 +14,6 @@ async def record_log(
     entry = LogEntry(source=source, message=message, level=level, payload=payload or {})
     db.add(entry)
     await db.commit()
-    await db.refresh(entry)
+    # Don't refresh; callers don't use the returned entry (most just call and forget).
+    # Refreshing after commit can cause issues when the session is closed/detached.
     return entry

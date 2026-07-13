@@ -33,6 +33,7 @@ class JobWorker:
         self._settings = get_settings()
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
+        self._semaphore = asyncio.Semaphore(self._settings.jobs_max_concurrent_workers)
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -70,18 +71,24 @@ class JobWorker:
             await self._recover_stale(session, repository, now)
             claimed = await self._claim_due(session, repository, now)
             # Capture ids while the objects are guaranteed fresh (just
-            # committed above). session.rollback() inside one job's failure
-            # handling expires *every* object on this shared session — the
-            # next job in this batch must be re-fetched by id (an explicit,
-            # safely-awaited query) rather than have its stale in-memory
-            # attributes accessed directly, which would crash with
-            # MissingGreenlet on the first implicit attribute refresh.
+            # committed above). Each concurrent job needs its own session to avoid
+            # SQLAlchemy async concurrency issues (session is not thread-safe).
             job_ids = [job.id for job in claimed]
-            for job_id in job_ids:
-                job = await repository.get(job_id)
-                if job is None:
-                    continue
-                await self._execute(session, repository, job)
+
+            async def execute_with_semaphore(job_id: int) -> None:
+                async with self._semaphore:
+                    # Each job gets its own session and repository to avoid
+                    # concurrent access to the same session state.
+                    async with async_session_factory() as job_session:
+                        job_repository = JobRepository(job_session)
+                        job = await job_repository.get(job_id)
+                        if job is None:
+                            return
+                        await self._execute(job_session, job_repository, job)
+
+            if job_ids:
+                await asyncio.gather(*(execute_with_semaphore(job_id) for job_id in job_ids))
+
             return len(job_ids)
 
     async def _claim_due(
