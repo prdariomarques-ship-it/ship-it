@@ -16,7 +16,8 @@ current_program:
   governance_state: LOCKED
   owner: chief-architect
   phase: IMPLEMENTATION
-  lifecycle_stage: DRT-001 (Workflow Engine + State Machine)
+  implementation_strategy: MVP-FIRST (DRT-001 optimized as 6-component production-usable Runtime, deferring advanced features to DRT-002-006)
+  lifecycle_stage: DRT-001 (Workflow Engine + State Machine) - MVP (6 components, 1-week sprint)
   architecture_approval_date: 2026-07-13
   architecture_freeze_date: 2026-07-13
   product_engineering_start_date: 2026-07-13
