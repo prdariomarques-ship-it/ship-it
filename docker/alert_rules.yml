@@ -1,0 +1,66 @@
+groups:
+  - name: darioos_alerts
+    interval: 15s
+    rules:
+      - alert: ResponseTimeAnomaly
+        expr: histogram_quantile(0.95, http_request_duration_seconds) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time detected"
+          description: "p95 response time is {{ $value }}s (threshold: 5s)"
+
+      - alert: ErrorRateSpike
+        expr: (increase(http_requests_total{status=~"5.."}[5m]) / increase(http_requests_total[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate spike detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+
+      - alert: JobQueueOverflow
+        expr: job_queue_depth > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job queue depth exceeded"
+          description: "Queue depth is {{ $value }} jobs (threshold: 100)"
+
+      - alert: AgentTimeoutRate
+        expr: (increase(agent_timeouts_total[5m]) / increase(agent_runs_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High agent timeout rate"
+          description: "Timeout rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+      - alert: LLMProviderError
+        expr: (increase(llm_provider_errors_total[5m]) / increase(llm_calls_total[5m])) > 0.02
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM provider error rate high"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 2%)"
+
+      - alert: DatabasePoolExhaustion
+        expr: db_connections_active > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool near exhaustion"
+          description: "Active connections: {{ $value }} (threshold: 80)"
+
+      - alert: PrometheusScrapeFailed
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus scrape failed"
+          description: "Backend service is not responding to Prometheus scrape"
