@@ -1,0 +1,82 @@
+# Workflow State — Single Source of Truth
+# Updated automatically after every merge and phase transition
+# Last Updated: 2026-07-13
+
+current_program:
+  id: OBS-002
+  name: "Distributed Tracing"
+  status: IN_PROGRESS
+  architecture_state: FROZEN
+  governance_state: FROZEN
+
+capabilities:
+  - id: OBS-002A
+    name: "OpenTelemetry Setup & Auto-Instrumentation"
+    status: COMPLETED
+    owner: implementation-engineer
+    phase: PRODUCTION
+    milestones_completed: 3/3
+    tests_passed: 11/11
+    merge_date: 2026-07-10
+    commits:
+      - de94b59
+      - 45c8c77
+
+  - id: OBS-002B
+    name: "Trace Propagation (6 Mechanisms)"
+    status: COMPLETED
+    owner: implementation-engineer
+    phase: PRODUCTION
+    milestones_completed: 3/3
+    tests_passed: 60/60
+    approval_date: 2026-07-13
+    merge_ready: true
+    commits:
+      - 1ca7966
+      - 0ca07ca
+
+  - id: OBS-002C
+    name: "Trace Correlation & Operational Metrics"
+    status: COMPLETED
+    owner: implementation-engineer
+    phase: VALIDATION
+    milestones_completed: 3/3
+    tests_passed: 41/41
+    total_regression_tests: 103/103
+    code_coverage: 76%
+    approval_ready: true
+    commits:
+      - ed4af99
+      - f3dc3ed
+
+current_capability: OBS-002C
+current_phase: FINAL_CAPABILITY_REVIEW
+current_status: VALIDATION_COMPLETE
+
+pending_approvals:
+  - gate: FINAL_CAPABILITY_REVIEW
+    capability: OBS-002C
+    owner: chief-architect
+    status: PENDING
+    deadline: 2026-07-14
+
+next_capability: null
+next_owner: null
+
+program_metrics:
+  total_phases_completed: 12
+  total_capabilities_completed: 3
+  total_tests_passing: 103
+  total_code_coverage: 76%
+  velocity_trend: INCREASING
+  regression_rate: 0%
+  merge_success_rate: 100%
+
+approval_chain:
+  specification: ✅ APPROVED
+  design_review: ✅ APPROVED
+  implementation: ✅ APPROVED
+  validation: ✅ COMPLETED
+  final_review: ⏳ PENDING (Chief Architect)
+  merge: ⏳ DEFERRED (awaiting final review)
+  production: ⏳ DEFERRED (awaiting merge)
