@@ -1,29 +1,21 @@
-"""Admin Dashboard API (Sprint 4) — read-only, ADMIN-only.
+"""Admin Dashboard API — read-only (P4) and job management operations (P6).
 
-Every route here only reads data that already exists: the Agent/Tool
-Registry, existing tables (`users`, `jobs`, `logs`, `messages`, `embeddings`,
-the four Google account tables, `google_drive_indexed_files`), the existing
-Prometheus registry, and the existing `MemoryService.client`/
-`WhatsAppProvider.health_check()` public surfaces. It does not add any new
-business logic, does not touch the Orchestrator/Event Bus/Memory
-Manager/Agents/Providers/OAuth flows, and does not change any existing API.
-
-See docs/DASHBOARD.md for the full data-source table, including which
-fields are honestly `null` because no historical record exists for them
-(there is no per-execution audit trail and no stored WhatsApp QR code —
-both were explicit, confirmed product decisions for this sprint, not
-oversights).
+Read-only endpoints (P4) query existing data: Agent/Tool Registry, existing
+tables (`users`, `jobs`, `logs`, etc.), Prometheus registry, and existing
+services. Job management endpoints (P6) allow admins to cancel and retry jobs
+with atomic state transitions, audit logging, and event bus integration.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin import schemas, service
 from auth.permissions import require_admin
 from database.session import get_db
+from events.bus import event_bus
 from models.email_account import EmailAccount
 from models.gcalendar_account import GoogleCalendarAccount
 from models.gcontacts_account import GoogleContactsAccount
@@ -32,8 +24,12 @@ from models.job import Job, JobStatus
 from models.log import LogEntry
 from models.message import Message, MessageDirection
 from models.user import User
+from services.audit import record_log
 from services.cache import cache_service
 from utils.config import get_settings
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -422,3 +418,134 @@ async def admin_whatsapp(db: DbSession) -> schemas.WhatsAppStatus:
         messages_sent=sent,
         messages_received=received,
     )
+
+
+# --- P6: Job Management Operations (ADMIN-only, state-changing) ---
+
+
+@router.post("/jobs/{job_id}/cancel", summary="Cancel a queued or running job", tags=["admin", "jobs"])
+async def admin_cancel_job(
+    job_id: int,
+    db: DbSession,
+) -> dict:
+    """Atomically cancel a QUEUED or RUNNING job. Cannot cancel already succeeded/failed/cancelled jobs."""
+    from sqlalchemy import update
+
+    # SELECT FOR UPDATE: acquire exclusive row lock before checking/updating state
+    stmt = select(Job).where(Job.id == job_id).with_for_update()
+    result = await db.execute(stmt)
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Validate state: only QUEUED and RUNNING can be cancelled
+    if job.status not in (JobStatus.QUEUED, JobStatus.RUNNING):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel job in {job.status.value} state; only QUEUED or RUNNING jobs can be cancelled",
+        )
+
+    # Update state within same transaction (atomic with lock acquired above)
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(Job)
+        .where(Job.id == job_id)
+        .values(status=JobStatus.CANCELLED, finished_at=now)
+    )
+    await db.commit()
+
+    # Audit logging (includes trace_id via RequestIDFilter)
+    logger.info(
+        "Admin cancelled job",
+        extra={"context": {"job_id": job_id, "previous_status": job.status.value, "new_status": "cancelled"}},
+    )
+
+    # Persist to audit trail
+    await record_log(
+        db,
+        source="admin:job_cancel",
+        message=f"Job {job_id} cancelled by admin",
+        level="info",
+        payload={"job_id": job_id, "job_name": job.name, "previous_status": job.status.value},
+    )
+
+    # Emit event (EventBus listener notifies UI dashboards, notification services)
+    await event_bus.publish(
+        "admin.job_cancelled",
+        {
+            "job_id": job_id,
+            "job_name": job.name,
+            "previous_status": job.status.value,
+            "cancelled_at": now.isoformat(),
+        },
+    )
+
+    return {"job_id": job_id, "status": JobStatus.CANCELLED.value, "finished_at": now.isoformat()}
+
+
+@router.post("/jobs/{job_id}/retry", summary="Retry a failed or cancelled job", tags=["admin", "jobs"])
+async def admin_retry_job(
+    job_id: int,
+    db: DbSession,
+) -> dict:
+    """Atomically reset a FAILED or CANCELLED job to QUEUED for re-execution. Clears error state."""
+    from sqlalchemy import update
+
+    # SELECT FOR UPDATE: acquire exclusive row lock before checking/updating state
+    stmt = select(Job).where(Job.id == job_id).with_for_update()
+    result = await db.execute(stmt)
+    job = result.scalar_one_or_none()
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Validate state: only FAILED and CANCELLED can be retried
+    if job.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry job in {job.status.value} state; only FAILED or CANCELLED jobs can be retried",
+        )
+
+    # Update state within same transaction (atomic with lock acquired above)
+    now = datetime.now(timezone.utc)
+    await db.execute(
+        update(Job)
+        .where(Job.id == job_id)
+        .values(
+            status=JobStatus.QUEUED,
+            attempts=0,  # Reset retry count
+            last_error=None,  # Clear previous error
+            scheduled_at=now,  # Immediate re-queue
+        )
+    )
+    await db.commit()
+
+    # Audit logging (includes trace_id via RequestIDFilter)
+    logger.info(
+        "Admin retried job",
+        extra={"context": {"job_id": job_id, "previous_status": job.status.value, "new_status": "queued"}},
+    )
+
+    # Persist to audit trail
+    await record_log(
+        db,
+        source="admin:job_retry",
+        message=f"Job {job_id} retried by admin (attempts reset to 0)",
+        level="info",
+        payload={"job_id": job_id, "job_name": job.name, "previous_status": job.status.value},
+    )
+
+    # Emit event (EventBus listener notifies UI dashboards, notification services)
+    await event_bus.publish(
+        "admin.job_retried",
+        {
+            "job_id": job_id,
+            "job_name": job.name,
+            "previous_status": job.status.value,
+            "retried_at": now.isoformat(),
+            "attempts_reset_to": 0,
+        },
+    )
+
+    return {"job_id": job_id, "status": JobStatus.QUEUED.value, "scheduled_at": now.isoformat()}

@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from auth.jwt import create_access_token
@@ -490,3 +491,238 @@ async def test_drive_index_stats_returns_zero_and_none_when_nothing_indexed(sess
         count, last_indexed = await drive_index_stats(session)
     assert count == 0
     assert last_indexed is None
+
+
+# --- P6: Job Management Operations (cancel, retry) ---
+
+
+@pytest.mark.asyncio
+async def test_admin_cancel_job_queued_succeeds(client, admin_headers, session_factory):
+    """Admin can cancel a QUEUED job."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.QUEUED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/cancel", headers=admin_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == JobStatus.CANCELLED.value
+    assert body["job_id"] == job_id
+
+    async with session_factory() as session:
+        result = await session.execute(select(Job).where(Job.id == job_id))
+        updated_job = result.scalar_one()
+        assert updated_job.status == JobStatus.CANCELLED
+        assert updated_job.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_cancel_job_running_succeeds(client, admin_headers, session_factory):
+    """Admin can cancel a RUNNING job."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.RUNNING, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/cancel", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == JobStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_admin_cancel_job_succeeded_fails(client, admin_headers, session_factory):
+    """Admin cannot cancel a SUCCEEDED job."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.SUCCEEDED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/cancel", headers=admin_headers)
+    assert response.status_code == 400
+    assert "cannot cancel" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_cancel_job_failed_fails(client, admin_headers, session_factory):
+    """Admin cannot cancel a FAILED job."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.FAILED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/cancel", headers=admin_headers)
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_admin_cancel_nonexistent_job_returns_404(client, admin_headers):
+    """Cancelling nonexistent job returns 404."""
+    response = await client.post("/api/admin/jobs/99999/cancel", headers=admin_headers)
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_job_failed_succeeds(client, admin_headers, session_factory):
+    """Admin can retry a FAILED job (resets attempts to 0, clears error)."""
+    async with session_factory() as session:
+        job = Job(
+            name="test.job",
+            status=JobStatus.FAILED,
+            payload={},
+            attempts=3,
+            last_error="Something went wrong",
+        )
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/retry", headers=admin_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == JobStatus.QUEUED.value
+    assert body["job_id"] == job_id
+
+    async with session_factory() as session:
+        result = await session.execute(select(Job).where(Job.id == job_id))
+        updated_job = result.scalar_one()
+        assert updated_job.status == JobStatus.QUEUED
+        assert updated_job.attempts == 0  # reset
+        assert updated_job.last_error is None  # cleared
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_job_cancelled_succeeds(client, admin_headers, session_factory):
+    """Admin can retry a CANCELLED job."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.CANCELLED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/retry", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == JobStatus.QUEUED.value
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_job_succeeded_fails(client, admin_headers, session_factory):
+    """Admin cannot retry a SUCCEEDED job."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.SUCCEEDED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/retry", headers=admin_headers)
+    assert response.status_code == 400
+    assert "cannot retry" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_job_queued_fails(client, admin_headers, session_factory):
+    """Admin cannot retry a QUEUED job (only FAILED or CANCELLED)."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.QUEUED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/retry", headers=admin_headers)
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_nonexistent_job_returns_404(client, admin_headers):
+    """Retrying nonexistent job returns 404."""
+    response = await client.post("/api/admin/jobs/99999/retry", headers=admin_headers)
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_cancel_job_creates_audit_log(client, admin_headers, session_factory):
+    """Cancelling a job creates an audit log entry."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.QUEUED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    await client.post(f"/api/admin/jobs/{job_id}/cancel", headers=admin_headers)
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LogEntry).where(LogEntry.source == "admin:job_cancel").order_by(LogEntry.id.desc())
+        )
+        log = result.scalars().first()
+        assert log is not None
+        assert log.payload["job_id"] == job_id
+
+
+@pytest.mark.asyncio
+async def test_admin_retry_job_creates_audit_log(client, admin_headers, session_factory):
+    """Retrying a job creates an audit log entry."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.FAILED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    await client.post(f"/api/admin/jobs/{job_id}/retry", headers=admin_headers)
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LogEntry).where(LogEntry.source == "admin:job_retry").order_by(LogEntry.id.desc())
+        )
+        log = result.scalars().first()
+        assert log is not None
+        assert log.payload["job_id"] == job_id
+
+
+@pytest.mark.asyncio
+async def test_admin_job_operations_require_authentication(client, session_factory):
+    """Job management endpoints require authentication."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.QUEUED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/cancel")
+    assert response.status_code == 401
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/retry")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_job_operations_require_admin_role(client, user_headers, session_factory):
+    """Job management endpoints require ADMIN role."""
+    async with session_factory() as session:
+        job = Job(name="test.job", status=JobStatus.QUEUED, payload={})
+        session.add(job)
+        await session.commit()
+        await session.refresh(job)
+        job_id = job.id
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/cancel", headers=user_headers)
+    assert response.status_code == 403
+
+    response = await client.post(f"/api/admin/jobs/{job_id}/retry", headers=user_headers)
+    assert response.status_code == 403
