@@ -24,129 +24,111 @@ This roadmap maps the 6-capability architecture from DRT_EPIC.md into a concrete
 ## Timeline Overview
 
 ```
-Week 1-2: Phase 1 (Foundation) — DRT-001
-  └─ Mon-Fri: Design + Core implementation
-  └─ Fri-Sun: Integration gap discovery
+Week 1: Phase 1 (Foundation MVP) — DRT-001
+  └─ Mon-Fri: 6-component MVP sprint (Workflow Engine, State Machine, EventBus, AuditEngine, RuntimeAPI, HealthManager)
+  └─ Fri: Ready for Phase 2 parallel development
 
-Week 3-4: Phase 2 (Events & Gates) — DRT-002, DRT-003 in parallel
+Week 2-3: Phase 2 (Events & Gates) — DRT-002, DRT-003 in parallel
   ├─ Track A: DRT-002 (Event Bus + Agent Dispatcher)
   ├─ Track B: DRT-003 (Gate Evaluator + Evidence Collector)
-  └─ Integration between DRT-002 and DRT-003 on Friday
+  └─ Integration between DRT-002 and DRT-003 by end of Week 3
 
-Week 5-6: Phase 3 (Support & Infrastructure) — DRT-004, DRT-005, DRT-006 in parallel
+Week 4-5: Phase 3 (Support & Infrastructure) — DRT-004, DRT-005, DRT-006 in parallel
   ├─ Track A: DRT-004 (Document Sync + Audit Engine)
   ├─ Track B: DRT-005 (Recovery Manager + Notification Engine)
   ├─ Track C: DRT-006 (Policy + Locks + Metrics)
-  └─ Cross-track integration starting Monday Week 6
+  └─ Cross-track integration starting Monday Week 5
 
-Week 7-8: Phase 4 (Integration & Validation)
+Week 6-7: Phase 4 (Integration & Validation)
   ├─ System-level acceptance testing (all 6 components)
   ├─ Performance validation (p95 latencies)
   ├─ Security audit and hardening
   ├─ Helm stack chart validation
   └─ Production readiness review
 
-**Total Sprint:** 8 weeks, 3 parallel tracks, ~5-6 developers
+Week 8: Production Release
+  └─ Final sign-off and production deployment
+
+**Total Sprint:** 8 weeks, accelerated Phase 1 from 2 weeks to 1-week MVP, ~5-6 developers
 ```
 
 ---
 
 ## Detailed Phase Breakdown
 
-### Phase 1: Foundation (Week 1-2) — DRT-001
+### Phase 1: Foundation MVP (Week 1) — DRT-001
 
-**Capability:** Workflow Engine + State Machine  
+**Status:** Compressed to 1-week MVP sprint (6 components only)  
+**Capability:** Workflow Engine + State Machine + EventBus + AuditEngine + RuntimeAPI + HealthManager  
 **Owner:** tech-lead  
-**Team Size:** 1-2 engineers  
+**Team Size:** 2-3 engineers (intensive 1-week sprint)  
 **Blocking:** All Phase 2-3 work  
+**Target:** Complete capability lifecycle execution (SPECIFICATION → CLOSED) without manual intervention
 
-#### Week 1 (Mon Jul 14 - Fri Jul 18)
+#### Week 1 (Mon Jul 14 - Fri Jul 18) — DRT-001 MVP Sprint
 
-**Mon-Tue: Design & Setup**
-- [ ] Detailed design review of DRT-001 from DRT_EPIC.md
-- [ ] Create tech design document (component interfaces, state transitions, audit log format)
+**Mon: Design & Setup**
+- [ ] Review DRT-001_SPECIFICATION.md (6-component MVP strategy)
+- [ ] Create development branch: `feat/drt-001-runtime-mvp`
 - [ ] Set up test framework and CI/CD pipeline
-- [ ] Create development branch: `feat/drt-001-workflow-engine`
-- [ ] **Deliverable:** Tech design doc approved by chief-architect
+- [ ] Assign component ownership (2-3 engineers, 2 components each)
+- [ ] **Deliverable:** Team ready, branching strategy established
 
-**Wed: Core Implementation**
-- [ ] Implement WorkflowEngine class (load_state, validate_transition, verify_authority, check_frozen_constraints)
-- [ ] Implement WorkflowState and AuditEntry classes
-- [ ] Implement RuntimeComponent wrapper for WorkflowEngine
-- [ ] Write unit tests (min 20 tests covering all paths)
-- [ ] **Deliverable:** Core WorkflowEngine with 60%+ test coverage
+**Tue: Core Components Implementation (Day 1 of 3)**
+- [ ] Implement WorkflowEngine (read/write workflow.yaml with file locking) + 8 tests
+- [ ] Implement StateMachine (DAG validation, VALID_TRANSITIONS) + 6 tests
+- [ ] Implement EventBus (in-memory pub/sub, 5 core events) + 8 tests
+- [ ] Write unit tests in parallel with implementation (30+ tests)
+- [ ] **Deliverable:** Core persistence + state machine + events working, 60%+ coverage
 
-**Thu: State Machine & Audit**
-- [ ] Implement state machine with DAG enforcement (VALID_TRANSITIONS)
-- [ ] Implement audit log generation (append-only, checksummed)
-- [ ] Implement rollback handler (atomic revert to checkpoint)
-- [ ] Implement recovery history indexing
-- [ ] Write state machine tests (10+ tests)
-- [ ] **Deliverable:** State machine with full DAG enforcement, audit working
+**Wed: Audit & API Implementation (Day 2 of 3)**
+- [ ] Implement AuditEngine (append-only JSON log) + 8 tests
+- [ ] Implement RuntimeAPI (4 FastAPI endpoints: GET state, GET history, POST transition, GET health) + 10 tests
+- [ ] Implement HealthManager (component health checks) + 5 tests
+- [ ] Write integration tests (15+ tests covering full workflow)
+- [ ] **Deliverable:** API working, health checks functional, 75%+ coverage
 
-**Fri: Integration & Validation**
-- [ ] Write integration tests (10+ tests covering full workflow)
-- [ ] Validate audit log integrity (append-only verification)
-- [ ] Verify recovery from audit log (deterministic replay)
-- [ ] Performance testing: p95 <1s on transitions
-- [ ] Create tech design review presentation
-- [ ] **Deliverable:** DRT-001 core implementation complete, 80%+ test coverage
+**Thu: Testing, Hardening & Documentation**
+- [ ] Complete all 55+ unit tests (target ≥90% coverage)
+- [ ] Integration testing: execute complete lifecycle SPECIFICATION → CLOSED
+- [ ] Security audit: API endpoints, no injection vulnerabilities
+- [ ] Performance testing: verify p95 <1s on transitions
+- [ ] Create API documentation (OpenAPI/Swagger)
+- [ ] Create Helm chart: `helm/drt-001-runtime-mvp/`
+- [ ] **Deliverable:** All tests passing, 90%+ coverage, documentation complete, Helm chart ready
 
-#### Week 2 (Mon Jul 21 - Fri Jul 25)
-
-**Mon: API & Documentation**
-- [ ] Design API specification (OpenAPI/Swagger)
-- [ ] Implement REST endpoints for workflow queries/updates
-- [ ] Write API documentation with examples
-- [ ] **Deliverable:** API spec and 3+ working endpoints
-
-**Tue: RuntimeComponent & Helm**
-- [ ] Finalize RuntimeComponent implementation (initialize, start, stop, health, metrics, recover, shutdown)
-- [ ] Test all 7 RuntimeComponent methods
-- [ ] Create Helm chart: `helm/drt-001-workflow-engine/`
-- [ ] **Deliverable:** RuntimeComponent passes all method tests, Helm chart skeleton
-
-**Wed: Security & Observability**
-- [ ] Security audit: no SQL injection, path traversal, etc. in API
-- [ ] Add logging and metrics exposition
-- [ ] Verify audit log signatures/integrity
-- [ ] Test error handling and edge cases
-- [ ] **Deliverable:** Security audit clean, observability complete
-
-**Thu: Review & Polish**
+**Fri: Review, Merge & Handoff**
 - [ ] Code review with 2+ approvals (tech-lead + chief-architect)
-- [ ] Fix review comments
-- [ ] Update documentation based on feedback
-- [ ] **Deliverable:** Code review approved
-
-**Fri: Finalization & Handoff**
-- [ ] Merge to development branch (not main yet)
-- [ ] Tag pre-release version: `drt-001-v0.1.0-alpha`
-- [ ] Create integration gap discovery list
+- [ ] Fix review comments and final polish
+- [ ] Merge to development branch
+- [ ] Tag: `drt-001-v1.0.0-alpha`
 - [ ] Prepare Phase 2 kickoff briefing
-- [ ] **Deliverable:** DRT-001 ready for Phase 2 integration, merged to dev branch
+- [ ] **Deliverable:** DRT-001 MVP merged, ready for immediate use
 
 **Acceptance Criteria (End of Phase 1):**
-- ✓ WorkflowEngine loads state correctly (100% success on valid workflow.yaml)
-- ✓ State transitions validated (DAG enforcement, rollback working)
-- ✓ Authority verified (role-based gate approval working)
-- ✓ Audit log append-only (no modifications detected)
-- ✓ Recovery deterministic (replay produces identical state)
-- ✓ All 35+ unit tests passing
-- ✓ API documented and 3+ endpoints working
-- ✓ RuntimeComponent methods functional
+- ✓ Complete capability lifecycle executes without manual intervention
+- ✓ WorkflowEngine loads/updates state correctly (100% success rate)
+- ✓ StateMachine enforces DAG transitions correctly
+- ✓ EventBus publishes/subscribes to 5 core events
+- ✓ AuditEngine append-only (no modifications)
+- ✓ RuntimeAPI 4 endpoints functional and documented
+- ✓ HealthManager checks all 6 components
+- ✓ All 55+ tests passing (≥90% coverage)
+- ✓ Performance benchmarks met (transition <1s p95)
 - ✓ Helm chart deployable to staging
 - ✓ Security audit clean (zero critical findings)
+- ✓ **DRT-001 can immediately execute real capability lifecycles**
 
 ---
 
-### Phase 2: Events & Gates (Week 3-4) — DRT-002, DRT-003 in parallel
+### Phase 2: Events & Gates (Week 2-3) — DRT-002, DRT-003 in parallel
 
 **Capabilities:** Agent Dispatcher + Event Bus (Track A), Gate Evaluator + Evidence Collector (Track B)  
 **Team Size:** 2-3 engineers (1-2 per track)  
 **Blocking:** Phase 3 work (all depends on this)  
+**Start Condition:** DRT-001 MVP merged and deployable
 
-#### Week 3 (Mon Jul 28 - Fri Aug 01)
+#### Week 2 (Mon Jul 21 - Fri Jul 25)
 
 **Track A: DRT-002 (Event Bus + Agent Dispatcher)**
 
@@ -198,7 +180,7 @@ Week 7-8: Phase 4 (Integration & Validation)
 - [ ] Write 20+ unit tests
 - [ ] **Deliverable:** EvidenceCollector working, quality scoring functional
 
-#### Week 4 (Mon Aug 04 - Fri Aug 08)
+#### Week 3 (Mon Jul 28 - Fri Aug 01)
 
 **Track A: DRT-002 continued & Integration**
 
@@ -230,7 +212,7 @@ Week 7-8: Phase 4 (Integration & Validation)
 - [ ] Code review with 2+ approvals (tech-lead + devops)
 - [ ] Fix review comments
 - [ ] Merge to development branch
-- [ ] Tag: `drt-002-v0.1.0-alpha`
+- [ ] Tag: `drt-002-v1.0.0-alpha`
 - [ ] **Deliverable:** DRT-002 merged, ready for Phase 3
 
 **Track B: DRT-003 continued & Integration**
@@ -264,7 +246,7 @@ Week 7-8: Phase 4 (Integration & Validation)
 - [ ] Code review with 2+ approvals (qa-engineer + tech-lead)
 - [ ] Fix review comments
 - [ ] Merge to development branch
-- [ ] Tag: `drt-003-v0.1.0-alpha`
+- [ ] Tag: `drt-003-v1.0.0-alpha`
 - [ ] **Deliverable:** DRT-003 merged, ready for Phase 3
 
 **Friday Sync (Track A + B):**
@@ -290,12 +272,13 @@ Week 7-8: Phase 4 (Integration & Validation)
 
 ---
 
-### Phase 3: Support & Infrastructure (Week 5-6) — DRT-004, DRT-005, DRT-006 in parallel
+### Phase 3: Support & Infrastructure (Week 4-5) — DRT-004, DRT-005, DRT-006 in parallel
 
 **Capabilities:** Document Synchronizer + Audit Engine (Track A), Recovery Manager + Notification Engine (Track B), Policy Engine + Lock Manager + Metrics Engine (Track C)  
 **Team Size:** 3 engineers (1+ per track)  
+**Start Condition:** DRT-001, DRT-002, DRT-003 merged and integrated
 
-#### Week 5 (Mon Aug 11 - Fri Aug 15)
+#### Week 4 (Mon Aug 04 - Fri Aug 08)
 
 **Track A: DRT-004 (Document Synchronizer + Audit Engine)**
 
@@ -350,7 +333,7 @@ Week 7-8: Phase 4 (Integration & Validation)
 - [ ] Write 35+ unit tests
 - [ ] **Deliverable:** Policy, locks, metrics working, 70%+ coverage
 
-#### Week 6 (Mon Aug 18 - Fri Aug 22)
+#### Week 5 (Mon Aug 11 - Fri Aug 15)
 
 **Track A: DRT-004 continued**
 
@@ -451,12 +434,13 @@ Week 7-8: Phase 4 (Integration & Validation)
 
 ---
 
-### Phase 4: Integration & Validation (Week 7-8) — All Capabilities
+### Phase 4: Integration & Validation (Week 6-7) — All Capabilities
 
 **Team Size:** Full team (all 3-5 engineers)  
+**Start Condition:** DRT-001 through DRT-006 all merged and integrated  
 **Objective:** System-level acceptance, performance validation, security hardening, production readiness
 
-#### Week 7 (Mon Aug 25 - Fri Aug 29)
+#### Week 6 (Mon Aug 18 - Fri Aug 22)
 
 **Mon-Tue: System Integration**
 - [ ] Deploy all 6 capabilities to staging environment
@@ -485,7 +469,7 @@ Week 7-8: Phase 4 (Integration & Validation)
 - [ ] Document known issues and mitigations
 - [ ] **Deliverable:** Production deployment documentation complete
 
-#### Week 8 (Mon Sep 01 - Fri Sep 07)
+#### Week 7 (Mon Aug 25 - Fri Aug 29)
 
 **Mon-Tue: Security Hardening**
 - [ ] Conduct security audit (all 6 components)
@@ -540,10 +524,11 @@ DRT-001 (Workflow + State Machine)
     │
     └──→ DRT-004, DRT-005, DRT-006 (all weak dependencies on DRT-001/002)
 
-Phase 1 (Week 1-2): DRT-001 only
-Phase 2 (Week 3-4): DRT-002 + DRT-003 (parallel)
-Phase 3 (Week 5-6): DRT-004 + DRT-005 + DRT-006 (parallel)
-Phase 4 (Week 7-8): Full system integration
+Phase 1 (Week 1): DRT-001 MVP only - accelerated 1-week sprint
+Phase 2 (Week 2-3): DRT-002 + DRT-003 (parallel)
+Phase 3 (Week 4-5): DRT-004 + DRT-005 + DRT-006 (parallel)
+Phase 4 (Week 6-7): Full system integration
+Week 8: Production release
 ```
 
 **Parallelization Benefits:**
@@ -560,15 +545,15 @@ Phase 4 (Week 7-8): Full system integration
 
 | Milestone | Target Date | Owner | Criteria |
 |-----------|-------------|-------|----------|
-| Phase 1 Complete | Fri, Jul 25 | tech-lead | DRT-001 merged to dev, 80%+ coverage |
-| Phase 2 Complete | Fri, Aug 08 | tech-lead, qa-engineer | DRT-002 + DRT-003 merged, integration tests ✓ |
-| Phase 3 Complete | Fri, Aug 22 | All engineers | DRT-004/005/006 merged, system integration ✓ |
-| Acceptance Testing | Fri, Aug 29 | qa-engineer | 240+ tests ✓, ≥95% pass rate |
-| Performance Validation | Fri, Aug 29 | devops | p95 latencies meet targets |
-| Security Audit | Tue, Sep 03 | cto, chief-architect | Zero critical findings |
-| Staging Deployment | Wed, Sep 04 | devops | 24-hour stability ✓ |
-| Production Readiness | Thu, Sep 05 | All stakeholders | Sign-off ✓ |
-| Production Release | Fri, Sep 07 | cto | drt-v1.0.0 deployed |
+| Phase 1 Complete | Fri, Jul 18 | tech-lead | DRT-001 MVP merged to dev, 90%+ coverage, end-to-end lifecycle ✓ |
+| Phase 2 Complete | Fri, Aug 01 | tech-lead, qa-engineer | DRT-002 + DRT-003 merged, integration tests ✓ |
+| Phase 3 Complete | Fri, Aug 15 | All engineers | DRT-004/005/006 merged, system integration ✓ |
+| Acceptance Testing | Fri, Aug 22 | qa-engineer | 240+ tests ✓, ≥95% pass rate |
+| Performance Validation | Fri, Aug 22 | devops | p95 latencies meet targets |
+| Security Audit | Thu, Aug 28 | cto, chief-architect | Zero critical findings |
+| Staging Deployment | Fri, Aug 29 | devops | 24-hour stability ✓ |
+| Production Readiness | Thu, Sep 04 | All stakeholders | Sign-off ✓ |
+| Production Release | Fri, Sep 05 | cto | drt-v1.0.0 deployed |
 
 ---
 

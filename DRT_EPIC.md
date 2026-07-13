@@ -64,89 +64,109 @@ DRT-EPIC-001
 ```
 
 **Parallelization Strategy:**
-- **Phase 1 (Week 1-2):** DRT-001 (foundation)
-- **Phase 2 (Week 3-4):** DRT-002, DRT-003 in parallel (DRT-002 weakly depends on DRT-001)
-- **Phase 3 (Week 5-6):** DRT-004, DRT-005, DRT-006 in parallel (all depend on Phase 1-2)
-- **Phase 4 (Week 7-8):** Integration testing, performance validation
+- **Phase 1 (Week 1):** DRT-001 MVP (foundation) - 1-week sprint
+- **Phase 2 (Week 2-3):** DRT-002, DRT-003 in parallel (DRT-002 weakly depends on DRT-001)
+- **Phase 3 (Week 4-5):** DRT-004, DRT-005, DRT-006 in parallel (all depend on Phase 1-2)
+- **Phase 4 (Week 6-7):** Integration testing, performance validation
+- **Week 8:** Production release
 
-**Estimated Total Timeline:** 8 weeks (56 days)
+**Estimated Total Timeline:** 8 weeks (56 days) - accelerated Phase 1 from 2 weeks to 1 week
 
 ---
 
-## Capability 1: DRT-001 Workflow Engine + State Machine
+## Capability 1: DRT-001 Workflow Engine + State Machine (MVP)
 
-**Purpose:** Single source of truth for capability lifecycle state, enforcing DAG transitions, managing phase/status/owner updates with immutable audit trail.
+**Status:** IMPLEMENTATION_STRATEGY_OPTIMIZED (6-component MVP, 1-week sprint)
 
-**Scope:**
+**Purpose:** Smallest production-usable Runtime capable of executing one complete capability lifecycle automatically without manual state manipulation. Establishes foundation for all future capabilities.
+
+**MVP Strategy:** DRT-001 focuses on core runtime capabilities only. Defers complex features (policy, metrics, recovery, notifications, distributed locks) to DRT-002 through DRT-006.
+
+**Included Components (6):**
+1. **WorkflowEngine** - Reads/writes workflow.yaml atomically with file locking
+2. **StateMachine** - Pure validation logic enforcing DAG rules (VALID_TRANSITIONS)
+3. **EventBus** - In-memory pub/sub (5 core events: PHASE_TRANSITIONED, OWNER_CHANGED, GATE_RECORDED, ERROR, HEALTH_CHECK)
+4. **AuditEngine** - Append-only JSON log, one entry per line, immutable persistence
+5. **RuntimeAPI** - 4 FastAPI endpoints (GET state, GET history, POST transition, GET health)
+6. **HealthManager** - Unified health orchestration across components
+
+**Scope (MVP):**
 - workflow.yaml parsing and validation
-- WorkflowState model with phase, status, owner, architecture_state, governance_state
-- State transitions via DAG-enforced state machine (no cycles, rollback support)
-- Authority verification (role-based gate approval)
-- Frozen/locked constraint enforcement
-- Audit log generation with checksums and integrity verification
-- Atomic phase/owner/gate updates with rollback on error
+- Atomic phase/owner/gate updates with file locking
+- State transitions via DAG-enforced state machine
+- In-memory event bus for internal communication (5 core events)
+- Append-only audit trail with no modification guarantees
+- Simple HTTP API for state queries and transitions
+- Health checks across all 6 components
+
+**Deferred Components (To DRT-002 through DRT-006):**
+- Policy Engine (DRT-006)
+- Metrics Engine (DRT-006)
+- Distributed Locks (DRT-006)
+- Recovery Manager (DRT-005)
+- Notification Engine (DRT-005)
+- Document Synchronizer (DRT-004)
+- Evidence Collector (DRT-003)
+- Gate Evaluator (DRT-003)
+- Agent Dispatcher (DRT-002)
+- Lock Manager (DRT-006)
 
 **Deliverables:**
-1. Enhanced `backend/governance/workflow_engine.py` (Workflow Engine + State Machine)
-2. Audit trail persistence with append-only guarantees
-3. Rollback handler for failed transitions (reverts to previous valid state)
-4. Recovery history indexing for deterministic replay
-5. WorkflowEngine RuntimeComponent implementation
-6. Helm chart: `helm/drt-001-workflow-engine/`
-7. API specification: `backend/governance/workflow_api.yaml`
-8. Test suite: `tests/governance/test_workflow_engine.py` (35+ tests)
+1. `backend/runtime/workflow_engine.py` (WorkflowEngine, StateMachine)
+2. `backend/runtime/event_bus.py` (In-memory EventBus)
+3. `backend/runtime/audit_engine.py` (Append-only AuditEngine)
+4. `backend/runtime/runtime_api.py` (FastAPI with 4 endpoints)
+5. `backend/runtime/health_manager.py` (Health checks)
+6. `backend/runtime/models.py` (WorkflowState, EventBus, AuditEntry models)
+7. RuntimeComponent implementations for all 6 components
+8. Helm chart: `helm/drt-001-runtime-mvp/`
+9. Test suite: `tests/runtime/test_workflow_engine.py`, `test_state_machine.py`, `test_event_bus.py`, `test_audit_engine.py`, `test_runtime_api.py`, `test_health_manager.py` (55+ tests)
 
 **Acceptance Criteria:**
-- ✓ All workflow.yaml transitions succeed (100% success rate on valid transitions)
-- ✓ Invalid transitions are rejected with clear error message
-- ✓ Rollback restores previous state atom atomically
-- ✓ Audit log is append-only (no modifications, only appends)
-- ✓ Recovery from audit log produces identical state (deterministic replay)
-- ✓ Frozen/locked constraints enforced before transition
-- ✓ Authority mismatch detected and rejected (no unauthorized gates)
-- ✓ Concurrent transitions fail cleanly (mutex at gate level)
+- ✓ Complete capability lifecycle executes without manual intervention (SPECIFICATION → CLOSED)
+- ✓ workflow.yaml transitions succeed (100% success rate on valid transitions)
+- ✓ Invalid transitions rejected with clear error
+- ✓ Audit log append-only (no modifications, only appends)
+- ✓ Recovery from audit log deterministic (identical state)
+- ✓ 5 core events publishable and subscribed
+- ✓ Health checks working for all 6 components
+- ✓ API endpoints functional and documented
 - ✓ Performance: transition <1s p95, state load <100ms p95
-- ✓ Coverage: ≥90% on WorkflowEngine, State Machine classes
+- ✓ Coverage: ≥90% on WorkflowEngine, StateMachine, EventBus, AuditEngine, RuntimeAPI
 
 **Dependencies:**
 - Python 3.10+
 - PyYAML for workflow.yaml parsing
-- RuntimeComponent ABC (DRT_RUNTIME_COMPONENT_INTERFACE.md)
-
-**Rollback Strategy:**
-- Failed transition: atomically revert workflow.yaml to checkpoint
-- Audit log: immutable (no rollback), but previous state available via query
-- Manual override: chief-architect role can force phase transition with documented rationale
+- FastAPI for REST API
+- RuntimeComponent ABC
 
 **Definition of Ready (DoR):**
-- OBS-004 specification reviewed and approved
-- RuntimeComponent interface finalized
-- workflow.yaml schema validated against 100 real capability records
-- Test scenarios documented (normal path, error path, recovery path)
+- DRT-001_SPECIFICATION.md reviewed and approved
+- 6-component MVP scope locked (no additions during implementation)
+- Success scenario documented (complete lifecycle without manual intervention)
+- Test scenarios documented
 
 **Definition of Done (DoD):**
 - All acceptance criteria met
 - Code review: 2+ approvals (tech-lead + chief-architect)
 - Test coverage: ≥90%
-- Performance benchmarks: p95 latency <1s
-- Documentation: API spec, deployment guide, runbook
+- Performance benchmarks met
+- API documented with examples
 - Helm chart deployable to staging
-- Audit: zero security findings (no SQL injection, path traversal, etc.)
+- Zero security findings
+- **Demonstrates complete capability lifecycle execution** (SPECIFICATION through CLOSED)
 
-**Estimated Complexity:** MEDIUM (3-4 days)
-**Estimated Timeline:** 2 weeks (includes integration gaps discovery)
-**Owner:** tech-lead (chief-architect + qa-engineer reviews)
-**Required Tests:**
-- `test_workflow_load_state` (load capability from workflow.yaml)
-- `test_workflow_validate_transition` (DAG enforcement)
-- `test_workflow_authority_verification` (role validation)
-- `test_workflow_frozen_constraints` (architecture + governance locks)
-- `test_workflow_atomic_phase_update` (no partial updates)
-- `test_workflow_rollback_on_error` (revert to checkpoint)
-- `test_workflow_audit_trail_append_only` (immutability)
-- `test_workflow_recovery_deterministic` (replay identical)
-- `test_workflow_concurrent_gates` (mutex at gate level)
-- `test_workflow_performance_transition` (p95 <1s)
+**Estimated Complexity:** LOW (focused scope, no policy/metrics/recovery)
+**Estimated Timeline:** 1 week (5 days) - shortest production-ready Runtime
+**Lines of Code:** ~650 (implementation) + ~400+ (tests)
+**Owner:** tech-lead (chief-architect review)
+**Required Tests (55+):**
+- WorkflowEngine: 15 tests (load, transitions, authority, freezing, atomicity, rollback, audit, recovery, concurrent)
+- StateMachine: 10 tests (transitions, invalid paths, DAG enforcement)
+- EventBus: 12 tests (publish, subscribe, ordering, core events)
+- AuditEngine: 10 tests (append-only, integrity, querying)
+- RuntimeAPI: 12 tests (all 4 endpoints, error handling)
+- HealthManager: 6 tests (component health, overall status)
 
 ---
 
