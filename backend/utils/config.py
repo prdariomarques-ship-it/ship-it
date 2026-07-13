@@ -162,6 +162,8 @@ class Settings(BaseSettings):
     # spans print to stdout (console exporter) instead of failing to export.
     otel_enabled: bool = False
     otel_exporter_otlp_endpoint: str = ""
+    otel_sampling: str = ""  # "always", "never", "fixed:0.1", "parent-fixed:0.1", "error:0.05", etc.
+    otel_prometheus_metrics: bool = False  # Enable Prometheus metrics reader for tracing
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"

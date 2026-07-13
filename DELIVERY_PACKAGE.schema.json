@@ -1,0 +1,326 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Delivery Package Schema",
+  "description": "Official schema for capability delivery packages (AOM-v3.1)",
+  "type": "object",
+  "required": [
+    "metadata",
+    "scope",
+    "implementation",
+    "tests",
+    "validation",
+    "evidence",
+    "rollback"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": [
+        "capability_id",
+        "phase",
+        "status",
+        "owner",
+        "date"
+      ],
+      "properties": {
+        "capability_id": {
+          "type": "string",
+          "pattern": "^[A-Z]+-\\d{3}[A-Z]$",
+          "description": "Capability ID (e.g., OBS-002C)"
+        },
+        "phase": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Phase number within capability"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "COMPLETED",
+            "VALIDATION_READY",
+            "REVIEW_READY",
+            "BLOCKED"
+          ]
+        },
+        "owner": {
+          "type": "string",
+          "description": "Implementation owner role"
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "Completion date"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": [
+        "authorized_items",
+        "items_completed",
+        "changes_summary"
+      ],
+      "properties": {
+        "authorized_items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "All scope items from authorization"
+        },
+        "items_completed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Scope items delivered in this phase"
+        },
+        "changes_summary": {
+          "type": "object",
+          "properties": {
+            "files_created": {
+              "type": "integer"
+            },
+            "files_modified": {
+              "type": "integer"
+            },
+            "lines_added": {
+              "type": "integer"
+            },
+            "lines_removed": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "required": [
+        "modules",
+        "backward_compatibility",
+        "breaking_changes"
+      ],
+      "properties": {
+        "modules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "status",
+              "lines"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "File path"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["created", "modified"]
+              },
+              "lines": {
+                "type": "integer",
+                "description": "Lines added or modified"
+              },
+              "feature": {
+                "type": "string",
+                "description": "What feature this implements"
+              }
+            }
+          }
+        },
+        "backward_compatibility": {
+          "type": "boolean",
+          "description": "Fully backward compatible with previous phase?"
+        },
+        "breaking_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of breaking changes (if any)"
+        }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "required": [
+        "unit_tests",
+        "integration_tests",
+        "regression_tests",
+        "code_coverage"
+      ],
+      "properties": {
+        "unit_tests": {
+          "type": "object",
+          "required": ["total", "passed", "failed"],
+          "properties": {
+            "total": { "type": "integer" },
+            "passed": { "type": "integer" },
+            "failed": { "type": "integer" },
+            "files": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "integration_tests": {
+          "type": "object",
+          "required": ["total", "passed", "failed"],
+          "properties": {
+            "total": { "type": "integer" },
+            "passed": { "type": "integer" },
+            "failed": { "type": "integer" },
+            "files": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "regression_tests": {
+          "type": "object",
+          "required": ["total", "passed", "failed"],
+          "properties": {
+            "total": { "type": "integer" },
+            "passed": { "type": "integer" },
+            "failed": { "type": "integer" },
+            "description": "Tests from all previous phases"
+          }
+        },
+        "code_coverage": {
+          "type": "object",
+          "required": ["percentage", "statements", "branches"],
+          "properties": {
+            "percentage": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "statements": { "type": "integer" },
+            "branches": { "type": "integer" },
+            "functions": { "type": "integer" },
+            "lines": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": [
+        "specification_compliance",
+        "design_compliance",
+        "acceptance_criteria"
+      ],
+      "properties": {
+        "specification_compliance": {
+          "type": "string",
+          "enum": ["PASSED", "FAILED", "PARTIAL"],
+          "description": "Does implementation match specification?"
+        },
+        "design_compliance": {
+          "type": "string",
+          "enum": ["PASSED", "FAILED", "PARTIAL"],
+          "description": "Does implementation match design?"
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["criterion", "status"],
+            "properties": {
+              "criterion": { "type": "string" },
+              "status": { "type": "string", "enum": ["PASSED", "FAILED"] },
+              "notes": { "type": "string" }
+            }
+          }
+        },
+        "known_limitations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Documented limitations"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "git_commits",
+        "branch_name",
+        "git_status",
+        "git_diff_stat"
+      ],
+      "properties": {
+        "git_commits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["hash", "message"],
+            "properties": {
+              "hash": { "type": "string", "pattern": "^[a-f0-9]{7}$" },
+              "message": { "type": "string" },
+              "date": { "type": "string", "format": "date-time" }
+            }
+          }
+        },
+        "branch_name": {
+          "type": "string",
+          "description": "Feature branch name"
+        },
+        "git_status": {
+          "type": "string",
+          "enum": ["CLEAN", "UNCOMMITTED_CHANGES", "UNPUSHED"],
+          "description": "Git working tree status"
+        },
+        "git_diff_stat": {
+          "type": "object",
+          "properties": {
+            "files_changed": { "type": "integer" },
+            "insertions": { "type": "integer" },
+            "deletions": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "required": [
+        "rollback_procedure",
+        "rollback_testing",
+        "impact"
+      ],
+      "properties": {
+        "rollback_procedure": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Step-by-step rollback instructions"
+        },
+        "rollback_testing": {
+          "type": "string",
+          "description": "How rollback was tested"
+        },
+        "impact": {
+          "type": "string",
+          "description": "Impact of rollback on system"
+        },
+        "estimated_time": {
+          "type": "string",
+          "description": "Estimated time to execute rollback"
+        }
+      }
+    },
+    "production_readiness": {
+      "type": "object",
+      "properties": {
+        "security": { "type": "boolean" },
+        "performance": { "type": "boolean" },
+        "reliability": { "type": "boolean" },
+        "observability": { "type": "boolean" },
+        "documentation": { "type": "boolean" },
+        "rollback": { "type": "boolean" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

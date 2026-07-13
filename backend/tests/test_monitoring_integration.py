@@ -12,7 +12,7 @@ Tests verify:
 
 import pytest
 from fastapi.testclient import TestClient
-from backend.main import create_app
+from main import create_app
 
 
 @pytest.fixture

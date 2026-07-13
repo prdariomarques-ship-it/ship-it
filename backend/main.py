@@ -33,7 +33,7 @@ from memory.router import router as memory_router
 from middleware.error_sanitization import ErrorSanitizationMiddleware
 from middleware.request_size_limit import RequestSizeLimitMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
-from observability import RequestIDMiddleware, health_router, metrics_middleware, metrics_router, setup_tracing
+from observability import RequestIDMiddleware, TraceContextMiddleware, health_router, metrics_middleware, metrics_router, setup_tracing
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
 from utils.logging import configure_logging, get_logger
@@ -143,10 +143,12 @@ def create_app() -> FastAPI:
     # Registered after (= outermost), so 429s from the rate limiter are counted too.
     app.middleware("http")(metrics_middleware)
 
-    # Outermost of all: the request id must be set before CORS/rate-limit/
+    # Outermost of all: trace context and request id must be set before CORS/rate-limit/
     # metrics run, so their own log lines (and an early 429/403 response)
-    # already carry it too.
+    # already carry them too. TraceContextMiddleware runs after RequestIDMiddleware
+    # so that request_id is available to convert to trace_id.
     app.add_middleware(RequestIDMiddleware)
+    app.add_middleware(TraceContextMiddleware)
 
     # P7 Security hardening middleware (in reverse order of execution):
     app.add_middleware(SecurityHeadersMiddleware)
@@ -158,6 +160,8 @@ def create_app() -> FastAPI:
         enabled=settings.otel_enabled,
         otlp_endpoint=settings.otel_exporter_otlp_endpoint,
         service_name=settings.app_name,
+        sampling=settings.otel_sampling,
+        prometheus_metrics=settings.otel_prometheus_metrics,
     )
 
     app.include_router(health_router)

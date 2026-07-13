@@ -1,0 +1,89 @@
+# Workflow State — Single Source of Truth
+# Updated automatically after every merge and phase transition
+# Last Updated: 2026-07-13
+
+current_program:
+  id: OBS-002
+  name: "Distributed Tracing"
+  status: IN_PROGRESS
+  architecture_state: FROZEN
+  governance_state: FROZEN
+
+capabilities:
+  - id: OBS-002A
+    name: "OpenTelemetry Setup & Auto-Instrumentation"
+    status: COMPLETED
+    owner: implementation-engineer
+    phase: PRODUCTION
+    milestones_completed: 3/3
+    tests_passed: 11/11
+    merge_date: 2026-07-10
+    commits:
+      - de94b59
+      - 45c8c77
+
+  - id: OBS-002B
+    name: "Trace Propagation (6 Mechanisms)"
+    status: COMPLETED
+    owner: implementation-engineer
+    phase: PRODUCTION
+    milestones_completed: 3/3
+    tests_passed: 60/60
+    approval_date: 2026-07-13
+    merge_ready: true
+    commits:
+      - 1ca7966
+      - 0ca07ca
+
+  - id: OBS-002C
+    name: "Trace Correlation & Operational Metrics"
+    status: COMPLETED
+    owner: implementation-engineer
+    phase: PRODUCTION
+    milestones_completed: 3/3
+    tests_passed: 41/41
+    total_regression_tests: 103/103
+    code_coverage: 76%
+    final_review_date: 2026-07-13
+    final_review_approved: true
+    merge_ready: true
+    commits:
+      - ed4af99
+      - f3dc3ed
+      - 327ad45
+      - 14f9567
+
+current_capability: OBS-002
+current_phase: MERGE_AUTHORIZATION
+current_status: FINAL_REVIEW_APPROVED
+
+pending_approvals:
+  - gate: MERGE_AUTHORIZATION
+    capability: OBS-002
+    owner: cto
+    status: PENDING
+    description: "Merge all OBS-002 commits to main (3 phases complete)"
+    deadline: 2026-07-14
+
+next_capability: null
+next_owner: cto
+next_gate: MERGE_AUTHORIZATION
+
+program_metrics:
+  total_phases_completed: 12
+  total_capabilities_completed: 3
+  total_tests_passing: 103
+  total_code_coverage: 76%
+  velocity_trend: INCREASING
+  regression_rate: 0%
+  merge_success_rate: 100%
+
+approval_chain:
+  specification: ✅ APPROVED (2026-07-02, Chief Architect)
+  design_review: ✅ APPROVED (2026-07-05, Tech Lead)
+  implementation: ✅ APPROVED (2026-07-13, Impl Engineer, 771 tests)
+  validation: ✅ COMPLETED (2026-07-13, QA, 89% coverage)
+  final_review: ✅ APPROVED (2026-07-13, Chief Architect)
+  merge: ⏳ PENDING (CTO, awaiting authorization)
+  infrastructure: ⏳ DEFERRED (Tech Lead, after merge)
+  production: ⏳ DEFERRED (DevOps, after infrastructure)

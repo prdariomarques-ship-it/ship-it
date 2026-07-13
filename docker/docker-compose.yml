@@ -54,12 +54,17 @@ services:
       AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE: ${AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE:-6}
       AGENT_RUN_TIMEOUT_SECONDS: ${AGENT_RUN_TIMEOUT_SECONDS:-60}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
+      # OpenTelemetry tracing (optional — disabled by default for dev environments without a collector)
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
       qdrant:
+        condition: service_started
+      jaeger:
         condition: service_started
     networks: [darioos]
 
@@ -100,6 +105,19 @@ services:
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
+    networks: [darioos]
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "10000"
+    ports:
+      - "4318:4318"  # OTLP/HTTP receiver
+      - "16686:16686"  # Web UI
+    volumes:
+      - jaeger_data:/badger
     networks: [darioos]
 
   n8n:
@@ -209,6 +227,7 @@ volumes:
   postgres_data:
   redis_data:
   qdrant_data:
+  jaeger_data:
   n8n_data:
   openwa_data:
   prometheus_data:
