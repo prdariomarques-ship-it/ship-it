@@ -8,7 +8,7 @@
  * - Time to Interactive (TTI): Time to interactive state
  */
 
-import { getCLS, getFCP, getFID, getLCP, getTTFB, Metric } from "web-vitals";
+// import { getCLS, getFCP, getFID, getLCP, getTTFB, Metric } from "web-vitals";
 
 export interface PerformanceMetric {
   name: string;
@@ -52,6 +52,9 @@ class PerformanceMonitor {
       return;
     }
 
+    // Web Vitals collection disabled - web-vitals package not installed
+    // Uncomment the following code if web-vitals package is added to dependencies:
+    /*
     // First Contentful Paint
     getFCP((metric: Metric) => {
       this.recordMetric("FCP", metric.value, "ms");
@@ -76,6 +79,7 @@ class PerformanceMonitor {
     getTTFB((metric: Metric) => {
       this.recordMetric("TTFB", metric.value, "ms");
     });
+    */
   }
 
   /**
