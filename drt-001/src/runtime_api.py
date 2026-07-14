@@ -270,13 +270,13 @@ if __name__ == "__main__":
 
     # Run server
     print("Starting DRT-001 Runtime...")
-    print("Listening on http://0.0.0.0:8000")
+    print("Listening on http://0.0.0.0:5000")
     print("Endpoints: POST /workflow, GET /workflow/{id}, GET /health")
     print("Send SIGTERM to gracefully shutdown")
 
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=5000,
         log_level="info",
     )
