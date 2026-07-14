@@ -27,25 +27,29 @@ echo ""
 
 # Validate storage
 echo "Validating storage..."
-python3 -c "
-from src.persistence import FilePersistence
+python3 << 'PYTHON'
+import sys
+sys.path.insert(0, 'src')
+from persistence import FilePersistence
 p = FilePersistence()
 if p.validate_storage():
     print('✓ Storage validation passed')
 else:
     print('ERROR: Storage validation failed')
     exit(1)
-"
+PYTHON
 echo ""
 
 # Verify imports
 echo "Verifying imports..."
-python3 -c "
-from src.persistence import FilePersistence
-from src.execution_tracker import ExecutionTracker
-from src.workflow_engine import WorkflowEngine
+python3 << 'PYTHON'
+import sys
+sys.path.insert(0, 'src')
+from persistence import FilePersistence
+from execution_tracker import ExecutionTracker
+from workflow_engine import WorkflowEngine
 print('✓ All imports successful')
-"
+PYTHON
 echo ""
 
 echo "====================================="
