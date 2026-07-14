@@ -12,17 +12,14 @@ Test Coverage:
 import json
 import pytest
 import redis
-from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 from backend.performance.cache_manager import (
     CacheManager,
     CacheStatistics,
     cache_result,
     invalidate_on_write,
-    get_cache_stats,
     init_cache_manager,
-    get_cache_manager,
 )
 from backend.performance.cache_decorators import (
     CacheStrategy,

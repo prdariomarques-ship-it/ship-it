@@ -38,7 +38,7 @@ def client(app_with_tracing):
 def test_log_includes_trace_id(client):
     """Log records include trace_id field."""
     configure_logging(json_output=True)
-    logger = get_logger("test")
+    get_logger("test")
 
     response = client.get("/log-test")
     assert response.status_code == 200

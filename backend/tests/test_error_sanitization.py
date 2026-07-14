@@ -2,7 +2,6 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from fastapi.responses import JSONResponse
 
 
 @pytest.fixture

@@ -8,7 +8,6 @@ from fastapi.responses import JSONResponse
 # import jobs.handlers  # noqa: F401 - disabled for development without database
 from admin.router import router as admin_router
 from agents.router import router as agents_router
-from jobs.handlers import register_event_subscribers
 from api.routes import (
     calendar_router,
     church_router,
@@ -27,7 +26,6 @@ from gcalendar.router import router as gcalendar_router
 from gcontacts.router import router as gcontacts_router
 from gdrive.router import router as gdrive_router
 from jobs.router import router as jobs_router
-from jobs.worker import job_worker
 from mail.router import router as mail_router
 from memory.router import router as memory_router
 from middleware.error_sanitization import ErrorSanitizationMiddleware

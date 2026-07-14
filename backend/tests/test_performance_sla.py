@@ -9,14 +9,11 @@ Test Coverage:
 """
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timedelta
-from typing import Dict, Any
+from unittest.mock import MagicMock
 
 from backend.observability.performance_middleware import (
     PerformanceMetrics,
     PerformanceMiddleware,
-    measure_operation,
     record_cache_operation,
 )
 

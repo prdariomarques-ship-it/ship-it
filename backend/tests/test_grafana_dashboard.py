@@ -2,7 +2,6 @@
 import json
 import tempfile
 
-import pytest
 
 from observability.grafana_dashboard import (
     create_dashboard_config,

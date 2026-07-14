@@ -9,10 +9,10 @@ Test Coverage:
 """
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock
 from sqlalchemy.orm import Query, Session
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy.orm import declarative_base, relationship
 
 from backend.performance.query_optimizer import (
     QueryOptimizer,

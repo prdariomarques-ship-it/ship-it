@@ -6,7 +6,7 @@ and maintain parent-child span relationships across async boundaries.
 """
 from typing import Optional
 
-from observability.request_context import get_request_id, get_trace_id
+from observability.request_context import get_trace_id
 from middleware.trace_context import get_trace_context
 
 

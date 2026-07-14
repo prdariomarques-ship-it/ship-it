@@ -105,7 +105,7 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
         request.state.performance = metrics
 
         # Process request
-        start = time.perf_counter()
+        time.perf_counter()
         response = await call_next(request)
         metrics.end_time = time.perf_counter()
 

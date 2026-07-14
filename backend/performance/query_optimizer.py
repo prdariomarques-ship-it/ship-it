@@ -5,10 +5,9 @@ and generate database index recommendations based on query analysis.
 """
 
 import logging
-from typing import Any, List, Set, Dict, Optional
+from typing import Any, List, Dict, Optional
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Query, Session
-from sqlalchemy.sql import visitors
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +131,6 @@ class QueryOptimizer:
         Returns:
             List of recommended indexes
         """
-        recommendations = []
 
         # Common recommendations for observed patterns
         common_patterns = [

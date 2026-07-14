@@ -8,7 +8,7 @@ Provides:
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -134,7 +134,7 @@ class IndexAnalyzer:
         Returns:
             Impact analysis dictionary
         """
-        col_str = ", ".join(columns)
+        ", ".join(columns)
 
         return {
             "table": table,
