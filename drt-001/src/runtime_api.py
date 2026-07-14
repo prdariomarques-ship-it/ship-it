@@ -7,6 +7,7 @@ Three endpoints: POST /workflow, GET /workflow/{id}, GET /health.
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from typing import Optional, Dict, Any
+from contextlib import asynccontextmanager
 import signal
 import asyncio
 import time
@@ -74,31 +75,41 @@ class RuntimeShutdownManager:
 
 def create_runtime_api(base_path: str = ".runtime") -> tuple:
     """Create FastAPI runtime application with graceful shutdown."""
-    app = FastAPI(title="DRT-001 Runtime", version="1.0")
     shutdown_mgr = RuntimeShutdownManager()
 
     # Initialize components
     persistence = FilePersistence(base_path)
     engine = WorkflowEngine(persistence)
 
-    # Startup validation
-    @app.on_event("startup")
-    async def startup():
-        """Validate storage and initialize runtime."""
+    # Lifespan context manager for startup/shutdown
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup
         if not persistence.validate_storage():
             raise RuntimeError("Storage validation failed - cannot start Runtime")
 
         app._start_time = time.time()
         app._shutdown_mgr = shutdown_mgr
 
-    # Shutdown event
-    @app.on_event("shutdown")
-    async def shutdown():
-        """Graceful shutdown handler."""
+        # Register SIGTERM/SIGINT handlers for graceful shutdown
+        def handle_sigterm(signum, frame):
+            """Handle SIGTERM: trigger graceful shutdown."""
+            asyncio.create_task(shutdown_mgr.request_disable())
+
+        def handle_sigint(signum, frame):
+            """Handle SIGINT: same as SIGTERM."""
+            asyncio.create_task(shutdown_mgr.request_disable())
+
+        signal.signal(signal.SIGTERM, handle_sigterm)
+        signal.signal(signal.SIGINT, handle_sigint)
+
+        yield
+
+        # Shutdown
         await shutdown_mgr.request_disable()
         finished = await shutdown_mgr.wait_for_completion(timeout_seconds=30)
-        if finished:
-            pass  # Cleanly shut down
+
+    app = FastAPI(title="DRT-001 Runtime", version="1.0", lifespan=lifespan)
 
     @app.post("/workflow")
     async def execute_workflow(
@@ -236,19 +247,6 @@ def create_runtime_api(base_path: str = ".runtime") -> tuple:
     return app, shutdown_mgr
 
 
-def setup_signal_handlers(shutdown_mgr: RuntimeShutdownManager):
-    """Setup OS signal handlers for graceful shutdown."""
-
-    def handle_sigterm(signum, frame):
-        """Handle SIGTERM: stop accepting, finish running, exit."""
-        asyncio.create_task(shutdown_mgr.request_disable())
-
-    def handle_sigint(signum, frame):
-        """Handle SIGINT: same as SIGTERM."""
-        asyncio.create_task(shutdown_mgr.request_disable())
-
-    signal.signal(signal.SIGTERM, handle_sigterm)
-    signal.signal(signal.SIGINT, handle_sigint)
 
 
 if __name__ == "__main__":
@@ -259,11 +257,8 @@ if __name__ == "__main__":
         print("Runtime disabled (DRT_ENABLED=false)")
         sys.exit(0)
 
-    # Create app and shutdown manager
+    # Create app (shutdown_mgr is created internally)
     app, shutdown_mgr = create_runtime_api()
-
-    # Setup signal handlers
-    setup_signal_handlers(shutdown_mgr)
 
     # Run server
     print("Starting DRT-001 Runtime...")

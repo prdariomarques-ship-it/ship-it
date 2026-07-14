@@ -5,6 +5,7 @@ Allows swapping storage implementations without changing Runtime code.
 
 import json
 import os
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -63,6 +64,7 @@ class FilePersistence(IPersistence):
         self.executions_path = self.base_path / "executions"
         self.wal_path = self.base_path / "wal.jsonl"
         self.checkpoint_path = self.base_path / "checkpoint.json"
+        self.wal_lock = threading.Lock()
 
     def validate_storage(self) -> bool:
         """Validate storage is accessible and writable."""
@@ -146,13 +148,14 @@ class FilePersistence(IPersistence):
         ]
 
     def write_wal(self, event: Dict[str, Any]) -> None:
-        """Append event to write-ahead log (JSONL format)."""
-        self.wal_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.wal_path, "a") as f:
-            f.write(json.dumps(event, default=str) + "\n")
+        """Append event to write-ahead log (JSONL format) with atomic protection."""
+        with self.wal_lock:
+            self.wal_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.wal_path, "a") as f:
+                f.write(json.dumps(event, default=str) + "\n")
 
-        # Update checkpoint
-        self.checkpoint_path.write_text(json.dumps(event, indent=2, default=str))
+            # Update checkpoint atomically within lock
+            self.checkpoint_path.write_text(json.dumps(event, indent=2, default=str))
 
     def get_wal_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Get last WAL checkpoint."""

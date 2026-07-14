@@ -4,6 +4,7 @@ Parse, validate, compile, and execute workflows deterministically.
 """
 
 import json
+import time
 from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime
 
@@ -69,6 +70,15 @@ class WorkflowDefinition:
         if not self.steps:
             raise ValidationError("Workflow must have at least one step")
 
+        # Validate timeout is positive
+        if self.timeout <= 0:
+            raise ValidationError("Workflow timeout must be positive")
+
+        # Check for duplicate step names
+        step_names = {s.name for s in self.steps}
+        if len(step_names) != len(self.steps):
+            raise ValidationError("Duplicate step names not allowed")
+
         for step in self.steps:
             if not step.validate():
                 raise ValidationError(f"Invalid step: {step.name}")
@@ -126,6 +136,20 @@ class WorkflowEngine:
             "WorkflowFailed": [],
             "WorkflowRecovered": [],
         }
+        # Index correlation_id -> execution_id for O(1) idempotency lookup
+        self.correlation_index: Dict[str, str] = {}
+        self._build_correlation_index()
+
+    def _build_correlation_index(self) -> None:
+        """Build index of correlation_id -> execution_id on startup for O(1) lookup."""
+        for exec_id in self.persistence.list_executions():
+            try:
+                data = self.persistence.load(exec_id)
+                correlation_id = data.get("correlation_id")
+                if correlation_id:
+                    self.correlation_index[correlation_id] = exec_id
+            except Exception:
+                continue
 
     def register_event_handler(
         self, event_name: str, handler: Callable[[Dict[str, Any]], None]
@@ -192,18 +216,19 @@ class WorkflowEngine:
 
     def check_idempotency(self, correlation_id: str) -> Optional[ExecutionContract]:
         """
-        Check if execution with this correlation_id already exists.
+        Check if execution with this correlation_id already exists (O(1) lookup).
         If found, return it (resume from last completed step).
         """
-        for exec_id in self.persistence.list_executions():
-            try:
-                data = self.persistence.load(exec_id)
-                if data.get("correlation_id") == correlation_id:
-                    return ExecutionContract.from_dict(data)
-            except Exception:
-                continue
+        # O(1) lookup via index
+        exec_id = self.correlation_index.get(correlation_id)
+        if not exec_id:
+            return None
 
-        return None
+        try:
+            data = self.persistence.load(exec_id)
+            return ExecutionContract.from_dict(data)
+        except Exception:
+            return None
 
     def execute_workflow(
         self,
@@ -251,6 +276,10 @@ class WorkflowEngine:
             correlation_id=correlation_id,
         )
 
+        # Add to correlation index for future lookups
+        if correlation_id:
+            self.correlation_index[correlation_id] = execution.execution_id
+
         self._emit_event(
             "WorkflowCreated",
             {
@@ -269,9 +298,18 @@ class WorkflowEngine:
             },
         )
 
-        # Step 6: Execute steps
+        # Step 6: Execute steps with timeout enforcement
+        start_time = time.time()
+        timeout_seconds = plan.workflow.timeout
         try:
             for step_name in plan.step_sequence:
+                # Check if timeout exceeded
+                elapsed = time.time() - start_time
+                if elapsed > timeout_seconds:
+                    raise TimeoutError(
+                        f"Workflow timeout exceeded ({elapsed:.1f}s > {timeout_seconds}s)"
+                    )
+
                 # Mark step started
                 execution = ExecutionTracker.mark_step_started(execution, step_name)
 

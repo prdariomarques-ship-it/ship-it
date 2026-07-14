@@ -235,20 +235,41 @@ class ExecutionTracker:
 
     @staticmethod
     def _generate_checksum(execution: ExecutionContract) -> str:
-        """Generate checksum for execution integrity."""
+        """Generate checksum for execution integrity including all mutable fields."""
         import hashlib
         import json
 
-        # Create checksum-able representation
+        # Include all mutable fields to detect any corruption
         data = {
             "execution_id": execution.execution_id,
             "correlation_id": execution.correlation_id,
             "workflow_version": execution.workflow_version,
             "runtime_version": execution.runtime_version,
             "started_at": execution.started_at,
+            "finished_at": execution.finished_at,
             "status": execution.status,
+            "duration_ms": execution.duration_ms,
             "step_count": len(execution.step_history),
+            "error": execution.error,
         }
+
+        # Create hash of step results to detect corruption in step history
+        step_data = json.dumps(
+            [
+                {
+                    "name": s.name,
+                    "status": s.status,
+                    "duration_ms": s.duration_ms,
+                    "result_hash": hashlib.sha256(
+                        json.dumps(s.result, sort_keys=True, default=str).encode()
+                    ).hexdigest(),
+                    "error": s.error,
+                }
+                for s in execution.step_history
+            ],
+            sort_keys=True,
+        )
+        data["steps_hash"] = hashlib.sha256(step_data.encode()).hexdigest()
 
         data_str = json.dumps(data, sort_keys=True)
         return hashlib.sha256(data_str.encode()).hexdigest()
@@ -262,17 +283,41 @@ class ExecutionTracker:
             "workflow_version",
             "runtime_version",
             "started_at",
+            "finished_at",
+            "duration_ms",
             "status",
             "checksum",
         ]
 
         for field in required_fields:
-            if not getattr(execution, field, None):
-                return False
+            value = getattr(execution, field, None)
+            # Allow 0 for duration_ms and finished_at (nullable)
+            if field in ["duration_ms"]:
+                if value is None:
+                    return False
+            elif field == "finished_at":
+                # finished_at can be None only if status is INITIALIZED or RUNNING
+                if execution.status in [ExecutionStatus.INITIALIZED.value, ExecutionStatus.RUNNING.value]:
+                    continue
+                if not value:
+                    return False
+            else:
+                if not value:
+                    return False
 
         # Validate status is valid
         valid_statuses = {s.value for s in ExecutionStatus}
         if execution.status not in valid_statuses:
+            return False
+
+        # Validate timestamps make sense
+        try:
+            start = datetime.fromisoformat(execution.started_at.replace("Z", "+00:00"))
+            if execution.finished_at:
+                finish = datetime.fromisoformat(execution.finished_at.replace("Z", "+00:00"))
+                if finish < start:
+                    return False
+        except (ValueError, AttributeError):
             return False
 
         return True

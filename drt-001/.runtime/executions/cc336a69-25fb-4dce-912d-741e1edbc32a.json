@@ -1,0 +1,41 @@
+{
+  "execution_id": "cc336a69-25fb-4dce-912d-741e1edbc32a",
+  "correlation_id": "708ba319-123b-489f-9e9d-373f653ced43",
+  "workflow_version": "1.0",
+  "runtime_version": "1.0",
+  "started_at": "2026-07-14T01:26:56.344763Z",
+  "finished_at": "2026-07-14T01:26:56.353828Z",
+  "duration_ms": 9,
+  "status": "COMPLETED",
+  "checksum": "cfd469cec3e34b394e92cd9f84498849900e6ccdfe5a2749788bd182dbea6558",
+  "workflow_id": "concurrent-test",
+  "workflow_name": "concurrent-test",
+  "current_step": "step-1",
+  "step_history": [
+    {
+      "name": "step-1",
+      "started_at": "2026-07-14T01:26:56.352573Z",
+      "finished_at": "2026-07-14T01:26:56.352803Z",
+      "duration_ms": 0,
+      "status": "COMPLETED",
+      "result": {
+        "status": "completed",
+        "step": "step-1"
+      },
+      "error": null
+    }
+  ],
+  "recovery_count": 0,
+  "retry_count": 0,
+  "audit_trail": [
+    {
+      "timestamp": "2026-07-14T01:26:56.381546Z",
+      "event": "WORKFLOW_COMPLETED",
+      "details": {
+        "duration_ms": 9
+      }
+    }
+  ],
+  "error": null,
+  "_checksum": "358d24a41e8a6422b15b18d481e844b00c78ea77b2d0b468529001e29ac4fba0"
+}
