@@ -94,11 +94,19 @@ def create_runtime_api(base_path: str = ".runtime") -> tuple:
         # Register SIGTERM/SIGINT handlers for graceful shutdown
         def handle_sigterm(signum, frame):
             """Handle SIGTERM: trigger graceful shutdown."""
-            asyncio.create_task(shutdown_mgr.request_disable())
+            try:
+                asyncio.create_task(shutdown_mgr.request_disable())
+            except RuntimeError:
+                # Event loop not running; set flag directly (fallback)
+                shutdown_mgr.enabled = False
 
         def handle_sigint(signum, frame):
             """Handle SIGINT: same as SIGTERM."""
-            asyncio.create_task(shutdown_mgr.request_disable())
+            try:
+                asyncio.create_task(shutdown_mgr.request_disable())
+            except RuntimeError:
+                # Event loop not running; set flag directly (fallback)
+                shutdown_mgr.enabled = False
 
         signal.signal(signal.SIGTERM, handle_sigterm)
         signal.signal(signal.SIGINT, handle_sigint)

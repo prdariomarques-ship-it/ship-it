@@ -5,6 +5,7 @@ Parse, validate, compile, and execute workflows deterministically.
 
 import json
 import time
+import threading
 from typing import Any, Callable, Dict, List, Optional
 from datetime import datetime
 
@@ -138,18 +139,30 @@ class WorkflowEngine:
         }
         # Index correlation_id -> execution_id for O(1) idempotency lookup
         self.correlation_index: Dict[str, str] = {}
+        self.correlation_lock = threading.Lock()  # Protect concurrent idempotency checks
         self._build_correlation_index()
 
     def _build_correlation_index(self) -> None:
         """Build index of correlation_id -> execution_id on startup for O(1) lookup."""
+        corrupted_files = []
         for exec_id in self.persistence.list_executions():
             try:
                 data = self.persistence.load(exec_id)
                 correlation_id = data.get("correlation_id")
                 if correlation_id:
                     self.correlation_index[correlation_id] = exec_id
-            except Exception:
-                continue
+            except Exception as e:
+                # Track corrupted files for diagnostics (don't silently skip)
+                corrupted_files.append((exec_id, str(e)))
+
+        if corrupted_files:
+            # Log corrupted files for operator awareness
+            import sys
+            print(f"WARNING: {len(corrupted_files)} corrupted execution files detected during index rebuild:", file=sys.stderr)
+            for exec_id, error in corrupted_files[:5]:  # Show first 5
+                print(f"  - {exec_id}: {error}", file=sys.stderr)
+            if len(corrupted_files) > 5:
+                print(f"  ... and {len(corrupted_files) - 5} more", file=sys.stderr)
 
     def register_event_handler(
         self, event_name: str, handler: Callable[[Dict[str, Any]], None]
@@ -166,8 +179,15 @@ class WorkflowEngine:
             "data": data,
         }
 
-        # Persist to WAL
-        self.persistence.write_wal(event)
+        # Persist to WAL (with error handling)
+        try:
+            self.persistence.write_wal(event)
+        except Exception as e:
+            # Log WAL write failure for diagnostics
+            import sys
+            print(f"ERROR: Failed to write event {event_name} to WAL: {e}", file=sys.stderr)
+            # Re-raise to interrupt workflow on critical event persistence failure
+            raise
 
         # Invoke local handlers
         for handler in self.event_handlers.get(event_name, []):
@@ -254,31 +274,40 @@ class WorkflowEngine:
         # Step 3: Compile
         plan = self.compile_workflow(workflow)
 
-        # Step 4: Check idempotency
-        existing = self.check_idempotency(correlation_id) if correlation_id else None
-        if existing and existing.status == ExecutionStatus.COMPLETED.value:
-            # Already completed - resume and return
-            self._emit_event(
-                "WorkflowRecovered",
-                {
-                    "execution_id": existing.execution_id,
-                    "correlation_id": correlation_id,
-                    "status": existing.status,
-                },
-            )
-            return existing
-
-        # Step 5: Create execution record
-        execution = ExecutionTracker.create_execution(
-            workflow_id=workflow.name,
-            workflow_name=workflow.name,
-            workflow_version=workflow.version,
-            correlation_id=correlation_id,
-        )
-
-        # Add to correlation index for future lookups
+        # Step 4: Check idempotency (atomic with lock to prevent concurrent duplicates)
         if correlation_id:
-            self.correlation_index[correlation_id] = execution.execution_id
+            with self.correlation_lock:
+                existing = self.check_idempotency(correlation_id)
+                if existing and existing.status == ExecutionStatus.COMPLETED.value:
+                    # Already completed - resume and return
+                    self._emit_event(
+                        "WorkflowRecovered",
+                        {
+                            "execution_id": existing.execution_id,
+                            "correlation_id": correlation_id,
+                            "status": existing.status,
+                        },
+                    )
+                    return existing
+
+                # Create execution record (within lock to prevent concurrent duplicates)
+                execution = ExecutionTracker.create_execution(
+                    workflow_id=workflow.name,
+                    workflow_name=workflow.name,
+                    workflow_version=workflow.version,
+                    correlation_id=correlation_id,
+                )
+
+                # Add to correlation index atomically
+                self.correlation_index[correlation_id] = execution.execution_id
+        else:
+            # No correlation_id: create execution without lock
+            execution = ExecutionTracker.create_execution(
+                workflow_id=workflow.name,
+                workflow_name=workflow.name,
+                workflow_version=workflow.version,
+                correlation_id=correlation_id,
+            )
 
         self._emit_event(
             "WorkflowCreated",
@@ -324,6 +353,13 @@ class WorkflowEngine:
 
                 # Simulate step execution (deterministic)
                 result = self._execute_step(step_name, plan.step_configs[step_name])
+
+                # Check if timeout exceeded during step execution
+                elapsed = time.time() - start_time
+                if elapsed > timeout_seconds:
+                    raise TimeoutError(
+                        f"Workflow timeout exceeded ({elapsed:.1f}s > {timeout_seconds}s)"
+                    )
 
                 # Mark step completed
                 execution = ExecutionTracker.mark_step_completed(

@@ -148,14 +148,22 @@ class FilePersistence(IPersistence):
         ]
 
     def write_wal(self, event: Dict[str, Any]) -> None:
-        """Append event to write-ahead log (JSONL format) with atomic protection."""
+        """Append event to write-ahead log (JSONL format) with atomic protection and durability."""
         with self.wal_lock:
             self.wal_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.wal_path, "a") as f:
                 f.write(json.dumps(event, default=str) + "\n")
+                f.flush()
+                os.fsync(f.fileno())  # Ensure data is written to disk
 
-            # Update checkpoint atomically within lock
+            # Update checkpoint atomically within lock with durability
             self.checkpoint_path.write_text(json.dumps(event, indent=2, default=str))
+            # fsync checkpoint file to disk
+            checkpoint_fd = os.open(str(self.checkpoint_path), os.O_RDONLY)
+            try:
+                os.fsync(checkpoint_fd)
+            finally:
+                os.close(checkpoint_fd)
 
     def get_wal_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Get last WAL checkpoint."""
