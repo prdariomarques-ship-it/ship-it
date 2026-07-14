@@ -277,18 +277,24 @@ class WorkflowEngine:
         # Step 4: Check idempotency (atomic with lock to prevent concurrent duplicates)
         if correlation_id:
             with self.correlation_lock:
-                existing = self.check_idempotency(correlation_id)
-                if existing and existing.status == ExecutionStatus.COMPLETED.value:
-                    # Already completed - resume and return
-                    self._emit_event(
-                        "WorkflowRecovered",
-                        {
-                            "execution_id": existing.execution_id,
-                            "correlation_id": correlation_id,
-                            "status": existing.status,
-                        },
-                    )
-                    return existing
+                # Check if already in index (O(1) lookup, avoids disk I/O during critical section)
+                existing_id = self.correlation_index.get(correlation_id)
+                if existing_id:
+                    try:
+                        data = self.persistence.load(existing_id)
+                        if data:
+                            existing = ExecutionContract.from_dict(data)
+                            self._emit_event(
+                                "WorkflowRecovered",
+                                {
+                                    "execution_id": existing.execution_id,
+                                    "correlation_id": correlation_id,
+                                    "status": existing.status,
+                                },
+                            )
+                            return existing
+                    except Exception:
+                        pass
 
                 # Create execution record (within lock to prevent concurrent duplicates)
                 execution = ExecutionTracker.create_execution(
@@ -297,6 +303,9 @@ class WorkflowEngine:
                     workflow_version=workflow.version,
                     correlation_id=correlation_id,
                 )
+
+                # Save immediately to disk so concurrent threads can load it
+                self.persistence.save(execution.execution_id, execution.to_dict())
 
                 # Add to correlation index atomically
                 self.correlation_index[correlation_id] = execution.execution_id
@@ -429,9 +438,8 @@ class WorkflowEngine:
         """
         Recover execution after crash.
         1. Check if execution exists
-        2. Load from persistence
-        3. Verify checksum
-        4. If incomplete, mark recovered
+        2. Load from persistence (checksum already verified by load())
+        3. If incomplete, mark recovered
         """
         try:
             data = self.persistence.load(execution_id)
@@ -440,16 +448,7 @@ class WorkflowEngine:
 
             execution = ExecutionContract.from_dict(data)
 
-            # Verify checksum
-            original_checksum = execution.checksum
-            execution.checksum = ""
-            computed_checksum = ExecutionTracker._generate_checksum(execution)
-            execution.checksum = original_checksum
-
-            if computed_checksum != original_checksum:
-                raise ValueError("Checksum mismatch - data corrupted")
-
-            # Mark recovered if incomplete
+            # Mark recovered if incomplete (checksum was already verified by persistence.load())
             if execution.status != ExecutionStatus.COMPLETED.value:
                 execution = ExecutionTracker.mark_recovered(execution)
                 self.persistence.save(execution_id, execution.to_dict())
