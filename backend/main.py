@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-import jobs.handlers  # noqa: F401 - register the built-in job handlers
+# import jobs.handlers  # noqa: F401 - disabled for development without database
 from admin.router import router as admin_router
 from agents.router import router as agents_router
 from jobs.handlers import register_event_subscribers
@@ -65,13 +65,13 @@ OPENAPI_TAGS = [
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(json_output=settings.log_json)
-    register_event_subscribers()
-    if settings.jobs_enabled and settings.environment != "test":
-        job_worker.start()
+    # register_event_subscribers()  # disabled for development without database
+    # if settings.jobs_enabled and settings.environment != "test":
+    #     job_worker.start()
     logger.info("%s v%s started (%s)", settings.app_name, settings.app_version, settings.environment)
     yield
-    if settings.jobs_enabled and settings.environment != "test":
-        await job_worker.stop()
+    # if settings.jobs_enabled and settings.environment != "test":
+    #     await job_worker.stop()
 
 
 def _validate_production_settings(settings) -> None:
