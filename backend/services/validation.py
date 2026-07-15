@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-def validate_url(url: str, allowed_schemes: list[str] = None) -> bool:
+def validate_url(url: str, allowed_schemes: list[str] | None = None) -> bool:
     """Whitelist validation for external URLs to prevent SSRF.
 
     Reject:

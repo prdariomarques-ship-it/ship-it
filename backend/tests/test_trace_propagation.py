@@ -1,9 +1,7 @@
 """Trace context propagation across 6 mechanisms: HTTP (in/out), DB, APIs, jobs, events, agents."""
 import pytest
-from uuid import uuid4
 from fastapi import FastAPI
 from starlette.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from observability.request_context import RequestIDMiddleware, get_request_id, get_trace_id
 from middleware.trace_context import TraceContextMiddleware, get_trace_context
@@ -150,7 +148,7 @@ def test_event_bus_includes_trace_context_in_payload(client):
     """Event Bus: trace context can be serialized into event payload."""
     response = client.get("/trace-info")
     assert response.status_code == 200
-    data = response.json()
+    response.json()
 
     # Simulate event payload enrichment
     event_payload = {"type": "test_event"}

@@ -13,6 +13,8 @@ Gemini's wire format differs from the two families already supported:
   `role="tool"` message can be turned back into a correctly named
   `functionResponse`.
 """
+from typing import Any
+
 import httpx
 
 from providers.llm.base import (
@@ -73,7 +75,7 @@ class GeminiProvider(LLMProvider):
                 continue
 
             if message.role == "assistant" and message.tool_calls:
-                parts = [{"text": message.content}] if message.content else []
+                parts: list[dict[str, Any]] = [{"text": message.content}] if message.content else []
                 for call in message.tool_calls:
                     call_id_to_name[call.id] = call.name
                     parts.append({"functionCall": {"name": call.name, "args": call.arguments}})

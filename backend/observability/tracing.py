@@ -78,7 +78,7 @@ def setup_tracing(
     sampler = sampler_strategy.get_sampler()
     set_sampling_rate(sampler_strategy.get_rate())
 
-    provider = TracerProvider(resource=resource, sampler=sampler)
+    provider = TracerProvider(resource=resource, sampler=sampler)  # type: ignore[arg-type]
     exporter = OTLPSpanExporter(endpoint=otlp_endpoint) if otlp_endpoint else ConsoleSpanExporter()
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)

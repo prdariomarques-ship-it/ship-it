@@ -34,7 +34,7 @@ def create_crud_router(
     class Repository(SQLAlchemyRepository):  # noqa: D401 - closure-scoped repository
         pass
 
-    Repository.model = model
+    Repository.model = model  # type: ignore[misc]
 
     def _scope(user_id: int) -> dict[str, Any]:
         return {"user_id": user_id} if user_scoped else {}
@@ -45,7 +45,7 @@ def create_crud_router(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{tag} not found")
         return item
 
-    @router.get("", response_model=list[read_schema])
+    @router.get("", response_model=list[read_schema])  # type: ignore[valid-type]
     async def list_items(
         db: DbSession,
         current_user: CurrentUser,
@@ -60,7 +60,7 @@ def create_crud_router(
 
     @router.post("", response_model=read_schema, status_code=status.HTTP_201_CREATED)
     async def create_item(payload: create_schema, db: DbSession, current_user: CurrentUser) -> Base:  # type: ignore[valid-type]
-        data = payload.model_dump()
+        data = payload.model_dump()  # type: ignore[attr-defined]
         if user_scoped:
             data["user_id"] = current_user.id
         return await Repository(db).create(**data)
@@ -75,7 +75,7 @@ def create_crud_router(
     ) -> Base:
         repository = Repository(db)
         item = await _get_or_404(repository, item_id, current_user.id)
-        return await repository.update(item, **payload.model_dump(exclude_unset=True))
+        return await repository.update(item, **payload.model_dump(exclude_unset=True))  # type: ignore[attr-defined]
 
     @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_item(item_id: int, db: DbSession, current_user: CurrentUser) -> None:

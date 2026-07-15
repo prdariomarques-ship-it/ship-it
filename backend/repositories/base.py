@@ -33,7 +33,7 @@ class SQLAlchemyRepository(Generic[ModelT]):
         statement = select(self.model)
         for field, value in filters.items():
             statement = statement.where(getattr(self.model, field) == value)
-        order = self.model.id.desc() if order_desc else self.model.id.asc()
+        order = self.model.id.desc() if order_desc else self.model.id.asc()  # type: ignore[attr-defined]
         result = await self.session.execute(statement.order_by(order).limit(limit).offset(offset))
         return list(result.scalars().all())
 

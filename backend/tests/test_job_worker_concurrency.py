@@ -140,7 +140,6 @@ async def test_exception_in_one_task_propagates():
 @pytest.mark.asyncio
 async def test_asyncio_gather_return_exceptions_true():
     """Verify asyncio.gather with return_exceptions=True doesn't raise."""
-    results = []
 
     async def mock_job_execution(job_id: int):
         if job_id == 3:
@@ -189,7 +188,6 @@ async def test_semaphore_fifo_ordering():
 @pytest.mark.asyncio
 async def test_concurrent_job_execution_performance():
     """Verify concurrent execution is faster than sequential."""
-    execution_times = []
 
     async def mock_job(delay: float = 0.05):
         await asyncio.sleep(delay)

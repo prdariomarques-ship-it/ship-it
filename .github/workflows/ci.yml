@@ -22,6 +22,14 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Lint
         run: ruff check .
+      - name: Type check
+        run: mypy --ignore-missing-imports .
+      - name: Formatting (report only — codebase not yet reformatted)
+        run: ruff format --check . || echo "::warning::ruff format found unformatted files; see TECHNICAL_DEBT.md"
+        continue-on-error: true
+      - name: Dependency vulnerabilities (report only — see TECHNICAL_DEBT.md)
+        run: pip install pip-audit && pip-audit -r requirements.txt || echo "::warning::pip-audit found known vulnerabilities"
+        continue-on-error: true
       - name: Tests
         run: pytest -q
       - name: Migrations apply and roll back
@@ -45,5 +53,24 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Build
+      - name: Lint
+        run: npm run lint
+      - name: Dependency vulnerabilities (report only — see TECHNICAL_DEBT.md)
+        run: npm audit --audit-level=critical || echo "::warning::npm audit found vulnerabilities"
+        continue-on-error: true
+      - name: Tests
+        run: npm run test
+      - name: Build (also type-checks — Next.js runs tsc during build)
         run: npm run build
+
+  docker-compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        working-directory: docker
+        run: |
+          cp .env.example .env
+          echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+          echo "WEBHOOK_SECRET=$(openssl rand -hex 32)" >> .env
+          docker compose config -q

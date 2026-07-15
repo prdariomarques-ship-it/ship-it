@@ -55,7 +55,7 @@ async def list_jobs(
 ) -> list[Job]:
     repository = JobRepository(db)
     filters = {"status": job_status} if job_status is not None else {}
-    return await repository.list(limit=limit, offset=offset, **filters)
+    return await repository.list(limit=limit, offset=offset, **filters)  # type: ignore[arg-type]
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)

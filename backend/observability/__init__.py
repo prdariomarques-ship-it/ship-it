@@ -27,7 +27,6 @@ from observability.sampling import (
     ErrorRateSampler,
     get_sampler_from_env,
 )
-from observability.grafana_dashboard import create_dashboard_config, save_dashboard_config
 from middleware.trace_context import TraceContextMiddleware, get_trace_context
 
 __all__ = [
@@ -59,6 +58,4 @@ __all__ = [
     "ParentBasedSampler",
     "ErrorRateSampler",
     "get_sampler_from_env",
-    "create_dashboard_config",
-    "save_dashboard_config",
 ]

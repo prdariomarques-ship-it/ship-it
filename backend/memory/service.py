@@ -82,7 +82,10 @@ class MemoryService:
         vector_ids = [row.vector_id for row in rows]
         if vector_ids:
             await self._ensure_collection()
-            await self.client.delete(collection_name=self._settings.qdrant_collection, points_selector=vector_ids)
+            await self.client.delete(
+                collection_name=self._settings.qdrant_collection,
+                points_selector=vector_ids,  # type: ignore[arg-type]  # list invariance false-positive
+            )
         for row in rows:
             await db.delete(row)
         await db.commit()

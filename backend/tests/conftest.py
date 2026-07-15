@@ -1,9 +1,11 @@
 """Test fixtures: in-memory SQLite database and an authenticated HTTP client."""
 import os
+import uuid
 
 os.environ["ENVIRONMENT"] = "test"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite://"
 os.environ["JWT_SECRET"] = "test-secret-key-with-enough-bytes-for-hs256"
+os.environ["WEBHOOK_SECRET"] = ""
 os.environ["OPENAI_API_KEY"] = ""
 # Unmocked provider calls in tests hit an unreachable localhost gateway by
 # design (no real WhatsApp/n8n running); keep retry/backoff from adding
@@ -15,7 +17,6 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from database.base import Base
 from database.session import get_db
@@ -44,13 +45,26 @@ def _reset_local_caches():
 
 
 @pytest_asyncio.fixture
-async def db_engine():
+async def db_engine(tmp_path):
+    # A real file (not `:memory:` + StaticPool, and not a shared-cache memory
+    # URI either) with WAL mode, because the job worker now opens genuinely
+    # concurrent sessions via asyncio.gather (one per due job). StaticPool
+    # forces every session through one shared connection object (undefined
+    # behaviour under real concurrent use); shared-cache in-memory mode
+    # supports two concurrent writers via the busy-timeout but still throws
+    # `InvalidRequestError: Could not refresh instance` once 3+ sessions
+    # write at once (SQLITE_LOCKED from shared-cache table locking isn't
+    # retried by the busy handler the way SQLITE_BUSY is). WAL mode is
+    # SQLite's actual answer to concurrent writers, but it isn't supported
+    # for in-memory databases — hence a real (temp, per-test, auto-cleaned
+    # by pytest's tmp_path) file on disk.
+    db_path = tmp_path / f"test_{uuid.uuid4().hex}.db"
     engine = create_async_engine(
-        "sqlite+aiosqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        f"sqlite+aiosqlite:///{db_path}",
+        connect_args={"check_same_thread": False, "timeout": 30},
     )
     async with engine.begin() as conn:
+        await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()

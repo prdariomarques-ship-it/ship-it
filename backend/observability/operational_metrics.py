@@ -63,7 +63,7 @@ def setup_operational_metrics(prometheus_enabled: bool = False) -> Optional[Mete
     return provider
 
 
-def record_span_exported(count: int = 1, attributes: dict = None) -> None:
+def record_span_exported(count: int = 1, attributes: dict | None = None) -> None:
     """Record that spans were exported successfully."""
     if _span_export_counter:
         _span_export_counter.add(count, attributes or {})
@@ -78,7 +78,7 @@ def record_span_dropped(count: int = 1, reason: str = "unknown") -> None:
 def set_sampling_rate(rate: float) -> None:
     """Update current sampling rate (0.0 to 1.0)."""
     if _sampling_rate_gauge:
-        _sampling_rate_gauge.record(rate)
+        _sampling_rate_gauge.set(rate)
 
 
 def record_exemplar_registration(trace_id: str, span_id: str, metric_name: str) -> None:

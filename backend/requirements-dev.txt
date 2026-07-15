@@ -4,3 +4,4 @@ pytest-asyncio>=0.24,<1
 pytest-cov>=6.0,<7
 aiosqlite>=0.20,<1
 ruff>=0.7,<1
+mypy>=1.13,<2

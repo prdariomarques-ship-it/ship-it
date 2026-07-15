@@ -93,7 +93,10 @@ def system_resources() -> dict:
 def db_pool_info() -> dict:
     pool = engine.pool
     try:
-        return {"db_pool_size": pool.size(), "db_pool_checked_out": pool.checkedout()}
+        return {
+            "db_pool_size": pool.size(),  # type: ignore[attr-defined]
+            "db_pool_checked_out": pool.checkedout(),  # type: ignore[attr-defined]
+        }
     except AttributeError:
         # NullPool (used for SQLite/tests) exposes neither method.
         return {"db_pool_size": None, "db_pool_checked_out": None}

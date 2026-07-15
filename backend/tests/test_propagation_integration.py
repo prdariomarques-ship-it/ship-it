@@ -17,7 +17,7 @@ from observability.propagation_examples import (
     AgentOrchestratorTraceIntegration,
     _job_trace_context,
 )
-from observability.trace_propagation import serialize_trace_context, restore_trace_context
+from observability.trace_propagation import restore_trace_context
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ def test_sqlalchemy_spans_maintain_parent_child_relationship(client):
     """SQLAlchemy: child query spans inherit parent request trace."""
     response = client.get("/test-trace")
     assert response.status_code == 200
-    parent_trace = response.json()["trace_id"]
+    response.json()["trace_id"]
 
     # During request, any queries would have same trace_id
     # (SQLAlchemy instrumentor handles span_id assignment)
@@ -124,7 +124,7 @@ async def test_job_worker_restores_and_preserves_trace_context(client):
     """Job Worker: trace context restored before handler execution."""
     response = client.get("/test-trace")
     assert response.status_code == 200
-    original_trace = response.json()["trace_id"]
+    response.json()["trace_id"]
 
     # Simulate job with trace context
     payload = {"contact_id": "123"}
@@ -178,7 +178,7 @@ async def test_event_bus_handler_restores_trace_context(client):
 
     # Mock handler
     async def mock_handler(event):
-        restored_context = _job_trace_context.get()
+        _job_trace_context.get()
         # Handler executed with context
 
     # Execute handler with trace restoration
@@ -264,7 +264,7 @@ def test_http_to_api_maintains_trace_continuity(client):
     """End-to-end: HTTP request → external API → external service maintains trace."""
     response = client.get("/test-trace")
     assert response.status_code == 200
-    http_trace = response.json()["trace_id"]
+    response.json()["trace_id"]
 
     # Simulate outbound API call
     headers = HttpxTraceIntegration.example_api_call_with_trace()

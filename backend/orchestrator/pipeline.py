@@ -259,6 +259,7 @@ class CognitivePipeline:
                     record_validation_retry()
                     logger.info("Retrying plan step (%s): %s", step.agent, validation.issues)
 
+            assert agent_result is not None, "_MAX_VALIDATION_ATTEMPTS must be >= 1"
             step.status = PlanStepStatus.DONE if validation_ok else PlanStepStatus.FAILED
             step.result = agent_result.reply
             steps.extend(agent_result.steps)

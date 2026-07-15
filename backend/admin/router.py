@@ -241,7 +241,7 @@ async def _domain_status(db: DbSession, model, domain: str) -> schemas.GoogleDom
     accounts = [
         schemas.GoogleAccountInfo(
             user_id=row.user_id,
-            label=getattr(row, "account_label", None) or getattr(row, "email_address", ""),
+            label=str(getattr(row, "account_label", None) or getattr(row, "email_address", "")),
             scopes=row.scopes,
             connected_at=row.connected_at,
         )
@@ -277,7 +277,7 @@ async def admin_memory(db: DbSession) -> schemas.MemoryStats:
         collection_stats = schemas.MemoryCollectionStats(
             name=settings.qdrant_collection,
             points_count=info.points_count,
-            vectors_count=info.vectors_count,
+            vectors_count=info.indexed_vectors_count,
             status=info.status.value if info.status is not None else None,
         )
     except Exception:  # noqa: BLE001 - collection may not exist yet on a fresh install
@@ -366,7 +366,7 @@ async def admin_users(
     db: DbSession,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[User]:
+) -> list[schemas.UserAdminRead]:
     statement = select(User).order_by(User.id.asc()).limit(limit).offset(offset)
     rows = (await db.execute(statement)).scalars().all()
     return [

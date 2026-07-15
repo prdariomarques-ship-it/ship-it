@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 try:
-    from opentelemetry.sdk.trace.sampling import Sampler, SamplingResult, Decision
+    from opentelemetry.sdk.trace.sampling import Sampler, SamplingResult, Decision  # noqa: F401 — availability probe
     _OTEL_AVAILABLE = True
 except ImportError:
     _OTEL_AVAILABLE = False
@@ -82,7 +82,9 @@ class ParentBasedSampler(SamplingStrategy):
             return None
         from opentelemetry.sdk.trace.sampling import ParentBased
         root_sampler = self.root_sampler.get_sampler()
-        return ParentBased(root_sampler)
+        # get_sampler() is typed Optional[object] so this module stays importable
+        # without opentelemetry installed; root_sampler is a real Sampler here.
+        return ParentBased(root_sampler)  # type: ignore[arg-type]
 
     def get_rate(self) -> float:
         return self.root_sampler.get_rate()

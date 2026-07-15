@@ -233,7 +233,9 @@ async def _index_folder(context: ToolContext, folder_id: str, limit: int = 20) -
     except DriveProviderError as exc:
         raise RuntimeError(f"Falha ao listar a pasta: {exc}") from exc
 
-    indexed, skipped, failed = [], [], []
+    indexed: list[dict] = []
+    skipped: list[dict] = []
+    failed: list[dict] = []
     for file in files:
         try:
             result = await _index_one(context, provider, access_token, file.id)
@@ -257,7 +259,9 @@ async def _update_index(context: ToolContext, limit: int = 20) -> str:
     repository = GoogleDriveIndexedFileRepository(context.db)
     tracked = await repository.list_by_user(context.user.id, limit=min(limit, _MAX_FILES_PER_INDEX_UPDATE))
 
-    updated, unchanged, failed = [], [], []
+    updated: list[dict] = []
+    unchanged: list[dict] = []
+    failed: list[dict] = []
     for entry in tracked:
         try:
             result = await _index_one(context, provider, access_token, entry.file_id)
