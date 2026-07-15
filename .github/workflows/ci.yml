@@ -56,7 +56,7 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Dependency vulnerabilities (report only — see TECHNICAL_DEBT.md)
-        run: npm audit --audit-level=critical || echo "::warning::npm audit found vulnerabilities"
+        run: npm audit --audit-level=high || echo "::warning::npm audit found vulnerabilities"
         continue-on-error: true
       - name: Tests
         run: npm run test
