@@ -133,7 +133,7 @@ services:
     networks: [darioos]
 
   openwa:
-    image: openwa/wa-automate:latest
+    build: ./openwa
     restart: unless-stopped
     # If you set OPENWA_API_KEY in .env, also append: --key <the same value>
     command: >-
@@ -141,12 +141,14 @@ services:
       --port 8002
       --api-host http://openwa:8002
       --webhook http://backend:8000/api/webhooks/whatsapp
+    ports:
+      - "8002:8002"
     volumes:
       - openwa_data:/sessions
     networks: [darioos]
 
   prometheus:
-    image: prometheus:v2.45.0
+    image: prom/prometheus:v2.45.0
     restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
