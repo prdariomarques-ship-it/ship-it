@@ -2,7 +2,7 @@
 
 ## Visão geral
 
-O Dario OS é composto por 8 containers orquestrados pelo Docker Compose:
+O Dario OS é composto por 12 containers orquestrados pelo Docker Compose. O diagrama abaixo mostra o fluxo central da aplicação (8 desses serviços); os 4 restantes — Jaeger, Prometheus, Alertmanager e Grafana — são a stack de observabilidade opcional (OBS-001/002) e não aparecem aqui por não fazerem parte do fluxo de request:
 
 ```mermaid
 graph TB

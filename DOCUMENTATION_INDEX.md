@@ -32,18 +32,17 @@ These are the single source of truth for platform and core architecture:
 | **VERSION_HISTORY.md** | Version-by-version changelog with architectural notes | ✅ Authoritative |
 | **CHANGELOG.md** | Latest release notes and changes | ✅ Authoritative |
 
-## Deprecated Documents (Historical Record — Do Not Reference)
+## Removed Documents
 
-These documents are kept in the repository as historical record but **are no longer authoritative**. New references should use the authoritative sources above.
+These documents were marked deprecated during Phase 0 (2026-07-11) with a notice pointing to their replacement, but were left in the repository. Removed outright on 2026-07-15 since each one's own deprecation notice confirmed 100% supersession by an authoritative source above — nothing to merge.
 
-| Document | Superseded By | Reason |
-|---|---|---|
-| **PLATFORM_ARCHITECTURE.md** | ARCHITECTURE_FINAL.md, MODULE_CATALOG.md | Original draft before consolidation and resolution of issues identified in ARCHITECTURE_REVIEW.md |
-| **docs/modulos/MODULE_CATALOG.md** | MODULE_CATALOG.md (root) | Pre-consolidation version; content updated and moved to root |
-| **docs/architecture/MASTER_CONTEXT.md** | ARCHITECTURE_FINAL.md | Context consolidated into single authoritative document |
-| **docs/architecture/ARCHITECT_DECISIONS.md** | ARCHITECTURE_DECISIONS.md (root) | Pre-consolidation version with 7 decisions; expanded to 9 in root version |
-
-**Note**: All deprecated documents have a deprecation notice at the top with references to authoritative replacements.
+| Document (removed) | Was superseded by |
+|---|---|
+| PLATFORM_ARCHITECTURE.md | ARCHITECTURE_FINAL.md |
+| docs/modulos/MODULE_CATALOG.md | MODULE_CATALOG.md (root) |
+| docs/architecture/MASTER_CONTEXT.md | ARCHITECTURE_FINAL.md |
+| docs/architecture/ARCHITECT_DECISIONS.md | ARCHITECTURE_DECISIONS.md (root) |
+| docs/governance/ENGINEERING_GUIDE.md | docs/architecture/MODULE_PATTERNS.md |
 
 ## Historical Documents (For Reference Only)
 

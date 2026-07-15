@@ -1,19 +1,21 @@
 # Project Status — Dario OS
 
+**⚠️ Esta página estava desatualizada desde a v1.2.0 (07-11) apesar de se apresentar como o snapshot atual — atualizada em 2026-07-15 só nos números efetivamente reconferidos nesta data (ver marcações abaixo). Endpoints/Agents/Tools/Providers/Páginas/Cobertura não foram reconferidos agora e podem estar desatualizados.**
+
 ## Resumo executivo
 
 | | |
 |---|---|
-| **Versão atual** | v1.2.0 |
-| **Última release** | v1.2.0 — 2026-07-11 (`174569a`) |
+| **Última verificação** | 2026-07-15 |
 | **Status geral** | ✅ Em produção, sem bloqueadores conhecidos |
-| **Endpoints HTTP** | 59 (todos os routers, incluindo os 12 admin) |
-| **Agents** | 5 (`personal`, `church`, `store`, `content`, `assistant`) |
-| **Tools** | 36 |
-| **Providers plugáveis** | 13, em 6 categorias (WhatsApp: 4, LLM: 5, Mail: 1, Calendar: 1, Contacts: 1, Drive: 1) |
-| **Páginas frontend** | 23 (10 app principal, 12 admin, 1 login) |
-| **Testes** | 555 backend + 108 frontend (unit) + 23 E2E (Playwright) = **686** |
-| **Cobertura** | 94% backend; ~95% em `components/admin`, `lib` e `hooks` no frontend |
+| **Endpoints HTTP** | 59 *(não reconferido em 07-15)* |
+| **Agents** | 5 (`personal`, `church`, `store`, `content`, `assistant`) *(não reconferido em 07-15)* |
+| **Tools** | 36 *(não reconferido em 07-15)* |
+| **Providers plugáveis** | 13, em 6 categorias (WhatsApp: 4, LLM: 5, Mail: 1, Calendar: 1, Contacts: 1, Drive: 1) *(não reconferido em 07-15)* |
+| **Páginas frontend** | 23 (10 app principal, 12 admin, 1 login) *(não reconferido em 07-15)* |
+| **Testes** | 758 backend + 108 frontend (unit) — reconferido em 07-15, rodando 2x em host + 1x em container, todos passando |
+| **Serviços Docker** | 12 (postgres, redis, qdrant, backend, frontend, caddy, n8n, openwa, jaeger, prometheus, alertmanager, grafana) — reconferido em 07-15 |
+| **Cobertura** | 94% backend; ~95% em `components/admin`, `lib` e `hooks` no frontend *(não reconferido em 07-15)* |
 
 ## Stack
 
@@ -48,21 +50,23 @@ Ver `VERSION_HISTORY.md` para a linha do tempo completa.
 - v1.1.2 (2026-07-10) — correção das migrations PostgreSQL ENUM
 - v1.2.0 (2026-07-11) — Dashboard Administrativo, Observabilidade, Playwright, OpenTelemetry, Production Hardening
 
-## Estado da validação (v1.2.0)
+## Estado da validação (última verificação 2026-07-15)
 
 | Validação | Resultado |
 |---|---|
-| TypeScript | ✅ 0 erros |
+| TypeScript (via `next build`) | ✅ 0 erros |
 | ESLint | ✅ 0 erros/warnings |
-| Ruff | ✅ All checks passed |
-| Pytest | ✅ 555 passed |
+| Ruff (lint) | ✅ All checks passed |
+| mypy | ✅ 0 erros (263 arquivos) |
+| Pytest | ✅ 758 passed (host); 753/758 em container — as 5 restantes são artefato do filesystem restrito do container (ver TECHNICAL_DEBT.md), confirmadas passando no ambiente equivalente ao CI real |
 | Frontend tests (Vitest) | ✅ 108 passed |
-| Playwright (E2E) | ✅ 23 passed |
+| Playwright (E2E) | *(não reexecutado em 07-15)* |
 | Build de produção (Next.js) | ✅ sucesso |
-| `alembic check` (drift) | ✅ nenhuma operação pendente |
+| `alembic upgrade head` (do zero) | ✅ 11 migrations aplicadas, schema consistente |
 | `docker compose config` | ✅ válido |
-| `docker compose up` (real) | ⚠️ não executável neste tipo de ambiente de sandbox — ver `OPERATIONS_RUNBOOK.md` |
+| `docker compose up` (real) | ✅ executado — stack de 12 serviços saudável |
 | Google OAuth (round-trip real) | ⚠️ validado só por código/testes — ver `KNOWN_LIMITATIONS.md` |
+| WhatsApp (OpenWA) | ⚠️ crash loop corrigido, mas sessão exige novo QR code (aguardando ação humana) e há incompatibilidade não resolvida com o WhatsApp Web atual — ver `TECHNICAL_DEBT.md` |
 
 ## Pendências conhecidas
 
