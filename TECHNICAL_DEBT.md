@@ -76,10 +76,11 @@ usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
   caracteres antes de ir para o modelo. Ver `docs/EMAIL.md`.
 - **Dashboard Administrativo**: página Settings é somente leitura por
   decisão de escopo da Sprint 4. Ver `docs/DASHBOARD.md`.
-- **GoalManager**: sem UI dedicada no frontend (só API); recorrência não
-  copia dependências para a próxima ocorrência; nenhuma automação
-  transiciona um Goal para `IN_PROGRESS`/`COMPLETED` sozinha — sempre ação
-  explícita via API/tool. Ver `docs/GOALS.md`.
+- **GoalManager**: UI do dashboard (`/metas`) é somente leitura, sem
+  formulário de criação/aprovação ainda; recorrência não copia
+  dependências para a próxima ocorrência; nenhuma automação transiciona um
+  Goal para `IN_PROGRESS`/`COMPLETED` sozinha — sempre ação explícita via
+  API/tool. Ver `docs/GOALS.md`.
 
 ## Performance
 
