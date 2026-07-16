@@ -1,4 +1,6 @@
 """Event Bus: in-process pub/sub, wildcard subscriptions, handler isolation."""
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from events.bus import EventBus
@@ -96,3 +98,53 @@ async def test_multiple_handlers_for_same_event_all_run(bus):
     await bus.publish("thing.happened", {})
 
     assert received == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_publish_survives_redis_being_unavailable(bus):
+    """In-process delivery must never depend on Redis fan-out succeeding."""
+    received = []
+
+    async def handler(event):
+        received.append(event.name)
+
+    bus.subscribe("thing.happened", handler)
+
+    with patch("events.bus.aioredis.from_url", side_effect=ConnectionError("redis down")):
+        event = await bus.publish("thing.happened", {})
+
+    assert received == ["thing.happened"]
+    assert event.name == "thing.happened"
+    assert bus._redis_available is False
+
+
+@pytest.mark.asyncio
+async def test_redis_failure_is_not_retried_on_every_publish(bus):
+    """Once Redis is marked unavailable, subsequent publishes must not
+    attempt a new connection on every call — that would turn a down Redis
+    into a per-request latency/error source instead of a one-time detection."""
+    connect_attempts = 0
+
+    def _from_url(*args, **kwargs):
+        nonlocal connect_attempts
+        connect_attempts += 1
+        raise ConnectionError("redis down")
+
+    with patch("events.bus.aioredis.from_url", side_effect=_from_url):
+        await bus.publish("a.b", {})
+        await bus.publish("a.b", {})
+        await bus.publish("a.b", {})
+
+    assert connect_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_fans_out_to_redis_when_available(bus):
+    mock_redis = AsyncMock()
+    with patch("events.bus.aioredis.from_url", return_value=mock_redis):
+        event = await bus.publish("agent.replied", {"agent": "assistant"})
+
+    mock_redis.publish.assert_awaited_once()
+    channel, payload = mock_redis.publish.call_args.args
+    assert channel == bus._settings.events_channel
+    assert event.name == "agent.replied"
