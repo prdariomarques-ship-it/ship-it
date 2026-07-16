@@ -35,4 +35,17 @@ RUN sed -i \
     /usr/src/app/node_modules/@open-wa/wa-automate/dist/controllers/browser.js \
     && grep -q "if (customUserAgent) { setupPromises.push" /usr/src/app/node_modules/@open-wa/wa-automate/dist/controllers/browser.js
 
+# The QR auth page (controllers/popup/index.html, served at :8002) logs
+# every socket message's raw `.data` into the on-page `.log` panel, and
+# only excludes the "sessionDataBase64" namespace from that dump — not
+# "qr", whose `.data` is the QR code's own full base64 data: URI. The
+# image itself renders fine via a separate, correct `.src = message.data`
+# assignment a few lines above; this second, unconditional block just
+# additionally dumps that same giant base64 string as visible text into
+# the log panel. Excluded "qr" the same way "sessionDataBase64" already is.
+RUN sed -i \
+    's#if (message.namespace !== "sessionDataBase64") $(#if (message.namespace !== "sessionDataBase64" \&\& message.namespace !== "qr") $(#' \
+    /usr/src/app/node_modules/@open-wa/wa-automate/dist/controllers/popup/index.html \
+    && grep -q 'message.namespace !== "sessionDataBase64" && message.namespace !== "qr"' /usr/src/app/node_modules/@open-wa/wa-automate/dist/controllers/popup/index.html
+
 USER owauser
