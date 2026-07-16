@@ -16,6 +16,7 @@ has no internal counterpart to collide with (unlike the calendar/contacts
 domains), but keeps the `Drive`-prefixed naming for consistency with
 `gcalendar`/`gcontacts`. See `docs/DRIVE.md`.
 """
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 
@@ -82,11 +83,15 @@ class DriveProvider(ABC):
         """Exchange a stored refresh token for a fresh access token."""
 
     @abstractmethod
-    async def list_files(self, access_token: str, folder_id: str | None = None, limit: int = 20) -> list[DriveFile]:
+    async def list_files(
+        self, access_token: str, folder_id: str | None = None, limit: int = 20
+    ) -> list[DriveFile]:
         """List files, optionally scoped to one folder."""
 
     @abstractmethod
-    async def search_files(self, access_token: str, query: DriveSearchQuery) -> list[DriveFile]:
+    async def search_files(
+        self, access_token: str, query: DriveSearchQuery
+    ) -> list[DriveFile]:
         """Search files by name/folder/type/free text (covers every
         "buscar..." bullet in the Sprint 3 spec via parameters)."""
 

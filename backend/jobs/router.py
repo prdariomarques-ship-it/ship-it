@@ -1,4 +1,5 @@
 """Job queue management endpoints (admin only)."""
+
 from datetime import datetime
 from typing import Annotated
 
@@ -63,7 +64,9 @@ async def enqueue_job(payload: JobCreate, db: DbSession) -> Job:
     try:
         resolve_handler(payload.name)
     except UnknownJobError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     return await JobService(db).enqueue(
         payload.name,
         payload.payload,
@@ -77,9 +80,12 @@ async def cancel_job(job_id: int, db: DbSession) -> Job:
     repository = JobRepository(db)
     job = await repository.get(job_id)
     if job is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Job not found"
+        )
     if job.status not in (JobStatus.QUEUED, JobStatus.RUNNING):
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=f"Job is already {job.status.value}"
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Job is already {job.status.value}",
         )
     return await repository.update(job, status=JobStatus.CANCELLED)

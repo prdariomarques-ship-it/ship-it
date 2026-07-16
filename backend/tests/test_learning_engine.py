@@ -1,5 +1,6 @@
 """Learning: tags a contact with the domains it interacts with, deduplicated
 at the storage boundary so repeat conversations never grow the list."""
+
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -26,7 +27,9 @@ async def contact(session_factory) -> Contact:
 
 
 def _intent(top: Intent) -> IntentResult:
-    return IntentResult(top=top, hypotheses=[IntentHypothesis(intent=top, confidence=0.9)])
+    return IntentResult(
+        top=top, hypotheses=[IntentHypothesis(intent=top, confidence=0.9)]
+    )
 
 
 _PRIORITY = PriorityResult(level=Priority.NORMAL)
@@ -36,7 +39,9 @@ _PRIORITY = PriorityResult(level=Priority.NORMAL)
 async def test_learning_tags_contact_with_agent_domain(session_factory, contact):
     plan = Plan(steps=[PlanStep(objective="comprar produto", agent="store")])
     async with session_factory() as session:
-        added = await LearningEngine().apply(session, contact.id, _intent(Intent.STORE), _PRIORITY, plan)
+        added = await LearningEngine().apply(
+            session, contact.id, _intent(Intent.STORE), _PRIORITY, plan
+        )
     assert added == ["loja"]
 
     async with session_factory() as session:
@@ -45,13 +50,19 @@ async def test_learning_tags_contact_with_agent_domain(session_factory, contact)
 
 
 @pytest.mark.asyncio
-async def test_learning_does_not_duplicate_existing_categories(session_factory, contact):
+async def test_learning_does_not_duplicate_existing_categories(
+    session_factory, contact
+):
     plan = Plan(steps=[PlanStep(objective="comprar produto", agent="store")])
     async with session_factory() as session:
-        await LearningEngine().apply(session, contact.id, _intent(Intent.STORE), _PRIORITY, plan)
+        await LearningEngine().apply(
+            session, contact.id, _intent(Intent.STORE), _PRIORITY, plan
+        )
 
     async with session_factory() as session:
-        added_again = await LearningEngine().apply(session, contact.id, _intent(Intent.STORE), _PRIORITY, plan)
+        added_again = await LearningEngine().apply(
+            session, contact.id, _intent(Intent.STORE), _PRIORITY, plan
+        )
     assert added_again == []  # already tagged — no redundant write
 
     async with session_factory() as session:
@@ -63,12 +74,16 @@ async def test_learning_does_not_duplicate_existing_categories(session_factory, 
 async def test_learning_skips_agents_with_no_category_mapping(session_factory, contact):
     plan = Plan(steps=[PlanStep(objective="oi", agent="assistant")])
     async with session_factory() as session:
-        added = await LearningEngine().apply(session, contact.id, _intent(Intent.GREETING), _PRIORITY, plan)
+        added = await LearningEngine().apply(
+            session, contact.id, _intent(Intent.GREETING), _PRIORITY, plan
+        )
     assert added == []
 
 
 @pytest.mark.asyncio
 async def test_learning_is_a_no_op_without_a_contact():
     plan = Plan(steps=[PlanStep(objective="oi", agent="store")])
-    added = await LearningEngine().apply(None, None, _intent(Intent.STORE), _PRIORITY, plan)
+    added = await LearningEngine().apply(
+        None, None, _intent(Intent.STORE), _PRIORITY, plan
+    )
     assert added == []

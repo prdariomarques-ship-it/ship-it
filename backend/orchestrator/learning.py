@@ -12,6 +12,7 @@ extraction) and tagging the contact with them, via the existing
 same domain never grows the list — "avoid redundant storage" is enforced at
 the storage boundary, not by the caller remembering to check.
 """
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memory.manager import memory_manager
@@ -40,8 +41,16 @@ class LearningEngine:
         if contact_id is None:
             return []
 
-        candidates = {_AGENT_CATEGORY[step.agent] for step in plan.steps if step.agent in _AGENT_CATEGORY}
-        added = await memory_manager.add_categories(db, contact_id, sorted(candidates)) if candidates else []
+        candidates = {
+            _AGENT_CATEGORY[step.agent]
+            for step in plan.steps
+            if step.agent in _AGENT_CATEGORY
+        }
+        added = (
+            await memory_manager.add_categories(db, contact_id, sorted(candidates))
+            if candidates
+            else []
+        )
 
         await record_log(
             db,

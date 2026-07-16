@@ -1,4 +1,5 @@
 """Cryptographic utilities — constant-time comparisons to prevent timing attacks."""
+
 import hmac
 
 

@@ -35,7 +35,11 @@ class TestMetricsEndpoint:
         response = client.get("/metrics")
         assert response.status_code == 200
         # Prometheus format: lines like 'metric_name{labels} value timestamp'
-        assert "# HELP" in response.text or "# TYPE" in response.text or response.text.count("\n") > 0
+        assert (
+            "# HELP" in response.text
+            or "# TYPE" in response.text
+            or response.text.count("\n") > 0
+        )
         assert "http_requests_total" in response.text or "up" in response.text
 
     def test_metrics_endpoint_returns_prometheus_content_type(self, client):
@@ -67,7 +71,10 @@ class TestPrometheusConfiguration:
         """Verify scrape interval from prometheus.yml is 15s."""
         # This test reads the prometheus.yml file
         import os
-        prometheus_yml_path = os.path.join(os.path.dirname(__file__), "../..", "docker/prometheus.yml")
+
+        prometheus_yml_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/prometheus.yml"
+        )
         assert os.path.exists(prometheus_yml_path), "prometheus.yml not found"
         with open(prometheus_yml_path) as f:
             content = f.read()
@@ -76,7 +83,10 @@ class TestPrometheusConfiguration:
     def test_prometheus_retention_policy_configured(self):
         """Verify retention policy in docker-compose.yml."""
         import os
-        compose_path = os.path.join(os.path.dirname(__file__), "../..", "docker/docker-compose.yml")
+
+        compose_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/docker-compose.yml"
+        )
         assert os.path.exists(compose_path), "docker-compose.yml not found"
         with open(compose_path) as f:
             content = f.read()
@@ -87,13 +97,19 @@ class TestPrometheusConfiguration:
     def test_alert_rules_file_exists(self):
         """Verify alert_rules.yml file exists."""
         import os
-        rules_path = os.path.join(os.path.dirname(__file__), "../..", "docker/alert_rules.yml")
+
+        rules_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/alert_rules.yml"
+        )
         assert os.path.exists(rules_path), "alert_rules.yml not found"
 
     def test_alert_rules_define_required_alerts(self):
         """Verify all required alert rules are defined."""
         import os
-        rules_path = os.path.join(os.path.dirname(__file__), "../..", "docker/alert_rules.yml")
+
+        rules_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/alert_rules.yml"
+        )
         assert os.path.exists(rules_path), "alert_rules.yml not found"
         with open(rules_path) as f:
             content = f.read()
@@ -116,13 +132,19 @@ class TestAlertmanagerConfiguration:
     def test_alertmanager_file_exists(self):
         """Verify alertmanager.yml file exists."""
         import os
-        alertmanager_path = os.path.join(os.path.dirname(__file__), "../..", "docker/alertmanager.yml")
+
+        alertmanager_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/alertmanager.yml"
+        )
         assert os.path.exists(alertmanager_path), "alertmanager.yml not found"
 
     def test_alertmanager_has_routing_tree(self):
         """Verify Alertmanager routing tree is configured."""
         import os
-        alertmanager_path = os.path.join(os.path.dirname(__file__), "../..", "docker/alertmanager.yml")
+
+        alertmanager_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/alertmanager.yml"
+        )
         assert os.path.exists(alertmanager_path), "alertmanager.yml not found"
         with open(alertmanager_path) as f:
             content = f.read()
@@ -133,7 +155,10 @@ class TestAlertmanagerConfiguration:
     def test_alertmanager_receivers_configured(self):
         """Verify Alertmanager receivers (webhook, email, Slack) are configured."""
         import os
-        alertmanager_path = os.path.join(os.path.dirname(__file__), "../..", "docker/alertmanager.yml")
+
+        alertmanager_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/alertmanager.yml"
+        )
         assert os.path.exists(alertmanager_path), "alertmanager.yml not found"
         with open(alertmanager_path) as f:
             content = f.read()
@@ -143,7 +168,10 @@ class TestAlertmanagerConfiguration:
     def test_alertmanager_grouping_configured(self):
         """Verify Alertmanager grouping policy is configured."""
         import os
-        alertmanager_path = os.path.join(os.path.dirname(__file__), "../..", "docker/alertmanager.yml")
+
+        alertmanager_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/alertmanager.yml"
+        )
         assert os.path.exists(alertmanager_path), "alertmanager.yml not found"
         with open(alertmanager_path) as f:
             content = f.read()
@@ -157,19 +185,32 @@ class TestGrafanaProvisioning:
     def test_grafana_datasource_provisioning_exists(self):
         """Verify Grafana datasource provisioning file exists."""
         import os
-        ds_path = os.path.join(os.path.dirname(__file__), "../..", "docker/grafana/provisioning/datasources/prometheus.yml")
+
+        ds_path = os.path.join(
+            os.path.dirname(__file__),
+            "../..",
+            "docker/grafana/provisioning/datasources/prometheus.yml",
+        )
         assert os.path.exists(ds_path), "Grafana datasource provisioning not found"
 
     def test_grafana_dashboard_provider_exists(self):
         """Verify Grafana dashboard provider config exists."""
         import os
-        provider_path = os.path.join(os.path.dirname(__file__), "../..", "docker/grafana/provisioning/dashboards/default.yml")
+
+        provider_path = os.path.join(
+            os.path.dirname(__file__),
+            "../..",
+            "docker/grafana/provisioning/dashboards/default.yml",
+        )
         assert os.path.exists(provider_path), "Grafana dashboard provider not found"
 
     def test_grafana_has_five_dashboards(self):
         """Verify all 5 required dashboards are provisioned."""
         import os
-        dashboard_dir = os.path.join(os.path.dirname(__file__), "../..", "docker/grafana/provisioning/dashboards")
+
+        dashboard_dir = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/grafana/provisioning/dashboards"
+        )
         required_dashboards = [
             "system-health.json",
             "agent-performance.json",
@@ -184,7 +225,12 @@ class TestGrafanaProvisioning:
     def test_grafana_datasource_points_to_prometheus(self):
         """Verify Grafana datasource configuration points to Prometheus."""
         import os
-        ds_path = os.path.join(os.path.dirname(__file__), "../..", "docker/grafana/provisioning/datasources/prometheus.yml")
+
+        ds_path = os.path.join(
+            os.path.dirname(__file__),
+            "../..",
+            "docker/grafana/provisioning/datasources/prometheus.yml",
+        )
         assert os.path.exists(ds_path), "Grafana datasource provisioning not found"
         with open(ds_path) as f:
             content = f.read()
@@ -197,7 +243,10 @@ class TestDockerComposeConfiguration:
     def test_prometheus_service_defined(self):
         """Verify Prometheus service is in docker-compose.yml."""
         import os
-        compose_path = os.path.join(os.path.dirname(__file__), "../..", "docker/docker-compose.yml")
+
+        compose_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/docker-compose.yml"
+        )
         assert os.path.exists(compose_path), "docker-compose.yml not found"
         with open(compose_path) as f:
             content = f.read()
@@ -207,7 +256,10 @@ class TestDockerComposeConfiguration:
     def test_alertmanager_service_defined(self):
         """Verify Alertmanager service is in docker-compose.yml."""
         import os
-        compose_path = os.path.join(os.path.dirname(__file__), "../..", "docker/docker-compose.yml")
+
+        compose_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/docker-compose.yml"
+        )
         assert os.path.exists(compose_path), "docker-compose.yml not found"
         with open(compose_path) as f:
             content = f.read()
@@ -217,7 +269,10 @@ class TestDockerComposeConfiguration:
     def test_grafana_service_defined(self):
         """Verify Grafana service is in docker-compose.yml."""
         import os
-        compose_path = os.path.join(os.path.dirname(__file__), "../..", "docker/docker-compose.yml")
+
+        compose_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/docker-compose.yml"
+        )
         assert os.path.exists(compose_path), "docker-compose.yml not found"
         with open(compose_path) as f:
             content = f.read()
@@ -227,7 +282,10 @@ class TestDockerComposeConfiguration:
     def test_monitoring_volumes_defined(self):
         """Verify monitoring volumes are in docker-compose.yml."""
         import os
-        compose_path = os.path.join(os.path.dirname(__file__), "../..", "docker/docker-compose.yml")
+
+        compose_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/docker-compose.yml"
+        )
         assert os.path.exists(compose_path), "docker-compose.yml not found"
         with open(compose_path) as f:
             content = f.read()
@@ -238,7 +296,10 @@ class TestDockerComposeConfiguration:
     def test_services_use_internal_network(self):
         """Verify monitoring services use darioos internal network."""
         import os
-        compose_path = os.path.join(os.path.dirname(__file__), "../..", "docker/docker-compose.yml")
+
+        compose_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/docker-compose.yml"
+        )
         assert os.path.exists(compose_path), "docker-compose.yml not found"
         with open(compose_path) as f:
             content = f.read()
@@ -252,7 +313,10 @@ class TestEnvironmentVariables:
     def test_monitoring_env_vars_in_example(self):
         """Verify monitoring environment variables are documented."""
         import os
-        env_path = os.path.join(os.path.dirname(__file__), "../..", "docker/.env.example")
+
+        env_path = os.path.join(
+            os.path.dirname(__file__), "../..", "docker/.env.example"
+        )
         assert os.path.exists(env_path), ".env.example not found"
         with open(env_path) as f:
             content = f.read()

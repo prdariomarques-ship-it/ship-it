@@ -1,4 +1,5 @@
 """Dario OS — API entry point."""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, status
@@ -34,7 +35,14 @@ from memory.router import router as memory_router
 from middleware.error_sanitization import ErrorSanitizationMiddleware
 from middleware.request_size_limit import RequestSizeLimitMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
-from observability import RequestIDMiddleware, TraceContextMiddleware, health_router, metrics_middleware, metrics_router, setup_tracing
+from observability import (
+    RequestIDMiddleware,
+    TraceContextMiddleware,
+    health_router,
+    metrics_middleware,
+    metrics_router,
+    setup_tracing,
+)
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
 from utils.logging import configure_logging, get_logger
@@ -45,20 +53,44 @@ logger = get_logger(__name__)
 
 OPENAPI_TAGS = [
     {"name": "auth", "description": "Registro, login, refresh token e perfil."},
-    {"name": "chat", "description": "Conversa com agentes IA (planner + executor + memória)."},
-    {"name": "agents", "description": "Agentes disponíveis e execução direta com function calling."},
-    {"name": "memory", "description": "Memória permanente semântica (Qdrant + embeddings)."},
+    {
+        "name": "chat",
+        "description": "Conversa com agentes IA (planner + executor + memória).",
+    },
+    {
+        "name": "agents",
+        "description": "Agentes disponíveis e execução direta com function calling.",
+    },
+    {
+        "name": "memory",
+        "description": "Memória permanente semântica (Qdrant + embeddings).",
+    },
     {"name": "whatsapp", "description": "Envio de mensagens via provider configurado."},
     {"name": "webhooks", "description": "Entrada de eventos externos (WhatsApp)."},
     {"name": "workflows", "description": "Disparo de automações no n8n."},
     {"name": "jobs", "description": "Fila de trabalhos em background (admin)."},
-    {"name": "mail", "description": "Integração Gmail (somente leitura) — conexão OAuth admin-only."},
-    {"name": "gcalendar", "description": "Integração Google Calendar — conexão OAuth admin-only."},
-    {"name": "gcontacts", "description": "Integração Google Contacts — conexão OAuth admin-only."},
-    {"name": "gdrive", "description": "Integração Google Drive (base de conhecimento) — conexão OAuth admin-only."},
+    {
+        "name": "mail",
+        "description": "Integração Gmail (somente leitura) — conexão OAuth admin-only.",
+    },
+    {
+        "name": "gcalendar",
+        "description": "Integração Google Calendar — conexão OAuth admin-only.",
+    },
+    {
+        "name": "gcontacts",
+        "description": "Integração Google Contacts — conexão OAuth admin-only.",
+    },
+    {
+        "name": "gdrive",
+        "description": "Integração Google Drive (base de conhecimento) — conexão OAuth admin-only.",
+    },
     {"name": "health", "description": "Liveness e readiness."},
     {"name": "observability", "description": "Métricas Prometheus."},
-    {"name": "admin", "description": "Dashboard administrativo (somente leitura) — admin-only."},
+    {
+        "name": "admin",
+        "description": "Dashboard administrativo (somente leitura) — admin-only.",
+    },
 ]
 
 
@@ -69,7 +101,12 @@ async def lifespan(app: FastAPI):
     register_event_subscribers()
     if settings.jobs_enabled and settings.environment != "test":
         job_worker.start()
-    logger.info("%s v%s started (%s)", settings.app_name, settings.app_version, settings.environment)
+    logger.info(
+        "%s v%s started (%s)",
+        settings.app_name,
+        settings.app_version,
+        settings.environment,
+    )
     yield
     if settings.jobs_enabled and settings.environment != "test":
         await job_worker.stop()
@@ -87,7 +124,10 @@ def _validate_production_settings(settings) -> None:
     """
     if settings.environment != "production":
         return
-    if settings.jwt_secret in ("", "change-me-in-production") or len(settings.jwt_secret) < 32:
+    if (
+        settings.jwt_secret in ("", "change-me-in-production")
+        or len(settings.jwt_secret) < 32
+    ):
         raise RuntimeError(
             "JWT_SECRET must be set to a strong value (>= 32 chars) in production; "
             "generate one with: openssl rand -hex 32"

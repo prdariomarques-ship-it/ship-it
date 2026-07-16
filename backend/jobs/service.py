@@ -1,4 +1,5 @@
 """Job service: enqueue and schedule background work."""
+
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession

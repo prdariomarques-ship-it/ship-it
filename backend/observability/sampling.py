@@ -1,9 +1,11 @@
 """Trace sampling strategies — optimize performance while maintaining observability."""
+
 from abc import ABC, abstractmethod
 from typing import Optional
 
 try:
     from opentelemetry.sdk.trace.sampling import Sampler, SamplingResult, Decision  # noqa: F401 — availability probe
+
     _OTEL_AVAILABLE = True
 except ImportError:
     _OTEL_AVAILABLE = False
@@ -30,6 +32,7 @@ class AlwaysSampler(SamplingStrategy):
         if not _OTEL_AVAILABLE:
             return None
         from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+
         return ALWAYS_ON
 
     def get_rate(self) -> float:
@@ -43,6 +46,7 @@ class NeverSampler(SamplingStrategy):
         if not _OTEL_AVAILABLE:
             return None
         from opentelemetry.sdk.trace.sampling import ALWAYS_OFF
+
         return ALWAYS_OFF
 
     def get_rate(self) -> float:
@@ -61,6 +65,7 @@ class FixedRateSampler(SamplingStrategy):
         if not _OTEL_AVAILABLE:
             return None
         from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
         return TraceIdRatioBased(self.rate)
 
     def get_rate(self) -> float:
@@ -75,12 +80,15 @@ class ParentBasedSampler(SamplingStrategy):
     """
 
     def __init__(self, root_sampler: Optional[SamplingStrategy] = None):
-        self.root_sampler = root_sampler or FixedRateSampler(0.1)  # Default 10% for root spans
+        self.root_sampler = root_sampler or FixedRateSampler(
+            0.1
+        )  # Default 10% for root spans
 
     def get_sampler(self) -> Optional[object]:
         if not _OTEL_AVAILABLE:
             return None
         from opentelemetry.sdk.trace.sampling import ParentBased
+
         root_sampler = self.root_sampler.get_sampler()
         # get_sampler() is typed Optional[object] so this module stays importable
         # without opentelemetry installed; root_sampler is a real Sampler here.
@@ -105,6 +113,7 @@ class ErrorRateSampler(SamplingStrategy):
         if not _OTEL_AVAILABLE:
             return None
         from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
         return TraceIdRatioBased(self.default_rate)
 
     def get_rate(self) -> float:

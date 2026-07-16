@@ -9,7 +9,9 @@ from repositories.base import SQLAlchemyRepository
 class JobRepository(SQLAlchemyRepository[Job]):
     model = Job
 
-    async def due_jobs(self, now: datetime, limit: int = 10, for_update: bool = False) -> list[Job]:
+    async def due_jobs(
+        self, now: datetime, limit: int = 10, for_update: bool = False
+    ) -> list[Job]:
         statement = (
             select(Job)
             .where(Job.status == JobStatus.QUEUED, Job.scheduled_at <= now)
@@ -22,7 +24,9 @@ class JobRepository(SQLAlchemyRepository[Job]):
             statement = statement.with_for_update(skip_locked=True)
         return list((await self.session.execute(statement)).scalars().all())
 
-    async def stale_running_jobs(self, started_before: datetime, limit: int = 50) -> list[Job]:
+    async def stale_running_jobs(
+        self, started_before: datetime, limit: int = 50
+    ) -> list[Job]:
         """Jobs stuck in RUNNING — the worker that claimed them died mid-flight."""
         statement = (
             select(Job)

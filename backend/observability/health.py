@@ -1,4 +1,5 @@
 """Health endpoints: liveness (process up) and readiness (dependencies)."""
+
 import asyncio
 
 from fastapi import APIRouter, Response, status

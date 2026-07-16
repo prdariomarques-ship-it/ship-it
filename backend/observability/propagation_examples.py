@@ -3,6 +3,7 @@
 These examples show how each mechanism uses the trace propagation helpers
 to maintain parent-child span relationships and context continuity.
 """
+
 from contextvars import ContextVar
 from typing import Optional
 
@@ -14,7 +15,9 @@ from observability.trace_propagation import (
 )
 
 # Context variable for Job Worker to preserve trace across async boundaries
-_job_trace_context: ContextVar[Optional[dict[str, str]]] = ContextVar("job_trace_context", default=None)
+_job_trace_context: ContextVar[Optional[dict[str, str]]] = ContextVar(
+    "job_trace_context", default=None
+)
 
 
 # ============================================================================

@@ -1,4 +1,5 @@
 """Trigger n8n workflows over their webhook endpoints."""
+
 import httpx
 
 from utils.config import get_settings
@@ -22,12 +23,16 @@ class WorkflowService:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
-                if response.headers.get("content-type", "").startswith("application/json"):
+                if response.headers.get("content-type", "").startswith(
+                    "application/json"
+                ):
                     return response.json()
                 return {"status": "ok"}
         except httpx.HTTPError as exc:
             logger.error("n8n workflow %s failed: %s", workflow, exc)
-            raise WorkflowError(f"Workflow {workflow!r} could not be triggered") from exc
+            raise WorkflowError(
+                f"Workflow {workflow!r} could not be triggered"
+            ) from exc
 
 
 workflow_service = WorkflowService()

@@ -1,4 +1,5 @@
 """Memory Manager: facade for short-term, long-term, knowledge and preferences."""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -25,7 +26,9 @@ async def contact(session_factory) -> Contact:
 
 
 @pytest.mark.asyncio
-async def test_short_term_returns_recent_messages_oldest_first(session_factory, contact):
+async def test_short_term_returns_recent_messages_oldest_first(
+    session_factory, contact
+):
     async with session_factory() as session:
         for text in ("primeira", "segunda", "terceira"):
             session.add(
@@ -44,7 +47,9 @@ async def test_short_term_returns_recent_messages_oldest_first(session_factory, 
 
 
 @pytest.mark.asyncio
-async def test_short_term_orders_by_provider_timestamp_not_arrival_order(session_factory, contact):
+async def test_short_term_orders_by_provider_timestamp_not_arrival_order(
+    session_factory, contact
+):
     """A webhook redelivery or network jitter can insert an older message
     after a newer one; conversation history must stay chronological by the
     provider's own event time, not by insertion order."""
@@ -70,7 +75,9 @@ async def test_short_term_orders_by_provider_timestamp_not_arrival_order(session
 
 
 @pytest.mark.asyncio
-async def test_short_term_falls_back_to_arrival_order_without_provider_timestamp(session_factory, contact):
+async def test_short_term_falls_back_to_arrival_order_without_provider_timestamp(
+    session_factory, contact
+):
     """Providers that don't report an event timestamp still get a sane,
     stable ordering (insertion order) via the coalesce to created_at/id."""
     async with session_factory() as session:
@@ -104,7 +111,9 @@ async def test_preferences_round_trip(session_factory, contact):
 
 
 @pytest.mark.asyncio
-async def test_set_preference_merges_without_clobbering_existing_keys(session_factory, contact):
+async def test_set_preference_merges_without_clobbering_existing_keys(
+    session_factory, contact
+):
     async with session_factory() as session:
         await memory_manager.set_preference(session, contact.id, "a", "1")
     async with session_factory() as session:
@@ -128,7 +137,9 @@ async def test_get_preferences_unknown_contact_returns_empty_dict(session_factor
 @pytest.mark.asyncio
 async def test_add_categories_appends_new_ones(session_factory, contact):
     async with session_factory() as session:
-        added = await memory_manager.add_categories(session, contact.id, ["vip", "atacado"])
+        added = await memory_manager.add_categories(
+            session, contact.id, ["vip", "atacado"]
+        )
     assert added == ["vip", "atacado"]
 
     async with session_factory() as session:
@@ -143,7 +154,9 @@ async def test_add_categories_skips_ones_already_present(session_factory, contac
         await memory_manager.add_categories(session, contact.id, ["vip"])
 
     async with session_factory() as session:
-        added = await memory_manager.add_categories(session, contact.id, ["vip", "novo"])
+        added = await memory_manager.add_categories(
+            session, contact.id, ["vip", "novo"]
+        )
     assert added == ["novo"]
 
     async with session_factory() as session:

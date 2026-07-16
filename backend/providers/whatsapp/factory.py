@@ -3,6 +3,7 @@
 Swap gateways by changing WHATSAPP_PROVIDER in the environment — the rest of
 the application only depends on the WhatsAppProvider interface.
 """
+
 from functools import lru_cache
 
 from providers.whatsapp.baileys.provider import BaileysProvider

@@ -1,6 +1,10 @@
 from observability.health import router as health_router
 from observability.metrics import metrics_middleware, metrics_router
-from observability.request_context import RequestIDMiddleware, get_request_id, get_trace_id
+from observability.request_context import (
+    RequestIDMiddleware,
+    get_request_id,
+    get_trace_id,
+)
 from observability.trace_propagation import (
     get_current_trace_context,
     format_traceparent,

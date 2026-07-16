@@ -8,6 +8,7 @@ shape into `EmailMessage`/`EmailThread`, and turn a search request into
 whatever query syntax the vendor expects. No business logic, no database
 access, no LLM calls — those belong to `agents/tools/mail.py` and `mail/`.
 """
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 
@@ -77,7 +78,9 @@ class MailProvider(ABC):
         """Exchange a stored refresh token for a fresh access token."""
 
     @abstractmethod
-    async def search(self, access_token: str, query: EmailSearchQuery) -> list[EmailMessage]:
+    async def search(
+        self, access_token: str, query: EmailSearchQuery
+    ) -> list[EmailMessage]:
         """Search messages in the authorized mailbox."""
 
     @abstractmethod

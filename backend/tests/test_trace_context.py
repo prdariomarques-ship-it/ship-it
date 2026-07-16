@@ -1,11 +1,20 @@
 """W3C Trace Context standard (RFC 9110) implementation — traceparent header extraction."""
+
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 from uuid import uuid4
 
-from middleware.trace_context import TraceContextMiddleware, get_trace_context, parse_traceparent
-from observability.request_context import RequestIDMiddleware, get_request_id, get_trace_id
+from middleware.trace_context import (
+    TraceContextMiddleware,
+    get_trace_context,
+    parse_traceparent,
+)
+from observability.request_context import (
+    RequestIDMiddleware,
+    get_request_id,
+    get_trace_id,
+)
 
 
 @pytest.fixture
@@ -51,9 +60,15 @@ def test_parse_traceparent_invalid_length():
 def test_parse_traceparent_invalid_format():
     """Invalid traceparent with wrong hex string lengths."""
     # version too long
-    assert parse_traceparent("000-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01") is None
+    assert (
+        parse_traceparent("000-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+        is None
+    )
     # trace_id too short
-    assert parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e47-00f067aa0ba902b7-01") is None
+    assert (
+        parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e47-00f067aa0ba902b7-01")
+        is None
+    )
 
 
 def test_trace_context_extracted_from_header(client):
@@ -145,15 +160,24 @@ def test_trace_context_is_isolated_between_requests(app_with_trace_context):
 
     traceparent1 = "00-1111111111111111111111111111111a-aaaaaaaaaaaaaaaa-01"
     response1 = client.get("/test", headers={"traceparent": traceparent1})
-    assert response1.json()["trace_context"]["trace_id"] == "1111111111111111111111111111111a"
+    assert (
+        response1.json()["trace_context"]["trace_id"]
+        == "1111111111111111111111111111111a"
+    )
 
     # Second request with different traceparent
     traceparent2 = "00-2222222222222222222222222222222b-bbbbbbbbbbbbbbbb-00"
     response2 = client.get("/test", headers={"traceparent": traceparent2})
-    assert response2.json()["trace_context"]["trace_id"] == "2222222222222222222222222222222b"
+    assert (
+        response2.json()["trace_context"]["trace_id"]
+        == "2222222222222222222222222222222b"
+    )
 
     # Verify they're different
-    assert response1.json()["trace_context"]["trace_id"] != response2.json()["trace_context"]["trace_id"]
+    assert (
+        response1.json()["trace_context"]["trace_id"]
+        != response2.json()["trace_context"]["trace_id"]
+    )
 
 
 def test_trace_context_cleanup_after_request(client):

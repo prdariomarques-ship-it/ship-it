@@ -12,6 +12,7 @@ Fields that must NEVER appear in any function's return value:
 `encrypted_refresh_token`, `hashed_password`, any `*api_key*`,
 `*_secret`, `access_token`, JWT strings.
 """
+
 import subprocess
 import time
 from datetime import datetime
@@ -40,7 +41,11 @@ def uptime_seconds() -> float:
 def _run_git(*args: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", *args], capture_output=True, text=True, timeout=3, check=True,
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=True,
         )
         value = result.stdout.strip()
         return value or None
@@ -121,7 +126,9 @@ def prometheus_snapshot(prefix: str = "darioos_") -> dict[str, list[dict]]:
     return snapshot
 
 
-def _metric_value(snapshot: dict[str, list[dict]], sample_name: str, **label_filter: str) -> float:
+def _metric_value(
+    snapshot: dict[str, list[dict]], sample_name: str, **label_filter: str
+) -> float:
     """Sum every sample named exactly `sample_name` (e.g.
     "darioos_agent_runs_total" or "darioos_agent_run_duration_seconds_sum")
     across every label combination that matches `label_filter`.
@@ -138,28 +145,45 @@ def _metric_value(snapshot: dict[str, list[dict]], sample_name: str, **label_fil
         for sample in samples:
             if sample["name"] != sample_name:
                 continue
-            if all(sample["labels"].get(key) == value for key, value in label_filter.items()):
+            if all(
+                sample["labels"].get(key) == value
+                for key, value in label_filter.items()
+            ):
                 total += sample["value"]
     return total
 
 
 def agent_run_stats(snapshot: dict[str, list[dict]], agent_name: str) -> dict:
-    ok = _metric_value(snapshot, "darioos_agent_runs_total", agent=agent_name, status="ok")
-    error = _metric_value(snapshot, "darioos_agent_runs_total", agent=agent_name, status="error")
-    duration_sum = _metric_value(snapshot, "darioos_agent_run_duration_seconds_sum", agent=agent_name)
-    duration_count = _metric_value(snapshot, "darioos_agent_run_duration_seconds_count", agent=agent_name)
+    ok = _metric_value(
+        snapshot, "darioos_agent_runs_total", agent=agent_name, status="ok"
+    )
+    error = _metric_value(
+        snapshot, "darioos_agent_runs_total", agent=agent_name, status="error"
+    )
+    duration_sum = _metric_value(
+        snapshot, "darioos_agent_run_duration_seconds_sum", agent=agent_name
+    )
+    duration_count = _metric_value(
+        snapshot, "darioos_agent_run_duration_seconds_count", agent=agent_name
+    )
     total = ok + error
     return {
         "runs_total": int(total) if snapshot else None,
         "runs_ok": int(ok) if snapshot else None,
         "runs_error": int(error) if snapshot else None,
-        "avg_duration_seconds": round(duration_sum / duration_count, 3) if duration_count else None,
+        "avg_duration_seconds": round(duration_sum / duration_count, 3)
+        if duration_count
+        else None,
     }
 
 
 def tool_call_stats(snapshot: dict[str, list[dict]], tool_name: str) -> dict:
-    ok = _metric_value(snapshot, "darioos_agent_tool_calls_total", tool=tool_name, status="ok")
-    error = _metric_value(snapshot, "darioos_agent_tool_calls_total", tool=tool_name, status="error")
+    ok = _metric_value(
+        snapshot, "darioos_agent_tool_calls_total", tool=tool_name, status="ok"
+    )
+    error = _metric_value(
+        snapshot, "darioos_agent_tool_calls_total", tool=tool_name, status="error"
+    )
     return {
         "calls_total": int(ok + error) if snapshot else None,
         "calls_ok": int(ok) if snapshot else None,
@@ -173,14 +197,20 @@ async def _timed_check(coro) -> tuple[bool, float, str]:
         await coro
         return True, (time.perf_counter() - started) * 1000, "ok"
     except Exception as exc:  # noqa: BLE001 - report, never raise, from a status probe
-        return False, (time.perf_counter() - started) * 1000, f"{type(exc).__name__}: {exc}"
+        return (
+            False,
+            (time.perf_counter() - started) * 1000,
+            f"{type(exc).__name__}: {exc}",
+        )
 
 
 async def check_database(db: AsyncSession) -> ComponentStatus:
     from sqlalchemy import text
 
     online, latency, detail = await _timed_check(db.execute(text("SELECT 1")))
-    return ComponentStatus(name="database", online=online, detail=detail, latency_ms=round(latency, 1))
+    return ComponentStatus(
+        name="database", online=online, detail=detail, latency_ms=round(latency, 1)
+    )
 
 
 async def check_redis() -> ComponentStatus:
@@ -194,14 +224,20 @@ async def check_redis() -> ComponentStatus:
             await client.aclose()
 
     online, latency, detail = await _timed_check(_ping())
-    return ComponentStatus(name="redis", online=online, detail=detail, latency_ms=round(latency, 1))
+    return ComponentStatus(
+        name="redis", online=online, detail=detail, latency_ms=round(latency, 1)
+    )
 
 
 async def check_qdrant() -> ComponentStatus:
     from memory.service import memory_service
 
-    online, latency, detail = await _timed_check(memory_service.client.get_collections())
-    return ComponentStatus(name="qdrant", online=online, detail=detail, latency_ms=round(latency, 1))
+    online, latency, detail = await _timed_check(
+        memory_service.client.get_collections()
+    )
+    return ComponentStatus(
+        name="qdrant", online=online, detail=detail, latency_ms=round(latency, 1)
+    )
 
 
 async def check_whatsapp() -> ComponentStatus:
@@ -213,12 +249,18 @@ async def check_whatsapp() -> ComponentStatus:
         healthy = await provider.health_check()
         latency = (time.perf_counter() - started) * 1000
         return ComponentStatus(
-            name="whatsapp", online=healthy, detail=f"provider={provider.name}", latency_ms=round(latency, 1)
+            name="whatsapp",
+            online=healthy,
+            detail=f"provider={provider.name}",
+            latency_ms=round(latency, 1),
         )
     except Exception as exc:  # noqa: BLE001
         latency = (time.perf_counter() - started) * 1000
         return ComponentStatus(
-            name="whatsapp", online=False, detail=f"{type(exc).__name__}: {exc}", latency_ms=round(latency, 1)
+            name="whatsapp",
+            online=False,
+            detail=f"{type(exc).__name__}: {exc}",
+            latency_ms=round(latency, 1),
         )
 
 
@@ -229,7 +271,9 @@ def check_event_bus() -> ComponentStatus:
         len(v) for v in event_bus._wildcard_handlers.values()
     )
     detail = f"{handler_count} handler(s) registered, redis_fanout={'ok' if event_bus._redis_available else 'degraded'}"
-    return ComponentStatus(name="event_bus", online=True, detail=detail, latency_ms=None)
+    return ComponentStatus(
+        name="event_bus", online=True, detail=detail, latency_ms=None
+    )
 
 
 async def embeddings_by_source(db: AsyncSession) -> dict[str, int]:
@@ -244,7 +288,9 @@ async def drive_index_stats(db: AsyncSession) -> tuple[int, datetime | None]:
     return count, last_indexed
 
 
-async def recent_log_for_source(db: AsyncSession, source_prefix: str) -> LogEntry | None:
+async def recent_log_for_source(
+    db: AsyncSession, source_prefix: str
+) -> LogEntry | None:
     statement = (
         select(LogEntry)
         .where(LogEntry.source.like(f"{source_prefix}%"))

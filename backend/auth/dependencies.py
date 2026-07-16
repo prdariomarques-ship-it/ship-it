@@ -1,4 +1,5 @@
 """FastAPI dependencies for authentication."""
+
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -29,7 +30,9 @@ async def get_current_user(
     if subject is None:
         raise unauthorized
 
-    user = (await db.execute(select(User).where(User.id == int(subject)))).scalar_one_or_none()
+    user = (
+        await db.execute(select(User).where(User.id == int(subject)))
+    ).scalar_one_or_none()
     if user is None or not user.is_active:
         raise unauthorized
     return user

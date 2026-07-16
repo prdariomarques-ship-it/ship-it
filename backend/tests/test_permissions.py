@@ -29,10 +29,16 @@ async def test_user_scoped_resources_are_isolated(client):
     admin_headers = await _register_and_login(client, "owner@example.com")
     other_headers = await _register_and_login(client, "other@example.com")
 
-    created = await client.post("/api/tasks", json={"title": "Minha tarefa"}, headers=admin_headers)
+    created = await client.post(
+        "/api/tasks", json={"title": "Minha tarefa"}, headers=admin_headers
+    )
     task_id = created.json()["id"]
 
-    assert (await client.get(f"/api/tasks/{task_id}", headers=admin_headers)).status_code == 200
-    assert (await client.get(f"/api/tasks/{task_id}", headers=other_headers)).status_code == 404
+    assert (
+        await client.get(f"/api/tasks/{task_id}", headers=admin_headers)
+    ).status_code == 200
+    assert (
+        await client.get(f"/api/tasks/{task_id}", headers=other_headers)
+    ).status_code == 404
     listed = await client.get("/api/tasks", headers=other_headers)
     assert listed.json() == []

@@ -3,6 +3,7 @@ Calendar). Mirrors `tests/test_mail_router.py`, with the Sprint 1.1 findings
 (XSS escaping, race-safe upsert) tested from the start instead of as a
 follow-up.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -11,7 +12,11 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from auth.jwt import create_access_token, create_oauth_state_token, decode_oauth_state_token
+from auth.jwt import (
+    create_access_token,
+    create_oauth_state_token,
+    decode_oauth_state_token,
+)
 from models.gcalendar_account import GoogleCalendarAccount
 from providers.calendar.base import CalendarProviderError, OAuthTokens
 from providers.calendar.factory import get_calendar_provider
@@ -27,16 +32,22 @@ def _configured(monkeypatch):
     monkeypatch.setattr(get_settings(), "google_client_id", "client-id")
     monkeypatch.setattr(get_settings(), "google_client_secret", "client-secret")
     monkeypatch.setattr(
-        get_settings(), "google_calendar_redirect_uri", "https://app.example.com/api/gcalendar/oauth/callback"
+        get_settings(),
+        "google_calendar_redirect_uri",
+        "https://app.example.com/api/gcalendar/oauth/callback",
     )
-    monkeypatch.setattr(get_settings(), "email_token_encryption_key", Fernet.generate_key().decode())
+    monkeypatch.setattr(
+        get_settings(), "email_token_encryption_key", Fernet.generate_key().decode()
+    )
     yield
     get_calendar_provider.cache_clear()
 
 
 @pytest.fixture(autouse=True)
 def _no_real_network_for_label_lookup():
-    with patch("gcalendar.router._resolve_account_label", new=AsyncMock(return_value="Dario")):
+    with patch(
+        "gcalendar.router._resolve_account_label", new=AsyncMock(return_value="Dario")
+    ):
         yield
 
 
@@ -49,10 +60,15 @@ async def session_factory(db_engine):
 async def second_user_headers(client, auth_headers):
     await client.post(
         "/api/auth/register",
-        json={"email": "second@example.com", "full_name": "Second", "password": "supersecret1"},
+        json={
+            "email": "second@example.com",
+            "full_name": "Second",
+            "password": "supersecret1",
+        },
     )
     response = await client.post(
-        "/api/auth/login", json={"email": "second@example.com", "password": "supersecret1"}
+        "/api/auth/login",
+        json={"email": "second@example.com", "password": "supersecret1"},
     )
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
@@ -76,7 +92,9 @@ class _FakeProvider:
 
 # --- /connect ------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_connect_returns_authorization_url_with_a_valid_state_token(client, auth_headers):
+async def test_connect_returns_authorization_url_with_a_valid_state_token(
+    client, auth_headers
+):
     response = await client.get("/api/gcalendar/connect", headers=auth_headers)
     assert response.status_code == 200
     url = response.json()["authorization_url"]
@@ -114,7 +132,9 @@ async def test_callback_missing_code_or_state_fails_cleanly(client):
 @pytest.mark.asyncio
 async def test_callback_escapes_the_error_param_against_reflected_xss(client):
     payload = "<script>alert(document.cookie)</script>"
-    response = await client.get("/api/gcalendar/oauth/callback", params={"error": payload})
+    response = await client.get(
+        "/api/gcalendar/oauth/callback", params={"error": payload}
+    )
     assert response.status_code == 200
     assert "<script>" not in response.text
     assert "&lt;script&gt;" in response.text
@@ -123,7 +143,8 @@ async def test_callback_escapes_the_error_param_against_reflected_xss(client):
 @pytest.mark.asyncio
 async def test_callback_rejects_invalid_state(client):
     response = await client.get(
-        "/api/gcalendar/oauth/callback", params={"code": "abc", "state": "not-a-real-token"}
+        "/api/gcalendar/oauth/callback",
+        params={"code": "abc", "state": "not-a-real-token"},
     )
     assert response.status_code == 200
     assert "expirada" in response.text or "inválida" in response.text
@@ -147,21 +168,34 @@ async def test_callback_rejects_a_gmail_state_token(client):
 async def test_callback_rejects_a_state_token_of_the_wrong_purpose(client):
     not_a_state_token = create_access_token(subject="1")
     response = await client.get(
-        "/api/gcalendar/oauth/callback", params={"code": "abc", "state": not_a_state_token}
+        "/api/gcalendar/oauth/callback",
+        params={"code": "abc", "state": not_a_state_token},
     )
     assert response.status_code == 200
     assert "Falha" in response.text or "inválida" in response.text
 
 
 @pytest.mark.asyncio
-async def test_callback_success_stores_an_encrypted_refresh_token(client, auth_headers, db_engine):
+async def test_callback_success_stores_an_encrypted_refresh_token(
+    client, auth_headers, db_engine
+):
     me = await client.get("/api/auth/me", headers=auth_headers)
     user_id = me.json()["id"]
     state = create_oauth_state_token(user_id, purpose=_PURPOSE)
-    tokens = OAuthTokens(access_token="at", refresh_token="rt-plaintext", expires_in=3600, scope="calendar")
+    tokens = OAuthTokens(
+        access_token="at",
+        refresh_token="rt-plaintext",
+        expires_in=3600,
+        scope="calendar",
+    )
 
-    with patch("gcalendar.router.get_calendar_provider", return_value=_FakeProvider(tokens=tokens)):
-        response = await client.get("/api/gcalendar/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gcalendar.router.get_calendar_provider",
+        return_value=_FakeProvider(tokens=tokens),
+    ):
+        response = await client.get(
+            "/api/gcalendar/oauth/callback", params={"code": "abc", "state": state}
+        )
 
     assert response.status_code == 200
     assert "sucesso" in response.text
@@ -180,19 +214,35 @@ async def test_callback_reconnect_updates_the_existing_account_instead_of_duplic
 ):
     me = await client.get("/api/auth/me", headers=auth_headers)
     user_id = me.json()["id"]
-    first_tokens = OAuthTokens(access_token="at1", refresh_token="rt1", scope="calendar")
-    second_tokens = OAuthTokens(access_token="at2", refresh_token="rt2", scope="calendar")
+    first_tokens = OAuthTokens(
+        access_token="at1", refresh_token="rt1", scope="calendar"
+    )
+    second_tokens = OAuthTokens(
+        access_token="at2", refresh_token="rt2", scope="calendar"
+    )
 
-    with patch("gcalendar.router.get_calendar_provider", return_value=_FakeProvider(tokens=first_tokens)):
+    with patch(
+        "gcalendar.router.get_calendar_provider",
+        return_value=_FakeProvider(tokens=first_tokens),
+    ):
         state = create_oauth_state_token(user_id, purpose=_PURPOSE)
-        await client.get("/api/gcalendar/oauth/callback", params={"code": "abc", "state": state})
-    with patch("gcalendar.router.get_calendar_provider", return_value=_FakeProvider(tokens=second_tokens)):
+        await client.get(
+            "/api/gcalendar/oauth/callback", params={"code": "abc", "state": state}
+        )
+    with patch(
+        "gcalendar.router.get_calendar_provider",
+        return_value=_FakeProvider(tokens=second_tokens),
+    ):
         state2 = create_oauth_state_token(user_id, purpose=_PURPOSE)
-        await client.get("/api/gcalendar/oauth/callback", params={"code": "abc2", "state": state2})
+        await client.get(
+            "/api/gcalendar/oauth/callback", params={"code": "abc2", "state": state2}
+        )
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
-        accounts = (await session.execute(select(GoogleCalendarAccount))).scalars().all()
+        accounts = (
+            (await session.execute(select(GoogleCalendarAccount))).scalars().all()
+        )
     assert len(accounts) == 1
 
 
@@ -212,7 +262,9 @@ async def test_callback_recovers_when_two_concurrent_callbacks_race_on_create(
             return None
         return await original_get_by_user(self, uid, provider)
 
-    monkeypatch.setattr(GoogleCalendarAccountRepository, "get_by_user", racy_get_by_user)
+    monkeypatch.setattr(
+        GoogleCalendarAccountRepository, "get_by_user", racy_get_by_user
+    )
 
     async with session_factory() as session:
         first = await GoogleCalendarAccountRepository(session).upsert_for_user(
@@ -242,18 +294,27 @@ async def test_callback_recovers_when_two_concurrent_callbacks_race_on_create(
 
 
 @pytest.mark.asyncio
-async def test_callback_without_a_refresh_token_fails_and_stores_nothing(client, auth_headers, db_engine):
+async def test_callback_without_a_refresh_token_fails_and_stores_nothing(
+    client, auth_headers, db_engine
+):
     me = await client.get("/api/auth/me", headers=auth_headers)
     state = create_oauth_state_token(me.json()["id"], purpose=_PURPOSE)
     tokens = OAuthTokens(access_token="at", refresh_token=None, scope="calendar")
 
-    with patch("gcalendar.router.get_calendar_provider", return_value=_FakeProvider(tokens=tokens)):
-        response = await client.get("/api/gcalendar/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gcalendar.router.get_calendar_provider",
+        return_value=_FakeProvider(tokens=tokens),
+    ):
+        response = await client.get(
+            "/api/gcalendar/oauth/callback", params={"code": "abc", "state": state}
+        )
     assert "refresh token" in response.text.lower() or "Falha" in response.text
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
-        accounts = (await session.execute(select(GoogleCalendarAccount))).scalars().all()
+        accounts = (
+            (await session.execute(select(GoogleCalendarAccount))).scalars().all()
+        )
     assert accounts == []
 
 
@@ -262,24 +323,44 @@ async def test_callback_without_encryption_configured_fails_and_stores_nothing(
     client, auth_headers, db_engine, monkeypatch
 ):
     monkeypatch.setattr(get_settings(), "email_token_encryption_key", "")
-    state = create_oauth_state_token((await client.get("/api/auth/me", headers=auth_headers)).json()["id"], purpose=_PURPOSE)
+    state = create_oauth_state_token(
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        purpose=_PURPOSE,
+    )
     tokens = OAuthTokens(access_token="at", refresh_token="rt", scope="calendar")
 
-    with patch("gcalendar.router.get_calendar_provider", return_value=_FakeProvider(tokens=tokens)):
-        response = await client.get("/api/gcalendar/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gcalendar.router.get_calendar_provider",
+        return_value=_FakeProvider(tokens=tokens),
+    ):
+        response = await client.get(
+            "/api/gcalendar/oauth/callback", params={"code": "abc", "state": state}
+        )
     assert "Falha" in response.text
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
-        accounts = (await session.execute(select(GoogleCalendarAccount))).scalars().all()
+        accounts = (
+            (await session.execute(select(GoogleCalendarAccount))).scalars().all()
+        )
     assert accounts == []
 
 
 @pytest.mark.asyncio
-async def test_callback_google_token_exchange_failure_fails_cleanly(client, auth_headers):
-    state = create_oauth_state_token((await client.get("/api/auth/me", headers=auth_headers)).json()["id"], purpose=_PURPOSE)
-    with patch("gcalendar.router.get_calendar_provider", return_value=_FakeProvider(exc=CalendarProviderError("boom"))):
-        response = await client.get("/api/gcalendar/oauth/callback", params={"code": "abc", "state": state})
+async def test_callback_google_token_exchange_failure_fails_cleanly(
+    client, auth_headers
+):
+    state = create_oauth_state_token(
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        purpose=_PURPOSE,
+    )
+    with patch(
+        "gcalendar.router.get_calendar_provider",
+        return_value=_FakeProvider(exc=CalendarProviderError("boom")),
+    ):
+        response = await client.get(
+            "/api/gcalendar/oauth/callback", params={"code": "abc", "state": state}
+        )
     assert response.status_code == 200
     assert "Falha" in response.text
 
@@ -289,7 +370,11 @@ async def test_callback_google_token_exchange_failure_fails_cleanly(client, auth
 async def test_status_reports_not_connected_by_default(client, auth_headers):
     response = await client.get("/api/gcalendar/status", headers=auth_headers)
     assert response.status_code == 200
-    assert response.json() == {"connected": False, "account_label": None, "connected_at": None}
+    assert response.json() == {
+        "connected": False,
+        "account_label": None,
+        "connected_at": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -299,16 +384,28 @@ async def test_status_forbidden_for_non_admin(client, second_user_headers):
 
 
 @pytest.mark.asyncio
-async def test_status_and_disconnect_reflect_a_connected_account(client, auth_headers, db_engine):
-    state = create_oauth_state_token((await client.get("/api/auth/me", headers=auth_headers)).json()["id"], purpose=_PURPOSE)
+async def test_status_and_disconnect_reflect_a_connected_account(
+    client, auth_headers, db_engine
+):
+    state = create_oauth_state_token(
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        purpose=_PURPOSE,
+    )
     tokens = OAuthTokens(access_token="at", refresh_token="rt", scope="calendar")
-    with patch("gcalendar.router.get_calendar_provider", return_value=_FakeProvider(tokens=tokens)):
-        await client.get("/api/gcalendar/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gcalendar.router.get_calendar_provider",
+        return_value=_FakeProvider(tokens=tokens),
+    ):
+        await client.get(
+            "/api/gcalendar/oauth/callback", params={"code": "abc", "state": state}
+        )
 
     status_response = await client.get("/api/gcalendar/status", headers=auth_headers)
     assert status_response.json()["connected"] is True
 
-    disconnect_response = await client.delete("/api/gcalendar/disconnect", headers=auth_headers)
+    disconnect_response = await client.delete(
+        "/api/gcalendar/disconnect", headers=auth_headers
+    )
     assert disconnect_response.status_code == 204
 
     status_after = await client.get("/api/gcalendar/status", headers=auth_headers)
@@ -317,7 +414,9 @@ async def test_status_and_disconnect_reflect_a_connected_account(client, auth_he
 
 @pytest.mark.asyncio
 async def test_disconnect_forbidden_for_non_admin(client, second_user_headers):
-    response = await client.delete("/api/gcalendar/disconnect", headers=second_user_headers)
+    response = await client.delete(
+        "/api/gcalendar/disconnect", headers=second_user_headers
+    )
     assert response.status_code == 403
 
 

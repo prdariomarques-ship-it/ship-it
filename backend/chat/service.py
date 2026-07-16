@@ -3,6 +3,7 @@
 Agent selection, memory and tool execution all live in the AI Orchestrator;
 this service only adapts between the chat wire format and that call.
 """
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from chat.schemas import ChatRequest, ChatResponse
@@ -11,7 +12,9 @@ from orchestrator.service import ai_orchestrator
 
 
 class ChatService:
-    async def respond(self, db: AsyncSession, user: User, request: ChatRequest) -> ChatResponse:
+    async def respond(
+        self, db: AsyncSession, user: User, request: ChatRequest
+    ) -> ChatResponse:
         result = await ai_orchestrator.run(
             db=db,
             user=user,

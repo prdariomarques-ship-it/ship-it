@@ -5,6 +5,7 @@ is directly unit-testable and explainable on its own -- given a goal, the
 score (and therefore the ranking decision) can be reproduced and inspected
 without touching the database.
 """
+
 from datetime import datetime, timezone
 
 from models.goal import Goal, GoalPriority
@@ -34,5 +35,7 @@ def priority_score(goal: Goal, *, now: datetime | None = None) -> float:
     if goal.deadline is None:
         return score
     days_remaining = (goal.deadline - now).total_seconds() / 86400
-    urgency = max(0.0, (_DEADLINE_HORIZON_DAYS - days_remaining) / _DEADLINE_HORIZON_DAYS)
+    urgency = max(
+        0.0, (_DEADLINE_HORIZON_DAYS - days_remaining) / _DEADLINE_HORIZON_DAYS
+    )
     return score + min(urgency, 1.0) * _MAX_DEADLINE_BONUS

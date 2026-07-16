@@ -5,14 +5,19 @@ import pytest
 async def test_register_login_me_flow(client):
     register = await client.post(
         "/api/auth/register",
-        json={"email": "user@example.com", "full_name": "User", "password": "supersecret1"},
+        json={
+            "email": "user@example.com",
+            "full_name": "User",
+            "password": "supersecret1",
+        },
     )
     assert register.status_code == 201
     assert register.json()["email"] == "user@example.com"
     assert "hashed_password" not in register.json()
 
     login = await client.post(
-        "/api/auth/login", json={"email": "user@example.com", "password": "supersecret1"}
+        "/api/auth/login",
+        json={"email": "user@example.com", "password": "supersecret1"},
     )
     assert login.status_code == 200
     body = login.json()
@@ -49,18 +54,24 @@ async def test_refresh_token_rotation(client):
     )
     refresh_token = login.json()["refresh_token"]
 
-    refreshed = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    refreshed = await client.post(
+        "/api/auth/refresh", json={"refresh_token": refresh_token}
+    )
     assert refreshed.status_code == 200
     new_pair = refreshed.json()
     assert new_pair["access_token"]
     assert new_pair["refresh_token"] != refresh_token
 
     # Rotation: the old refresh token is revoked and can't be reused.
-    reused = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    reused = await client.post(
+        "/api/auth/refresh", json={"refresh_token": refresh_token}
+    )
     assert reused.status_code == 401
 
     # The new one works.
-    again = await client.post("/api/auth/refresh", json={"refresh_token": new_pair["refresh_token"]})
+    again = await client.post(
+        "/api/auth/refresh", json={"refresh_token": new_pair["refresh_token"]}
+    )
     assert again.status_code == 200
 
 
@@ -75,16 +86,24 @@ async def test_logout_revokes_refresh_token(client):
     )
     refresh_token = login.json()["refresh_token"]
 
-    logout = await client.post("/api/auth/logout", json={"refresh_token": refresh_token})
+    logout = await client.post(
+        "/api/auth/logout", json={"refresh_token": refresh_token}
+    )
     assert logout.status_code == 204
 
-    refused = await client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    refused = await client.post(
+        "/api/auth/refresh", json={"refresh_token": refresh_token}
+    )
     assert refused.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_duplicate_email_rejected(client):
-    payload = {"email": "dup@example.com", "full_name": "Dup", "password": "supersecret1"}
+    payload = {
+        "email": "dup@example.com",
+        "full_name": "Dup",
+        "password": "supersecret1",
+    }
     assert (await client.post("/api/auth/register", json=payload)).status_code == 201
     assert (await client.post("/api/auth/register", json=payload)).status_code == 409
 
@@ -96,7 +115,8 @@ async def test_wrong_password_rejected(client):
         json={"email": "wp@example.com", "full_name": "WP", "password": "supersecret1"},
     )
     login = await client.post(
-        "/api/auth/login", json={"email": "wp@example.com", "password": "wrong-password"}
+        "/api/auth/login",
+        json={"email": "wp@example.com", "password": "wrong-password"},
     )
     assert login.status_code == 401
 

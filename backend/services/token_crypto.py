@@ -8,6 +8,7 @@ the *actual* token to Google to refresh access), so this uses symmetric
 encryption (Fernet — AES-128-CBC + HMAC, authenticated) with a key that
 never leaves configuration, never touches the database.
 """
+
 from cryptography.fernet import Fernet, InvalidToken
 
 from utils.config import get_settings
@@ -23,7 +24,7 @@ def _fernet() -> Fernet:
     if not key:
         raise TokenEncryptionNotConfigured(
             "EMAIL_TOKEN_ENCRYPTION_KEY is not configured — generate one with: "
-            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
         )
     try:
         return Fernet(key.encode())

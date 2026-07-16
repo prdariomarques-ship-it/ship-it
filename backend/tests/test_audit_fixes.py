@@ -1,4 +1,5 @@
 """Regression tests for the Phase-2 audit fixes."""
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -15,7 +16,9 @@ from utils.config import get_settings
 
 # --- Production settings guard ---------------------------------------------
 def test_production_requires_strong_jwt_secret():
-    weak = SimpleNamespace(environment="production", jwt_secret="change-me-in-production")
+    weak = SimpleNamespace(
+        environment="production", jwt_secret="change-me-in-production"
+    )
     with pytest.raises(RuntimeError):
         _validate_production_settings(weak)
 
@@ -23,37 +26,49 @@ def test_production_requires_strong_jwt_secret():
     with pytest.raises(RuntimeError):
         _validate_production_settings(short)
 
-    strong = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="y" * 32)
+    strong = SimpleNamespace(
+        environment="production", jwt_secret="x" * 64, webhook_secret="y" * 32
+    )
     _validate_production_settings(strong)  # must not raise
 
-    dev = SimpleNamespace(environment="development", jwt_secret="change-me-in-production")
+    dev = SimpleNamespace(
+        environment="development", jwt_secret="change-me-in-production"
+    )
     _validate_production_settings(dev)  # dev keeps working with the default
 
 
 # --- PROD-004: production requires a strong WEBHOOK_SECRET ------------------
 def test_development_does_not_require_a_webhook_secret():
     """Dev environment: no WEBHOOK_SECRET at all must not block boot."""
-    dev = SimpleNamespace(environment="development", jwt_secret="x" * 64, webhook_secret="")
+    dev = SimpleNamespace(
+        environment="development", jwt_secret="x" * 64, webhook_secret=""
+    )
     _validate_production_settings(dev)  # must not raise
 
 
 def test_production_rejects_missing_webhook_secret():
     """Prod environment, secret ausente."""
-    missing = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="")
+    missing = SimpleNamespace(
+        environment="production", jwt_secret="x" * 64, webhook_secret=""
+    )
     with pytest.raises(RuntimeError, match="WEBHOOK_SECRET"):
         _validate_production_settings(missing)
 
 
 def test_production_rejects_weak_webhook_secret():
     """Prod environment, secret inválido (curto demais)."""
-    weak = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="short")
+    weak = SimpleNamespace(
+        environment="production", jwt_secret="x" * 64, webhook_secret="short"
+    )
     with pytest.raises(RuntimeError, match="WEBHOOK_SECRET"):
         _validate_production_settings(weak)
 
 
 def test_production_accepts_strong_webhook_secret():
     """Prod environment, secret válido."""
-    strong = SimpleNamespace(environment="production", jwt_secret="x" * 64, webhook_secret="z" * 32)
+    strong = SimpleNamespace(
+        environment="production", jwt_secret="x" * 64, webhook_secret="z" * 32
+    )
     _validate_production_settings(strong)  # must not raise
 
 
@@ -69,7 +84,9 @@ def test_production_still_checks_jwt_secret_before_webhook_secret():
 
 # --- Webhook authentication --------------------------------------------------
 @pytest.mark.asyncio
-async def test_webhook_rejects_missing_or_wrong_token_when_secret_set(client, monkeypatch):
+async def test_webhook_rejects_missing_or_wrong_token_when_secret_set(
+    client, monkeypatch
+):
     monkeypatch.setattr(get_settings(), "webhook_secret", "super-secret")
 
     payload = {"from": "5511900000001@c.us", "body": "oi", "notifyName": "X"}
@@ -82,7 +99,9 @@ async def test_webhook_rejects_missing_or_wrong_token_when_secret_set(client, mo
     assert wrong.status_code == 401
 
     right = await client.post(
-        "/api/webhooks/whatsapp", json=payload, headers={"X-Webhook-Token": "super-secret"}
+        "/api/webhooks/whatsapp",
+        json=payload,
+        headers={"X-Webhook-Token": "super-secret"},
     )
     assert right.status_code == 200
 
@@ -114,7 +133,9 @@ async def test_webhook_enqueues_embedding_job(client, db_engine):
 
 # --- Outbound messages also feed the automatic summary -----------------------
 @pytest.mark.asyncio
-async def test_outbound_send_triggers_summary_job(client, auth_headers, db_engine, monkeypatch):
+async def test_outbound_send_triggers_summary_job(
+    client, auth_headers, db_engine, monkeypatch
+):
     monkeypatch.setattr(get_settings(), "contact_summary_every_n_messages", 1)
 
     with patch(
@@ -140,7 +161,9 @@ async def test_get_or_create_by_phone_recovers_from_unique_race(db_engine, monke
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async with factory() as session:
-        existing = await ContactRepository(session).create(name="Ana", phone="5511911110000")
+        existing = await ContactRepository(session).create(
+            name="Ana", phone="5511911110000"
+        )
 
     # Simulate the race: the first lookup misses, the insert then collides with
     # a row committed by a concurrent request.
@@ -156,7 +179,9 @@ async def test_get_or_create_by_phone_recovers_from_unique_race(db_engine, monke
     monkeypatch.setattr(ContactRepository, "get_by_phone", flaky_get_by_phone)
 
     async with factory() as session:
-        contact = await ContactRepository(session).get_or_create_by_phone("5511911110000")
+        contact = await ContactRepository(session).get_or_create_by_phone(
+            "5511911110000"
+        )
     assert contact.id == existing.id
     assert calls["count"] == 2
 
@@ -166,7 +191,9 @@ async def test_get_or_create_by_phone_recovers_from_unique_race(db_engine, monke
 async def test_rate_limiter_in_memory_window():
     limiter = RateLimiter()
     limiter._redis_available = False
-    limiter._settings = SimpleNamespace(rate_limit_requests=2, rate_limit_window_seconds=60)
+    limiter._settings = SimpleNamespace(
+        rate_limit_requests=2, rate_limit_window_seconds=60
+    )
 
     assert await limiter.is_allowed("ip-1")
     assert await limiter.is_allowed("ip-1")
@@ -193,10 +220,15 @@ async def test_login_purges_expired_refresh_tokens(client, db_engine):
 
     await client.post(
         "/api/auth/register",
-        json={"email": "purge@example.com", "full_name": "P", "password": "supersecret1"},
+        json={
+            "email": "purge@example.com",
+            "full_name": "P",
+            "password": "supersecret1",
+        },
     )
     await client.post(
-        "/api/auth/login", json={"email": "purge@example.com", "password": "supersecret1"}
+        "/api/auth/login",
+        json={"email": "purge@example.com", "password": "supersecret1"},
     )
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -207,11 +239,14 @@ async def test_login_purges_expired_refresh_tokens(client, db_engine):
         await session.commit()
 
     await client.post(
-        "/api/auth/login", json={"email": "purge@example.com", "password": "supersecret1"}
+        "/api/auth/login",
+        json={"email": "purge@example.com", "password": "supersecret1"},
     )
     async with factory() as session:
         tokens = (await session.execute(select(RefreshToken))).scalars().all()
-    assert len(tokens) == 1  # the expired one is gone; only the new pair's token remains
+    assert (
+        len(tokens) == 1
+    )  # the expired one is gone; only the new pair's token remains
 
 
 # --- Contact search uses SQL, with partial matching ----------------------------

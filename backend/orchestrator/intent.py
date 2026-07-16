@@ -9,6 +9,7 @@ ambiguous message. Only when the model can't be reached or degrades to a stub
 does a lightweight keyword heuristic step in — a fallback, never the primary
 decision path, mirroring how `providers/llm/*` already degrade to STUB_REPLY.
 """
+
 from enum import Enum
 
 from pydantic import BaseModel
@@ -86,15 +87,51 @@ _INTENT_SYSTEM_PROMPT = (
 
 # Degrade path only (see module docstring) — not the primary decision mechanism.
 _FALLBACK_KEYWORDS: dict[Intent, tuple[str, ...]] = {
-    Intent.GREETING: ("oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "e aí", "eae"),
+    Intent.GREETING: (
+        "oi",
+        "olá",
+        "ola",
+        "bom dia",
+        "boa tarde",
+        "boa noite",
+        "e aí",
+        "eae",
+    ),
     Intent.SCHEDULE: ("agenda", "agendar", "marcar", "reunião", "reuniao"),
     Intent.APPOINTMENT: ("compromisso", "consulta", "horário", "horario"),
     Intent.REMINDER: ("lembrete", "lembrar", "não esquecer", "nao esquecer"),
     Intent.TASK: ("tarefa", "afazer", "pendência", "pendencia", "to-do", "todo"),
-    Intent.STORE: ("loja", "produto", "pedido", "comprar", "cliente", "orçamento", "orcamento"),
-    Intent.CHURCH: ("igreja", "culto", "oração", "oracao", "membro", "escala", "pastor"),
-    Intent.WEB_SEARCH: ("pesquise na internet", "busque na web", "google", "pesquisar na web"),
-    Intent.RESEARCH: ("pesquisa", "pesquisar", "descubra", "informações sobre", "informacoes sobre"),
+    Intent.STORE: (
+        "loja",
+        "produto",
+        "pedido",
+        "comprar",
+        "cliente",
+        "orçamento",
+        "orcamento",
+    ),
+    Intent.CHURCH: (
+        "igreja",
+        "culto",
+        "oração",
+        "oracao",
+        "membro",
+        "escala",
+        "pastor",
+    ),
+    Intent.WEB_SEARCH: (
+        "pesquise na internet",
+        "busque na web",
+        "google",
+        "pesquisar na web",
+    ),
+    Intent.RESEARCH: (
+        "pesquisa",
+        "pesquisar",
+        "descubra",
+        "informações sobre",
+        "informacoes sobre",
+    ),
     Intent.DOCUMENT: ("documento", "pdf", "contrato", "relatório", "relatorio"),
     Intent.FILE: ("arquivo", "anexo"),
     Intent.IMAGE: ("imagem", "foto", "figura"),
@@ -135,7 +172,9 @@ class IntentEngine:
                 confidence = float(raw.get("confidence", 0))
             except (TypeError, ValueError):
                 continue
-            hypotheses.append(IntentHypothesis(intent=Intent(raw["intent"]), confidence=confidence))
+            hypotheses.append(
+                IntentHypothesis(intent=Intent(raw["intent"]), confidence=confidence)
+            )
         if not hypotheses:
             return self._fallback(message)
 
@@ -163,6 +202,8 @@ class IntentEngine:
 
         hypotheses = [
             IntentHypothesis(intent=intent, confidence=confidence)
-            for intent, confidence in sorted(scores.items(), key=lambda item: item[1], reverse=True)
+            for intent, confidence in sorted(
+                scores.items(), key=lambda item: item[1], reverse=True
+            )
         ]
         return IntentResult(top=hypotheses[0].intent, hypotheses=hypotheses)

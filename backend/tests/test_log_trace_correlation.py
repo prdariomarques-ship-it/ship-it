@@ -1,4 +1,5 @@
 """Log-to-trace correlation tests."""
+
 import logging
 import json
 
@@ -6,7 +7,11 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from observability.request_context import RequestIDMiddleware, get_trace_id, get_request_id
+from observability.request_context import (
+    RequestIDMiddleware,
+    get_trace_id,
+    get_request_id,
+)
 from middleware.trace_context import TraceContextMiddleware
 from utils.logging import configure_logging, get_logger
 
@@ -107,7 +112,9 @@ def test_text_formatter_includes_trace_id():
     """Text log format includes trace_id in readable format."""
     from utils.logging import RequestIDFilter
 
-    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(request_id)s:%(trace_id)s | %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(request_id)s:%(trace_id)s | %(message)s"
+    )
     record = logging.LogRecord(
         name="test",
         level=logging.INFO,

@@ -1,4 +1,5 @@
 """Tests for JobWorker concurrency control via asyncio.Semaphore."""
+
 import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -65,6 +66,7 @@ async def test_concurrency_limit_enforcement():
     # Apply semaphore to all tasks (simulating execute_with_semaphore behavior)
     guarded_tasks = []
     for task in tasks:
+
         async def guarded(t=task):
             async with worker._semaphore:
                 await t
@@ -74,7 +76,9 @@ async def test_concurrency_limit_enforcement():
     await asyncio.gather(*guarded_tasks)
 
     # Verify max concurrent never exceeded limit
-    assert max_active <= max_concurrent, f"Max concurrent {max_active} exceeded limit {max_concurrent}"
+    assert max_active <= max_concurrent, (
+        f"Max concurrent {max_active} exceeded limit {max_concurrent}"
+    )
 
 
 @pytest.mark.asyncio
@@ -284,7 +288,9 @@ async def test_run_once_does_not_hang_with_semaphore():
         mock_factory.return_value.__aenter__.return_value = mock_session
 
         with patch("jobs.worker.JobRepository") as mock_repo_class:
-            with patch.object(worker, "_execute", new_callable=AsyncMock) as mock_execute:
+            with patch.object(
+                worker, "_execute", new_callable=AsyncMock
+            ) as mock_execute:
                 mock_repo = AsyncMock()
                 mock_repo_class.return_value = mock_repo
 
@@ -292,9 +298,9 @@ async def test_run_once_does_not_hang_with_semaphore():
                 mock_jobs = [MagicMock(spec=Job, id=i) for i in range(1, 6)]
                 mock_repo.stale_running_jobs.return_value = []
                 mock_repo.due_jobs.return_value = mock_jobs
-                mock_repo.get.side_effect = lambda job_id: mock_jobs[job_id - 1] if job_id <= len(
-                    mock_jobs
-                ) else None
+                mock_repo.get.side_effect = lambda job_id: (
+                    mock_jobs[job_id - 1] if job_id <= len(mock_jobs) else None
+                )
 
                 mock_execute.return_value = None
 

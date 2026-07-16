@@ -1,4 +1,5 @@
 """Tools over the church and store domains."""
+
 from agents.tools.base import Tool, ToolContext, ok
 from models.store import StoreCustomer
 from repositories.base import SQLAlchemyRepository
@@ -25,7 +26,9 @@ async def _list_church_members(context: ToolContext) -> str:
     )
 
 
-async def _add_prayer_request(context: ToolContext, member_name: str, request: str) -> str:
+async def _add_prayer_request(
+    context: ToolContext, member_name: str, request: str
+) -> str:
     repository = ChurchMemberRepository(context.db)
     matches = await repository.search_by_name(member_name, limit=1)
     member = matches[0] if matches else await repository.create(name=member_name)
@@ -68,7 +71,10 @@ add_prayer_request_tool = Tool(
     handler=_add_prayer_request,
     parameters={
         "type": "object",
-        "properties": {"member_name": {"type": "string"}, "request": {"type": "string"}},
+        "properties": {
+            "member_name": {"type": "string"},
+            "request": {"type": "string"},
+        },
         "required": ["member_name", "request"],
     },
 )

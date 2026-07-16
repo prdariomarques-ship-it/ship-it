@@ -14,7 +14,9 @@ async def test_list_agents(client, auth_headers):
 @pytest.mark.asyncio
 async def test_run_agent_without_llm_key_returns_stub(client, auth_headers):
     response = await client.post(
-        "/api/agents/personal/run", json={"message": "Resuma meu dia"}, headers=auth_headers
+        "/api/agents/personal/run",
+        json={"message": "Resuma meu dia"},
+        headers=auth_headers,
     )
     assert response.status_code == 200
     assert response.json()["agent"] == "personal"

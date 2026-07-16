@@ -23,7 +23,9 @@ class Job(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
-    status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.QUEUED, index=True)
+    status: Mapped[JobStatus] = mapped_column(
+        Enum(JobStatus), default=JobStatus.QUEUED, index=True
+    )
     attempts: Mapped[int] = mapped_column(default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(default=3, nullable=False)
     scheduled_at: Mapped[datetime] = mapped_column(

@@ -6,6 +6,7 @@ qwen2.5). Reusing OpenAIProvider — same trick as GLM — means this provider i
 a configuration, not a reimplementation: point `base_url` at the local
 Ollama instance and skip the API key (Ollama doesn't require one by default).
 """
+
 from providers.llm.base import EmbeddingsNotSupportedError
 from providers.llm.openai.provider import OpenAIProvider
 from utils.config import get_settings

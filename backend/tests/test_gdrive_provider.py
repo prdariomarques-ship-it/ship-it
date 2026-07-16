@@ -2,6 +2,7 @@
 extraction (pypdf, python-docx). Mirrors the mocking style used for
 Gmail/Calendar/Contacts.
 """
+
 import io
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -29,7 +30,9 @@ from providers.drive.google.provider import (
 from utils.config import get_settings
 
 
-def _mock_response(json_body=None, content: bytes | None = None, status_code: int = 200) -> MagicMock:
+def _mock_response(
+    json_body=None, content: bytes | None = None, status_code: int = 200
+) -> MagicMock:
     response = MagicMock()
     response.status_code = status_code
     response.raise_for_status = MagicMock()
@@ -43,19 +46,29 @@ def _mock_response(json_body=None, content: bytes | None = None, status_code: in
 def _patch_get(get_result=None, post_result=None):
     client = MagicMock()
     if get_result is not None:
-        client.get = AsyncMock(side_effect=get_result if isinstance(get_result, list) else [get_result] * 20)
+        client.get = AsyncMock(
+            side_effect=get_result
+            if isinstance(get_result, list)
+            else [get_result] * 20
+        )
     if post_result is not None:
         client.post = AsyncMock(return_value=post_result)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    return patch("providers.drive.google.provider.httpx.AsyncClient", return_value=client), client
+    return patch(
+        "providers.drive.google.provider.httpx.AsyncClient", return_value=client
+    ), client
 
 
 @pytest.fixture
 def provider(monkeypatch):
     monkeypatch.setattr(get_settings(), "google_client_id", "client-id")
     monkeypatch.setattr(get_settings(), "google_client_secret", "client-secret")
-    monkeypatch.setattr(get_settings(), "google_drive_redirect_uri", "https://app.example.com/api/gdrive/oauth/callback")
+    monkeypatch.setattr(
+        get_settings(),
+        "google_drive_redirect_uri",
+        "https://app.example.com/api/gdrive/oauth/callback",
+    )
     monkeypatch.setattr(get_settings(), "gdrive_max_file_size_bytes", 20_000_000)
     return GoogleDriveProvider()
 
@@ -71,7 +84,12 @@ def test_authorization_url_includes_offline_access_readonly_scope_and_state(prov
 
 @pytest.mark.asyncio
 async def test_exchange_code_returns_tokens(provider):
-    body = {"access_token": "at1", "refresh_token": "rt1", "expires_in": 3600, "scope": "drive.readonly"}
+    body = {
+        "access_token": "at1",
+        "refresh_token": "rt1",
+        "expires_in": 3600,
+        "scope": "drive.readonly",
+    }
     patcher, _ = _patch_get(post_result=_mock_response(body))
     with patcher:
         tokens = await provider.exchange_code("auth-code")
@@ -96,7 +114,9 @@ async def test_token_request_failure_raises_provider_error(provider):
     client.post = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.drive.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.drive.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(DriveProviderError):
             await provider.exchange_code("auth-code")
 
@@ -104,7 +124,16 @@ async def test_token_request_failure_raises_provider_error(provider):
 # --- list/search/metadata ----------------------------------------------------------
 @pytest.mark.asyncio
 async def test_list_files_parses_results(provider):
-    body = {"files": [{"id": "f1", "name": "Contrato.pdf", "mimeType": "application/pdf", "size": "1024"}]}
+    body = {
+        "files": [
+            {
+                "id": "f1",
+                "name": "Contrato.pdf",
+                "mimeType": "application/pdf",
+                "size": "1024",
+            }
+        ]
+    }
     patcher, client = _patch_get(get_result=[_mock_response(body)])
     with patcher:
         files = await provider.list_files("access-token")
@@ -118,7 +147,9 @@ async def test_search_files_sends_the_built_query(provider):
     body = {"files": []}
     patcher, client = _patch_get(get_result=[_mock_response(body)])
     with patcher:
-        await provider.search_files("access-token", DriveSearchQuery(name="Contrato", folder_id="f-1"))
+        await provider.search_files(
+            "access-token", DriveSearchQuery(name="Contrato", folder_id="f-1")
+        )
     sent_params = client.get.call_args.kwargs["params"]
     assert "name contains 'Contrato'" in sent_params["q"]
     assert "'f-1' in parents" in sent_params["q"]
@@ -133,14 +164,21 @@ async def test_search_files_api_failure_raises_provider_error(provider):
     client.get = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.drive.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.drive.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(DriveProviderError):
             await provider.search_files("access-token", DriveSearchQuery())
 
 
 @pytest.mark.asyncio
 async def test_get_metadata_parses_a_single_file(provider):
-    body = {"id": "f1", "name": "Notas.txt", "mimeType": "text/plain", "modifiedTime": "2026-01-15T10:00:00Z"}
+    body = {
+        "id": "f1",
+        "name": "Notas.txt",
+        "mimeType": "text/plain",
+        "modifiedTime": "2026-01-15T10:00:00Z",
+    }
     patcher, _ = _patch_get(get_result=[_mock_response(body)])
     with patcher:
         metadata = await provider.get_metadata("access-token", "f1")
@@ -157,7 +195,11 @@ def test_parse_file_handles_missing_size_and_modified_time():
 # --- read_file_text: guardrails ------------------------------------------------
 @pytest.mark.asyncio
 async def test_read_file_text_rejects_google_native_types(provider):
-    metadata_body = {"id": "f1", "name": "Planilha", "mimeType": "application/vnd.google-apps.spreadsheet"}
+    metadata_body = {
+        "id": "f1",
+        "name": "Planilha",
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+    }
     patcher, _ = _patch_get(get_result=[_mock_response(metadata_body)])
     with patcher:
         with pytest.raises(UnsupportedDriveFileTypeError):
@@ -175,8 +217,15 @@ async def test_read_file_text_rejects_unsupported_binary_types(provider):
 
 @pytest.mark.asyncio
 async def test_read_file_text_rejects_oversized_files_before_downloading(provider):
-    provider._max_file_size_bytes = 100  # provider already constructed; set directly (like the fixture would)
-    metadata_body = {"id": "f1", "name": "grande.pdf", "mimeType": "application/pdf", "size": "999999"}
+    provider._max_file_size_bytes = (
+        100  # provider already constructed; set directly (like the fixture would)
+    )
+    metadata_body = {
+        "id": "f1",
+        "name": "grande.pdf",
+        "mimeType": "application/pdf",
+        "size": "999999",
+    }
     patcher, client = _patch_get(get_result=[_mock_response(metadata_body)])
     with patcher:
         with pytest.raises(DriveFileTooLargeError):
@@ -186,9 +235,16 @@ async def test_read_file_text_rejects_oversized_files_before_downloading(provide
 
 @pytest.mark.asyncio
 async def test_read_file_text_downloads_and_decodes_plain_text(provider):
-    metadata_body = {"id": "f1", "name": "notas.txt", "mimeType": "text/plain", "size": "10"}
+    metadata_body = {
+        "id": "f1",
+        "name": "notas.txt",
+        "mimeType": "text/plain",
+        "size": "10",
+    }
     download_response = _mock_response(content="Olá, mundo!".encode())
-    patcher, _ = _patch_get(get_result=[_mock_response(metadata_body), download_response])
+    patcher, _ = _patch_get(
+        get_result=[_mock_response(metadata_body), download_response]
+    )
     with patcher:
         text = await provider.read_file_text("access-token", "f1")
     assert text == "Olá, mundo!"
@@ -197,9 +253,16 @@ async def test_read_file_text_downloads_and_decodes_plain_text(provider):
 @pytest.mark.asyncio
 async def test_read_file_text_falls_back_to_extension_for_markdown(provider):
     """Drive sometimes reports a generic mimeType for a .md file."""
-    metadata_body = {"id": "f1", "name": "leia-me.md", "mimeType": "application/octet-stream", "size": "5"}
+    metadata_body = {
+        "id": "f1",
+        "name": "leia-me.md",
+        "mimeType": "application/octet-stream",
+        "size": "5",
+    }
     download_response = _mock_response(content=b"# Ola")
-    patcher, _ = _patch_get(get_result=[_mock_response(metadata_body), download_response])
+    patcher, _ = _patch_get(
+        get_result=[_mock_response(metadata_body), download_response]
+    )
     with patcher:
         text = await provider.read_file_text("access-token", "f1")
     assert text == "# Ola"
@@ -218,7 +281,9 @@ def test_extract_pdf_text_joins_pages():
 
 
 def test_extract_pdf_text_wraps_extraction_failures():
-    with patch("providers.drive.google.provider.PdfReader", side_effect=Exception("corrupt")):
+    with patch(
+        "providers.drive.google.provider.PdfReader", side_effect=Exception("corrupt")
+    ):
         with pytest.raises(DriveProviderError):
             _extract_pdf_text(b"not-a-real-pdf")
 
@@ -269,7 +334,9 @@ def test_build_query_escapes_single_quotes():
 
 
 def test_build_query_combines_all_filters():
-    query = _build_query(DriveSearchQuery(name="a", folder_id="b", mime_type="c", query="d"))
+    query = _build_query(
+        DriveSearchQuery(name="a", folder_id="b", mime_type="c", query="d")
+    )
     assert "name contains 'a'" in query
     assert "'b' in parents" in query
     assert "mimeType = 'c'" in query

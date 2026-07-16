@@ -13,6 +13,7 @@ by `_discover()` (called once, lazily, on first registry access), so the
 `@register_agent` decorator runs and the class is available through
 `get_agent`/`list_agents` — no dict to edit, no import to add anywhere else.
 """
+
 import importlib
 import pkgutil
 from typing import TypeVar

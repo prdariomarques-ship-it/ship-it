@@ -7,6 +7,7 @@ from the LLM), not by a prompt instruction. These tests simulate a malicious
 or careless tool-call argument (as if injected by a manipulated LLM) and
 confirm the handler itself rejects it regardless of what the model asked for.
 """
+
 import json
 
 import pytest
@@ -28,7 +29,9 @@ async def session_factory(db_engine):
 @pytest.fixture
 async def user(session_factory) -> User:
     async with session_factory() as session:
-        user = User(email="isolation@example.com", full_name="Isolation", hashed_password="x")
+        user = User(
+            email="isolation@example.com", full_name="Isolation", hashed_password="x"
+        )
         session.add(user)
         await session.commit()
         await session.refresh(user)
@@ -64,7 +67,9 @@ async def test_send_blocks_message_to_another_contact_when_conversation_scoped(
     simulates a prompt-injected/malicious `to` argument."""
     async with session_factory() as session:
         context = ToolContext(db=session, user=user, contact_id=contact_a.id)
-        result = await send_whatsapp_tool.run(context, {"to": contact_b.phone, "message": "oi"})
+        result = await send_whatsapp_tool.run(
+            context, {"to": contact_b.phone, "message": "oi"}
+        )
 
     payload = json.loads(result)
     assert "error" in payload
@@ -76,10 +81,14 @@ async def test_send_blocks_message_to_another_contact_when_conversation_scoped(
 
 
 @pytest.mark.asyncio
-async def test_send_allows_message_to_the_current_conversation_contact(session_factory, user, contact_a):
+async def test_send_allows_message_to_the_current_conversation_contact(
+    session_factory, user, contact_a
+):
     async with session_factory() as session:
         context = ToolContext(db=session, user=user, contact_id=contact_a.id)
-        result = await send_whatsapp_tool.run(context, {"to": contact_a.phone, "message": "oi"})
+        result = await send_whatsapp_tool.run(
+            context, {"to": contact_a.phone, "message": "oi"}
+        )
 
     payload = json.loads(result)
     assert payload["ok"] is True
@@ -98,19 +107,25 @@ async def test_send_allows_message_to_a_known_contact_without_conversation_scope
     WhatsApp-triggered run) — sending to an existing, known contact is fine."""
     async with session_factory() as session:
         context = ToolContext(db=session, user=user, contact_id=None)
-        result = await send_whatsapp_tool.run(context, {"to": contact_a.phone, "message": "oi"})
+        result = await send_whatsapp_tool.run(
+            context, {"to": contact_a.phone, "message": "oi"}
+        )
 
     payload = json.loads(result)
     assert payload["ok"] is True
 
 
 @pytest.mark.asyncio
-async def test_send_blocks_arbitrary_unknown_number_without_conversation_scope(session_factory, user):
+async def test_send_blocks_arbitrary_unknown_number_without_conversation_scope(
+    session_factory, user
+):
     """Without a conversation scope, the model still cannot invent a brand
     new destination number that isn't a known contact."""
     async with session_factory() as session:
         context = ToolContext(db=session, user=user, contact_id=None)
-        result = await send_whatsapp_tool.run(context, {"to": "5599999999999", "message": "oi"})
+        result = await send_whatsapp_tool.run(
+            context, {"to": "5599999999999", "message": "oi"}
+        )
 
     payload = json.loads(result)
     assert "error" in payload
@@ -121,7 +136,9 @@ async def test_send_blocks_arbitrary_unknown_number_without_conversation_scope(s
 
 
 @pytest.mark.asyncio
-async def test_send_isolation_is_not_bypassable_by_phone_formatting(session_factory, user, contact_a, contact_b):
+async def test_send_isolation_is_not_bypassable_by_phone_formatting(
+    session_factory, user, contact_a, contact_b
+):
     """Normalizing the target phone (e.g. adding '@c.us' or '+') must not
     let a scoped conversation slip past the isolation check."""
     async with session_factory() as session:
@@ -149,7 +166,9 @@ async def test_find_contact_blocks_lookup_of_another_contact_when_conversation_s
 
 
 @pytest.mark.asyncio
-async def test_find_contact_blocks_lookup_by_phone_of_another_contact(session_factory, user, contact_a, contact_b):
+async def test_find_contact_blocks_lookup_by_phone_of_another_contact(
+    session_factory, user, contact_a, contact_b
+):
     async with session_factory() as session:
         context = ToolContext(db=session, user=user, contact_id=contact_a.id)
         result = await find_contact_tool.run(context, {"query": contact_b.phone})
@@ -159,7 +178,9 @@ async def test_find_contact_blocks_lookup_by_phone_of_another_contact(session_fa
 
 
 @pytest.mark.asyncio
-async def test_find_contact_allows_lookup_of_the_current_conversation_contact(session_factory, user, contact_a):
+async def test_find_contact_allows_lookup_of_the_current_conversation_contact(
+    session_factory, user, contact_a
+):
     async with session_factory() as session:
         context = ToolContext(db=session, user=user, contact_id=contact_a.id)
         result = await find_contact_tool.run(context, {"query": contact_a.phone})

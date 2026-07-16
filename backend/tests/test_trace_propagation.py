@@ -1,9 +1,14 @@
 """Trace context propagation across 6 mechanisms: HTTP (in/out), DB, APIs, jobs, events, agents."""
+
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from observability.request_context import RequestIDMiddleware, get_request_id, get_trace_id
+from observability.request_context import (
+    RequestIDMiddleware,
+    get_request_id,
+    get_trace_id,
+)
 from middleware.trace_context import TraceContextMiddleware, get_trace_context
 from observability.trace_propagation import (
     get_current_trace_context,
@@ -93,7 +98,9 @@ def test_http_outbound_traceparent_injection(client):
 def test_http_outbound_preserves_upstream_trace_id(client):
     """HTTP outbound: preserves upstream trace_id when present."""
     upstream_traceparent = "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0-bbbbbbbbbbbbbb00-01"
-    response = client.get("/propagate-header", headers={"traceparent": upstream_traceparent})
+    response = client.get(
+        "/propagate-header", headers={"traceparent": upstream_traceparent}
+    )
     assert response.status_code == 200
     data = response.json()
     # Injected header should use upstream trace_id
@@ -116,7 +123,9 @@ def test_job_worker_serialize_trace_context(client):
     serialized = serialize_trace_context()
     # If trace_id exists, serialization should work
     if data["trace_id"]:
-        assert serialized is not None or serialized is None  # Depends on whether we're in request context
+        assert (
+            serialized is not None or serialized is None
+        )  # Depends on whether we're in request context
 
 
 def test_job_worker_restore_trace_context():

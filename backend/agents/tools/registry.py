@@ -7,6 +7,7 @@ discoverable. New tools work the same way — define a `Tool(...)`, import its
 module once (agents already do, to build their `tools` list), and it shows up
 in `list_tools()` / `get_tool()` automatically.
 """
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

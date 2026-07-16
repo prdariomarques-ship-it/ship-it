@@ -1,6 +1,7 @@
 """OAuth connect/callback/status/disconnect endpoints (Sprint 3 — Google
 Drive). Mirrors `tests/test_gcalendar_router.py`/`tests/test_gcontacts_router.py`.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -9,7 +10,11 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from auth.jwt import create_access_token, create_oauth_state_token, decode_oauth_state_token
+from auth.jwt import (
+    create_access_token,
+    create_oauth_state_token,
+    decode_oauth_state_token,
+)
 from models.gdrive_account import GoogleDriveAccount
 from providers.drive.base import DriveProviderError, OAuthTokens
 from providers.drive.factory import get_drive_provider
@@ -24,15 +29,23 @@ def _configured(monkeypatch):
     get_drive_provider.cache_clear()
     monkeypatch.setattr(get_settings(), "google_client_id", "client-id")
     monkeypatch.setattr(get_settings(), "google_client_secret", "client-secret")
-    monkeypatch.setattr(get_settings(), "google_drive_redirect_uri", "https://app.example.com/api/gdrive/oauth/callback")
-    monkeypatch.setattr(get_settings(), "email_token_encryption_key", Fernet.generate_key().decode())
+    monkeypatch.setattr(
+        get_settings(),
+        "google_drive_redirect_uri",
+        "https://app.example.com/api/gdrive/oauth/callback",
+    )
+    monkeypatch.setattr(
+        get_settings(), "email_token_encryption_key", Fernet.generate_key().decode()
+    )
     yield
     get_drive_provider.cache_clear()
 
 
 @pytest.fixture(autouse=True)
 def _no_real_network_for_label_lookup():
-    with patch("gdrive.router._resolve_account_label", new=AsyncMock(return_value="Dario")):
+    with patch(
+        "gdrive.router._resolve_account_label", new=AsyncMock(return_value="Dario")
+    ):
         yield
 
 
@@ -45,10 +58,15 @@ async def session_factory(db_engine):
 async def second_user_headers(client, auth_headers):
     await client.post(
         "/api/auth/register",
-        json={"email": "second@example.com", "full_name": "Second", "password": "supersecret1"},
+        json={
+            "email": "second@example.com",
+            "full_name": "Second",
+            "password": "supersecret1",
+        },
     )
     response = await client.post(
-        "/api/auth/login", json={"email": "second@example.com", "password": "supersecret1"}
+        "/api/auth/login",
+        json={"email": "second@example.com", "password": "supersecret1"},
     )
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
@@ -72,7 +90,9 @@ class _FakeProvider:
 
 # --- /connect ------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_connect_returns_authorization_url_with_a_valid_state_token(client, auth_headers):
+async def test_connect_returns_authorization_url_with_a_valid_state_token(
+    client, auth_headers
+):
     response = await client.get("/api/gdrive/connect", headers=auth_headers)
     assert response.status_code == 200
     url = response.json()["authorization_url"]
@@ -119,7 +139,8 @@ async def test_callback_escapes_the_error_param_against_reflected_xss(client):
 @pytest.mark.asyncio
 async def test_callback_rejects_invalid_state(client):
     response = await client.get(
-        "/api/gdrive/oauth/callback", params={"code": "abc", "state": "not-a-real-token"}
+        "/api/gdrive/oauth/callback",
+        params={"code": "abc", "state": "not-a-real-token"},
     )
     assert response.status_code == 200
     assert "expirada" in response.text or "inválida" in response.text
@@ -148,14 +169,25 @@ async def test_callback_rejects_a_state_token_of_the_wrong_purpose(client):
 
 
 @pytest.mark.asyncio
-async def test_callback_success_stores_an_encrypted_refresh_token(client, auth_headers, db_engine):
+async def test_callback_success_stores_an_encrypted_refresh_token(
+    client, auth_headers, db_engine
+):
     me = await client.get("/api/auth/me", headers=auth_headers)
     user_id = me.json()["id"]
     state = create_oauth_state_token(user_id, purpose=_PURPOSE)
-    tokens = OAuthTokens(access_token="at", refresh_token="rt-plaintext", expires_in=3600, scope="drive.readonly")
+    tokens = OAuthTokens(
+        access_token="at",
+        refresh_token="rt-plaintext",
+        expires_in=3600,
+        scope="drive.readonly",
+    )
 
-    with patch("gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)):
-        response = await client.get("/api/gdrive/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)
+    ):
+        response = await client.get(
+            "/api/gdrive/oauth/callback", params={"code": "abc", "state": state}
+        )
 
     assert response.status_code == 200
     assert "sucesso" in response.text
@@ -174,15 +206,29 @@ async def test_callback_reconnect_updates_the_existing_account_instead_of_duplic
 ):
     me = await client.get("/api/auth/me", headers=auth_headers)
     user_id = me.json()["id"]
-    first_tokens = OAuthTokens(access_token="at1", refresh_token="rt1", scope="drive.readonly")
-    second_tokens = OAuthTokens(access_token="at2", refresh_token="rt2", scope="drive.readonly")
+    first_tokens = OAuthTokens(
+        access_token="at1", refresh_token="rt1", scope="drive.readonly"
+    )
+    second_tokens = OAuthTokens(
+        access_token="at2", refresh_token="rt2", scope="drive.readonly"
+    )
 
-    with patch("gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=first_tokens)):
+    with patch(
+        "gdrive.router.get_drive_provider",
+        return_value=_FakeProvider(tokens=first_tokens),
+    ):
         state = create_oauth_state_token(user_id, purpose=_PURPOSE)
-        await client.get("/api/gdrive/oauth/callback", params={"code": "abc", "state": state})
-    with patch("gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=second_tokens)):
+        await client.get(
+            "/api/gdrive/oauth/callback", params={"code": "abc", "state": state}
+        )
+    with patch(
+        "gdrive.router.get_drive_provider",
+        return_value=_FakeProvider(tokens=second_tokens),
+    ):
         state2 = create_oauth_state_token(user_id, purpose=_PURPOSE)
-        await client.get("/api/gdrive/oauth/callback", params={"code": "abc2", "state": state2})
+        await client.get(
+            "/api/gdrive/oauth/callback", params={"code": "abc2", "state": state2}
+        )
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
@@ -210,13 +256,21 @@ async def test_callback_recovers_when_two_concurrent_callbacks_race_on_create(
 
     async with session_factory() as session:
         first = await GoogleDriveAccountRepository(session).upsert_for_user(
-            user_id, "google", account_label="racer", encrypted_refresh_token="enc-1",
-            scopes=["drive.readonly"], connected_at=datetime.now(timezone.utc),
+            user_id,
+            "google",
+            account_label="racer",
+            encrypted_refresh_token="enc-1",
+            scopes=["drive.readonly"],
+            connected_at=datetime.now(timezone.utc),
         )
     async with session_factory() as session:
         second = await GoogleDriveAccountRepository(session).upsert_for_user(
-            user_id, "google", account_label="racer", encrypted_refresh_token="enc-2",
-            scopes=["drive.readonly"], connected_at=datetime.now(timezone.utc),
+            user_id,
+            "google",
+            account_label="racer",
+            encrypted_refresh_token="enc-2",
+            scopes=["drive.readonly"],
+            connected_at=datetime.now(timezone.utc),
         )
     assert first.id == second.id
     assert calls["count"] == 3
@@ -228,12 +282,21 @@ async def test_callback_recovers_when_two_concurrent_callbacks_race_on_create(
 
 
 @pytest.mark.asyncio
-async def test_callback_without_a_refresh_token_fails_and_stores_nothing(client, auth_headers, db_engine):
-    state = create_oauth_state_token((await client.get("/api/auth/me", headers=auth_headers)).json()["id"], purpose=_PURPOSE)
+async def test_callback_without_a_refresh_token_fails_and_stores_nothing(
+    client, auth_headers, db_engine
+):
+    state = create_oauth_state_token(
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        purpose=_PURPOSE,
+    )
     tokens = OAuthTokens(access_token="at", refresh_token=None, scope="drive.readonly")
 
-    with patch("gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)):
-        response = await client.get("/api/gdrive/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)
+    ):
+        response = await client.get(
+            "/api/gdrive/oauth/callback", params={"code": "abc", "state": state}
+        )
     assert "refresh token" in response.text.lower() or "Falha" in response.text
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -247,11 +310,18 @@ async def test_callback_without_encryption_configured_fails_and_stores_nothing(
     client, auth_headers, db_engine, monkeypatch
 ):
     monkeypatch.setattr(get_settings(), "email_token_encryption_key", "")
-    state = create_oauth_state_token((await client.get("/api/auth/me", headers=auth_headers)).json()["id"], purpose=_PURPOSE)
+    state = create_oauth_state_token(
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        purpose=_PURPOSE,
+    )
     tokens = OAuthTokens(access_token="at", refresh_token="rt", scope="drive.readonly")
 
-    with patch("gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)):
-        response = await client.get("/api/gdrive/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)
+    ):
+        response = await client.get(
+            "/api/gdrive/oauth/callback", params={"code": "abc", "state": state}
+        )
     assert "Falha" in response.text
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -261,10 +331,20 @@ async def test_callback_without_encryption_configured_fails_and_stores_nothing(
 
 
 @pytest.mark.asyncio
-async def test_callback_google_token_exchange_failure_fails_cleanly(client, auth_headers):
-    state = create_oauth_state_token((await client.get("/api/auth/me", headers=auth_headers)).json()["id"], purpose=_PURPOSE)
-    with patch("gdrive.router.get_drive_provider", return_value=_FakeProvider(exc=DriveProviderError("boom"))):
-        response = await client.get("/api/gdrive/oauth/callback", params={"code": "abc", "state": state})
+async def test_callback_google_token_exchange_failure_fails_cleanly(
+    client, auth_headers
+):
+    state = create_oauth_state_token(
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        purpose=_PURPOSE,
+    )
+    with patch(
+        "gdrive.router.get_drive_provider",
+        return_value=_FakeProvider(exc=DriveProviderError("boom")),
+    ):
+        response = await client.get(
+            "/api/gdrive/oauth/callback", params={"code": "abc", "state": state}
+        )
     assert response.status_code == 200
     assert "Falha" in response.text
 
@@ -274,7 +354,11 @@ async def test_callback_google_token_exchange_failure_fails_cleanly(client, auth
 async def test_status_reports_not_connected_by_default(client, auth_headers):
     response = await client.get("/api/gdrive/status", headers=auth_headers)
     assert response.status_code == 200
-    assert response.json() == {"connected": False, "account_label": None, "connected_at": None}
+    assert response.json() == {
+        "connected": False,
+        "account_label": None,
+        "connected_at": None,
+    }
 
 
 @pytest.mark.asyncio
@@ -284,16 +368,27 @@ async def test_status_forbidden_for_non_admin(client, second_user_headers):
 
 
 @pytest.mark.asyncio
-async def test_status_and_disconnect_reflect_a_connected_account(client, auth_headers, db_engine):
-    state = create_oauth_state_token((await client.get("/api/auth/me", headers=auth_headers)).json()["id"], purpose=_PURPOSE)
+async def test_status_and_disconnect_reflect_a_connected_account(
+    client, auth_headers, db_engine
+):
+    state = create_oauth_state_token(
+        (await client.get("/api/auth/me", headers=auth_headers)).json()["id"],
+        purpose=_PURPOSE,
+    )
     tokens = OAuthTokens(access_token="at", refresh_token="rt", scope="drive.readonly")
-    with patch("gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)):
-        await client.get("/api/gdrive/oauth/callback", params={"code": "abc", "state": state})
+    with patch(
+        "gdrive.router.get_drive_provider", return_value=_FakeProvider(tokens=tokens)
+    ):
+        await client.get(
+            "/api/gdrive/oauth/callback", params={"code": "abc", "state": state}
+        )
 
     status_response = await client.get("/api/gdrive/status", headers=auth_headers)
     assert status_response.json()["connected"] is True
 
-    disconnect_response = await client.delete("/api/gdrive/disconnect", headers=auth_headers)
+    disconnect_response = await client.delete(
+        "/api/gdrive/disconnect", headers=auth_headers
+    )
     assert disconnect_response.status_code == 204
 
     status_after = await client.get("/api/gdrive/status", headers=auth_headers)
@@ -302,7 +397,9 @@ async def test_status_and_disconnect_reflect_a_connected_account(client, auth_he
 
 @pytest.mark.asyncio
 async def test_disconnect_forbidden_for_non_admin(client, second_user_headers):
-    response = await client.delete("/api/gdrive/disconnect", headers=second_user_headers)
+    response = await client.delete(
+        "/api/gdrive/disconnect", headers=second_user_headers
+    )
     assert response.status_code == 403
 
 

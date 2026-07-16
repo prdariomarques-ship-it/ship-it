@@ -7,6 +7,7 @@ job-triggered send used by the automatic reply and by agent tools
 message and fed memory; the job path silently skipped both. This is the one
 place that does it, so neither path can drift from the other again.
 """
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from jobs.service import JobService
@@ -40,7 +41,9 @@ async def persist_outbound_message(
     await db.commit()
     await db.refresh(message)
 
-    summary_due = await contact_memory_service.record_interaction(db, contact, content, source="whatsapp")
+    summary_due = await contact_memory_service.record_interaction(
+        db, contact, content, source="whatsapp"
+    )
     if summary_due:
         await JobService(db).enqueue("contact.summarize", {"contact_id": contact.id})
     return message

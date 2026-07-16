@@ -8,6 +8,7 @@ chunk replacement, citation content) calls the existing Memory Manager
 correctly, not that Qdrant itself works (already covered by
 `tests/test_memory_service_delete.py` and the pre-existing memory suite).
 """
+
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
@@ -29,7 +30,12 @@ from agents.tools.gdrive import (
 )
 from models.gdrive_account import GoogleDriveAccount
 from models.user import User
-from providers.drive.base import DriveFile, DriveProvider, DriveProviderError, UnsupportedDriveFileTypeError
+from providers.drive.base import (
+    DriveFile,
+    DriveProvider,
+    DriveProviderError,
+    UnsupportedDriveFileTypeError,
+)
 from repositories.gdrive_account import GoogleDriveAccountRepository
 from repositories.gdrive_indexed_file import GoogleDriveIndexedFileRepository
 from services.token_crypto import encrypt_token
@@ -38,7 +44,9 @@ from utils.config import get_settings
 
 @pytest.fixture(autouse=True)
 def _encryption_key(monkeypatch):
-    monkeypatch.setattr(get_settings(), "email_token_encryption_key", Fernet.generate_key().decode())
+    monkeypatch.setattr(
+        get_settings(), "email_token_encryption_key", Fernet.generate_key().decode()
+    )
 
 
 @pytest.fixture
@@ -68,7 +76,9 @@ async def user_b(session_factory) -> User:
         return user
 
 
-async def _connect(session_factory, user: User, refresh_token: str, label: str) -> GoogleDriveAccount:
+async def _connect(
+    session_factory, user: User, refresh_token: str, label: str
+) -> GoogleDriveAccount:
     async with session_factory() as session:
         return await GoogleDriveAccountRepository(session).create(
             user_id=user.id,
@@ -97,7 +107,11 @@ class FakeDriveProvider(DriveProvider):
 
     name = "google"
 
-    def __init__(self, files_by_token: dict[str, list[DriveFile]] | None = None, text_by_file: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        files_by_token: dict[str, list[DriveFile]] | None = None,
+        text_by_file: dict[str, str] | None = None,
+    ) -> None:
         self.files_by_token = files_by_token or {}
         self.text_by_file = text_by_file or {}
         self.calls: list[str] = []
@@ -113,7 +127,9 @@ class FakeDriveProvider(DriveProvider):
 
         return OAuthTokens(access_token=f"access-for-{refresh_token}")
 
-    async def list_files(self, access_token: str, folder_id=None, limit: int = 20) -> list[DriveFile]:
+    async def list_files(
+        self, access_token: str, folder_id=None, limit: int = 20
+    ) -> list[DriveFile]:
         self.calls.append(access_token)
         return self.files_by_token.get(access_token, [])
 
@@ -130,16 +146,22 @@ class FakeDriveProvider(DriveProvider):
 
     async def read_file_text(self, access_token: str, file_id: str) -> str:
         self.calls.append(access_token)
-        await self.get_metadata(access_token, file_id)  # enforces the same isolation boundary as the real provider
+        await self.get_metadata(
+            access_token, file_id
+        )  # enforces the same isolation boundary as the real provider
         return self.text_by_file.get(file_id, "")
 
 
 # --- _get_access_token -----------------------------------------------------------
 @pytest.mark.asyncio
-async def test_get_access_token_resolves_strictly_from_context_user_id(session_factory, user_a, user_b, monkeypatch):
+async def test_get_access_token_resolves_strictly_from_context_user_id(
+    session_factory, user_a, user_b, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     await _connect(session_factory, user_b, "rt-b", "b")
-    monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: FakeDriveProvider())
+    monkeypatch.setattr(
+        "agents.tools.gdrive.get_drive_provider", lambda: FakeDriveProvider()
+    )
 
     async with session_factory() as session:
         token_a = await _get_access_token(ToolContext(db=session, user=user_a))
@@ -158,14 +180,18 @@ async def test_get_access_token_raises_when_not_connected(session_factory, user_
 
 
 @pytest.mark.asyncio
-async def test_get_access_token_treats_a_revoked_refresh_token_as_not_connected(session_factory, user_a, monkeypatch):
+async def test_get_access_token_treats_a_revoked_refresh_token_as_not_connected(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
 
     class _RevokedProvider(FakeDriveProvider):
         async def refresh_access_token(self, refresh_token):
             raise DriveProviderError("invalid_grant")
 
-    monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: _RevokedProvider())
+    monkeypatch.setattr(
+        "agents.tools.gdrive.get_drive_provider", lambda: _RevokedProvider()
+    )
     async with session_factory() as session:
         with pytest.raises(DriveNotConnectedError, match="reconectar"):
             await _get_access_token(ToolContext(db=session, user=user_a))
@@ -175,50 +201,68 @@ async def test_get_access_token_treats_a_revoked_refresh_token_as_not_connected(
 @pytest.mark.asyncio
 async def test_list_files_tool_rejects_when_not_connected(session_factory, user_a):
     async with session_factory() as session:
-        result = await list_google_drive_files_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await list_google_drive_files_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
 async def test_search_files_tool_rejects_when_not_connected(session_factory, user_a):
     async with session_factory() as session:
-        result = await search_google_drive_files_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await search_google_drive_files_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
 async def test_read_file_tool_rejects_when_not_connected(session_factory, user_a):
     async with session_factory() as session:
-        result = await read_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f1"})
+        result = await read_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f1"}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
 async def test_index_file_tool_rejects_when_not_connected(session_factory, user_a):
     async with session_factory() as session:
-        result = await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f1"})
+        result = await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f1"}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
 async def test_update_index_tool_rejects_when_not_connected(session_factory, user_a):
     async with session_factory() as session:
-        result = await update_google_drive_index_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await update_google_drive_index_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     assert "error" in json.loads(result)
 
 
 # --- isolation: two connected users, zero cross-user leakage -------------------
 @pytest.mark.asyncio
-async def test_search_files_tool_never_returns_another_users_drive(session_factory, user_a, user_b, monkeypatch):
+async def test_search_files_tool_never_returns_another_users_drive(
+    session_factory, user_a, user_b, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     await _connect(session_factory, user_b, "rt-b", "b")
-    provider = FakeDriveProvider({"access-for-rt-a": [_file("a")], "access-for-rt-b": [_file("b")]})
+    provider = FakeDriveProvider(
+        {"access-for-rt-a": [_file("a")], "access-for-rt-b": [_file("b")]}
+    )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
 
     async with session_factory() as session:
-        result_a = await search_google_drive_files_tool.run(ToolContext(db=session, user=user_a), {})
+        result_a = await search_google_drive_files_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     async with session_factory() as session:
-        result_b = await search_google_drive_files_tool.run(ToolContext(db=session, user=user_b), {})
+        result_b = await search_google_drive_files_tool.run(
+            ToolContext(db=session, user=user_b), {}
+        )
 
     files_a = json.loads(result_a)["files"]
     files_b = json.loads(result_b)["files"]
@@ -228,7 +272,9 @@ async def test_search_files_tool_never_returns_another_users_drive(session_facto
 
 
 @pytest.mark.asyncio
-async def test_read_file_tool_cannot_be_pointed_at_another_users_file(session_factory, user_a, user_b, monkeypatch):
+async def test_read_file_tool_cannot_be_pointed_at_another_users_file(
+    session_factory, user_a, user_b, monkeypatch
+):
     """Even if the model supplies a file_id that belongs to user A's Drive,
     user B's tool call must not read it — the access token used is derived
     only from user B's own connected account, and Google's Drive API itself
@@ -237,29 +283,40 @@ async def test_read_file_tool_cannot_be_pointed_at_another_users_file(session_fa
     await _connect(session_factory, user_a, "rt-a", "a")
     await _connect(session_factory, user_b, "rt-b", "b")
     provider = FakeDriveProvider(
-        {"access-for-rt-a": [_file("a", "f-a")], "access-for-rt-b": [_file("b", "f-b")]},
+        {
+            "access-for-rt-a": [_file("a", "f-a")],
+            "access-for-rt-b": [_file("b", "f-b")],
+        },
         {"f-a": "conteúdo secreto de a"},
     )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
 
     async with session_factory() as session:
-        result = await read_google_drive_file_tool.run(ToolContext(db=session, user=user_b), {"file_id": "f-a"})
+        result = await read_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_b), {"file_id": "f-a"}
+        )
     payload = json.loads(result)
     assert "error" in payload
     assert "secreto" not in result
 
 
 @pytest.mark.asyncio
-async def test_search_files_tool_maps_provider_error_to_a_tool_error(session_factory, user_a, monkeypatch):
+async def test_search_files_tool_maps_provider_error_to_a_tool_error(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
 
     class _FailingProvider(FakeDriveProvider):
         async def search_files(self, access_token, query):
             raise DriveProviderError("google is down")
 
-    monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: _FailingProvider())
+    monkeypatch.setattr(
+        "agents.tools.gdrive.get_drive_provider", lambda: _FailingProvider()
+    )
     async with session_factory() as session:
-        result = await search_google_drive_files_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await search_google_drive_files_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     assert "error" in json.loads(result)
 
 
@@ -270,7 +327,8 @@ async def test_index_file_tool_stores_content_via_the_existing_memory_manager(
 ):
     await _connect(session_factory, user_a, "rt-a", "a")
     provider = FakeDriveProvider(
-        {"access-for-rt-a": [_file("a", "f-a")]}, {"f-a": "Conteúdo do documento sobre investimentos."}
+        {"access-for-rt-a": [_file("a", "f-a")]},
+        {"f-a": "Conteúdo do documento sobre investimentos."},
     )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
 
@@ -278,7 +336,9 @@ async def test_index_file_tool_stores_content_via_the_existing_memory_manager(
     monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", remember)
 
     async with session_factory() as session:
-        result = await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"})
+        result = await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+        )
 
     payload = json.loads(result)
     assert payload["indexed"] is True
@@ -295,40 +355,64 @@ async def test_index_file_tool_records_bookkeeping_and_skips_unchanged_reindex(
     session_factory, user_a, db_engine, monkeypatch
 ):
     await _connect(session_factory, user_a, "rt-a", "a")
-    provider = FakeDriveProvider({"access-for-rt-a": [_file("a", "f-a")]}, {"f-a": "conteúdo"})
+    provider = FakeDriveProvider(
+        {"access-for-rt-a": [_file("a", "f-a")]}, {"f-a": "conteúdo"}
+    )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
-    monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        "agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1)
+    )
 
     async with session_factory() as session:
-        first = json.loads(await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"}))
+        first = json.loads(
+            await index_google_drive_file_tool.run(
+                ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+            )
+        )
     assert first["indexed"] is True
 
     async with session_factory() as session:
-        second = json.loads(await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"}))
+        second = json.loads(
+            await index_google_drive_file_tool.run(
+                ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+            )
+        )
     assert second["indexed"] is False
     assert "sem alterações" in second["reason"]
 
 
 @pytest.mark.asyncio
-async def test_index_file_tool_replaces_stale_chunks_when_file_changed(session_factory, user_a, monkeypatch):
+async def test_index_file_tool_replaces_stale_chunks_when_file_changed(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     old_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     new_time = old_time + timedelta(days=1)
-    provider = FakeDriveProvider({"access-for-rt-a": [_file("a", "f-a", modified=old_time)]}, {"f-a": "versão 1"})
+    provider = FakeDriveProvider(
+        {"access-for-rt-a": [_file("a", "f-a", modified=old_time)]}, {"f-a": "versão 1"}
+    )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
-    monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        "agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1)
+    )
     forget = AsyncMock()
     monkeypatch.setattr("agents.tools.gdrive.memory_manager.forget", forget)
 
     async with session_factory() as session:
-        await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"})
+        await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+        )
 
     # File changed on Drive: newer modified_time, new content.
     provider.files_by_token["access-for-rt-a"] = [_file("a", "f-a", modified=new_time)]
     provider.text_by_file["f-a"] = "versão 2"
 
     async with session_factory() as session:
-        result = json.loads(await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"}))
+        result = json.loads(
+            await index_google_drive_file_tool.run(
+                ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+            )
+        )
 
     assert result["indexed"] is True
     forget.assert_awaited_once()
@@ -336,7 +420,9 @@ async def test_index_file_tool_replaces_stale_chunks_when_file_changed(session_f
 
 
 @pytest.mark.asyncio
-async def test_index_file_tool_rejects_unsupported_file_types(session_factory, user_a, monkeypatch):
+async def test_index_file_tool_rejects_unsupported_file_types(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
 
     class _UnsupportedProvider(FakeDriveProvider):
@@ -348,21 +434,29 @@ async def test_index_file_tool_rejects_unsupported_file_types(session_factory, u
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
 
     async with session_factory() as session:
-        result = await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"})
+        result = await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
-async def test_index_file_tool_skips_empty_files_without_calling_memory_manager(session_factory, user_a, monkeypatch):
+async def test_index_file_tool_skips_empty_files_without_calling_memory_manager(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
-    provider = FakeDriveProvider({"access-for-rt-a": [_file("a", "f-empty")]}, {"f-empty": "   "})
+    provider = FakeDriveProvider(
+        {"access-for-rt-a": [_file("a", "f-empty")]}, {"f-empty": "   "}
+    )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
     remember = AsyncMock(return_value=1)
     monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", remember)
 
     async with session_factory() as session:
         result = json.loads(
-            await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-empty"})
+            await index_google_drive_file_tool.run(
+                ToolContext(db=session, user=user_a), {"file_id": "f-empty"}
+            )
         )
     assert result["indexed"] is False
     assert "vazio" in result["reason"]
@@ -370,10 +464,13 @@ async def test_index_file_tool_skips_empty_files_without_calling_memory_manager(
 
 
 @pytest.mark.asyncio
-async def test_index_folder_tool_records_failed_files_without_stopping(session_factory, user_a, monkeypatch):
+async def test_index_folder_tool_records_failed_files_without_stopping(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     provider = FakeDriveProvider(
-        {"access-for-rt-a": [_file("a", "f-ok"), _file("a", "f-bad")]}, {"f-ok": "conteúdo bom"}
+        {"access-for-rt-a": [_file("a", "f-ok"), _file("a", "f-bad")]},
+        {"f-ok": "conteúdo bom"},
     )
 
     original_read = provider.read_file_text
@@ -385,49 +482,72 @@ async def test_index_folder_tool_records_failed_files_without_stopping(session_f
 
     provider.read_file_text = flaky_read
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
-    monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        "agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1)
+    )
 
     async with session_factory() as session:
         result = json.loads(
-            await index_google_drive_folder_tool.run(ToolContext(db=session, user=user_a), {"folder_id": "folder-1"})
+            await index_google_drive_folder_tool.run(
+                ToolContext(db=session, user=user_a), {"folder_id": "folder-1"}
+            )
         )
     assert [item["file_id"] for item in result["indexed"]] == ["f-ok"]
     assert [item["file_id"] for item in result["failed"]] == ["f-bad"]
 
 
 @pytest.mark.asyncio
-async def test_index_folder_tool_aggregates_indexed_and_skipped(session_factory, user_a, monkeypatch):
+async def test_index_folder_tool_aggregates_indexed_and_skipped(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     provider = FakeDriveProvider(
         {"access-for-rt-a": [_file("a", "f-1"), _file("a", "f-2")]},
         {"f-1": "conteúdo 1", "f-2": "conteúdo 2"},
     )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
-    monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        "agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1)
+    )
 
     async with session_factory() as session:
         result = json.loads(
-            await index_google_drive_folder_tool.run(ToolContext(db=session, user=user_a), {"folder_id": "folder-1"})
+            await index_google_drive_folder_tool.run(
+                ToolContext(db=session, user=user_a), {"folder_id": "folder-1"}
+            )
         )
     assert len(result["indexed"]) == 2
     assert result["failed"] == []
 
 
 @pytest.mark.asyncio
-async def test_update_index_tool_reindexes_only_changed_files(session_factory, user_a, monkeypatch):
+async def test_update_index_tool_reindexes_only_changed_files(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     old_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     provider = FakeDriveProvider(
-        {"access-for-rt-a": [_file("a", "f-1", modified=old_time), _file("a", "f-2", modified=old_time)]},
+        {
+            "access-for-rt-a": [
+                _file("a", "f-1", modified=old_time),
+                _file("a", "f-2", modified=old_time),
+            ]
+        },
         {"f-1": "v1", "f-2": "v1"},
     )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
-    monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        "agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1)
+    )
     monkeypatch.setattr("agents.tools.gdrive.memory_manager.forget", AsyncMock())
 
     async with session_factory() as session:
-        await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-1"})
-        await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-2"})
+        await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-1"}
+        )
+        await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-2"}
+        )
 
     # Only f-1 changes on Drive.
     new_time = old_time + timedelta(days=1)
@@ -438,7 +558,11 @@ async def test_update_index_tool_reindexes_only_changed_files(session_factory, u
     provider.text_by_file["f-1"] = "v2"
 
     async with session_factory() as session:
-        result = json.loads(await update_google_drive_index_tool.run(ToolContext(db=session, user=user_a), {}))
+        result = json.loads(
+            await update_google_drive_index_tool.run(
+                ToolContext(db=session, user=user_a), {}
+            )
+        )
 
     assert [item["file_id"] for item in result["updated"]] == ["f-1"]
     assert [item["file_id"] for item in result["unchanged"]] == ["f-2"]
@@ -446,35 +570,56 @@ async def test_update_index_tool_reindexes_only_changed_files(session_factory, u
 
 
 @pytest.mark.asyncio
-async def test_update_index_tool_records_failed_files_without_stopping(session_factory, user_a, monkeypatch):
+async def test_update_index_tool_records_failed_files_without_stopping(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     old_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     provider = FakeDriveProvider(
-        {"access-for-rt-a": [_file("a", "f-1", modified=old_time), _file("a", "f-2", modified=old_time)]},
+        {
+            "access-for-rt-a": [
+                _file("a", "f-1", modified=old_time),
+                _file("a", "f-2", modified=old_time),
+            ]
+        },
         {"f-1": "v1", "f-2": "v1"},
     )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
-    monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1))
+    monkeypatch.setattr(
+        "agents.tools.gdrive.memory_manager.remember", AsyncMock(return_value=1)
+    )
     monkeypatch.setattr("agents.tools.gdrive.memory_manager.forget", AsyncMock())
 
     async with session_factory() as session:
-        await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-1"})
-        await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-2"})
+        await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-1"}
+        )
+        await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-2"}
+        )
 
     # f-2 was deleted from Drive since it was indexed.
     provider.files_by_token["access-for-rt-a"] = [_file("a", "f-1", modified=old_time)]
 
     async with session_factory() as session:
-        result = json.loads(await update_google_drive_index_tool.run(ToolContext(db=session, user=user_a), {}))
+        result = json.loads(
+            await update_google_drive_index_tool.run(
+                ToolContext(db=session, user=user_a), {}
+            )
+        )
 
     assert [item["file_id"] for item in result["failed"]] == ["f-2"]
     assert [item["file_id"] for item in result["unchanged"]] == ["f-1"]
 
 
 @pytest.mark.asyncio
-async def test_summarize_document_tool_empty_content_skips_the_llm_call(session_factory, user_a, monkeypatch):
+async def test_summarize_document_tool_empty_content_skips_the_llm_call(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
-    provider = FakeDriveProvider({"access-for-rt-a": [_file("a", "f-empty")]}, {"f-empty": "   "})
+    provider = FakeDriveProvider(
+        {"access-for-rt-a": [_file("a", "f-empty")]}, {"f-empty": "   "}
+    )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
 
     calls = {"n": 0}
@@ -490,7 +635,9 @@ async def test_summarize_document_tool_empty_content_skips_the_llm_call(session_
 
     async with session_factory() as session:
         result = json.loads(
-            await summarize_google_drive_document_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-empty"})
+            await summarize_google_drive_document_tool.run(
+                ToolContext(db=session, user=user_a), {"file_id": "f-empty"}
+            )
         )
     assert result["summary"] == ""
     assert calls["n"] == 0
@@ -498,7 +645,9 @@ async def test_summarize_document_tool_empty_content_skips_the_llm_call(session_
 
 # --- concurrency: indexing bookkeeping race -------------------------------------
 @pytest.mark.asyncio
-async def test_indexed_file_upsert_recovers_from_concurrent_race(session_factory, user_a, monkeypatch):
+async def test_indexed_file_upsert_recovers_from_concurrent_race(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     original_get = GoogleDriveIndexedFileRepository.get_by_user_and_file
     calls = {"count": 0}
@@ -509,17 +658,33 @@ async def test_indexed_file_upsert_recovers_from_concurrent_race(session_factory
             return None
         return await original_get(self, uid, file_id)
 
-    monkeypatch.setattr(GoogleDriveIndexedFileRepository, "get_by_user_and_file", racy_get)
+    monkeypatch.setattr(
+        GoogleDriveIndexedFileRepository, "get_by_user_and_file", racy_get
+    )
 
     async with session_factory() as session:
-        first = await GoogleDriveIndexedFileRepository(session).upsert_for_user_and_file(
-            user_a.id, "f-race", file_name="x", mime_type="text/plain",
-            modified_time=datetime.now(timezone.utc), embedding_ids=[1], indexed_at=datetime.now(timezone.utc),
+        first = await GoogleDriveIndexedFileRepository(
+            session
+        ).upsert_for_user_and_file(
+            user_a.id,
+            "f-race",
+            file_name="x",
+            mime_type="text/plain",
+            modified_time=datetime.now(timezone.utc),
+            embedding_ids=[1],
+            indexed_at=datetime.now(timezone.utc),
         )
     async with session_factory() as session:
-        second = await GoogleDriveIndexedFileRepository(session).upsert_for_user_and_file(
-            user_a.id, "f-race", file_name="x", mime_type="text/plain",
-            modified_time=datetime.now(timezone.utc), embedding_ids=[2], indexed_at=datetime.now(timezone.utc),
+        second = await GoogleDriveIndexedFileRepository(
+            session
+        ).upsert_for_user_and_file(
+            user_a.id,
+            "f-race",
+            file_name="x",
+            mime_type="text/plain",
+            modified_time=datetime.now(timezone.utc),
+            embedding_ids=[2],
+            indexed_at=datetime.now(timezone.utc),
         )
     assert first.id == second.id
     assert calls["count"] == 3
@@ -557,9 +722,14 @@ async def test_concurrent_reindexing_of_the_same_file_does_not_orphan_embeddings
             embedding_ids=[100, 101],
             indexed_at=old_time,
         )
-    stale_snapshot = SimpleNamespace(modified_time=old_time, embedding_ids=[100, 101], indexed_at=old_time)
+    stale_snapshot = SimpleNamespace(
+        modified_time=old_time, embedding_ids=[100, 101], indexed_at=old_time
+    )
 
-    provider = FakeDriveProvider({"access-for-rt-a": [_file("a", "f-a", modified=new_time)]}, {"f-a": "novo conteúdo"})
+    provider = FakeDriveProvider(
+        {"access-for-rt-a": [_file("a", "f-a", modified=new_time)]},
+        {"f-a": "novo conteúdo"},
+    )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
 
     created_ids = {"n": 200}
@@ -578,7 +748,9 @@ async def test_concurrent_reindexing_of_the_same_file_does_not_orphan_embeddings
     from agents.tools.gdrive import _index_one
 
     async with session_factory() as session:
-        await _index_one(ToolContext(db=session, user=user_a), provider, "access-for-rt-a", "f-a")
+        await _index_one(
+            ToolContext(db=session, user=user_a), provider, "access-for-rt-a", "f-a"
+        )
 
     original_get = GoogleDriveIndexedFileRepository.get_by_user_and_file
     calls = {"n": 0}
@@ -591,13 +763,19 @@ async def test_concurrent_reindexing_of_the_same_file_does_not_orphan_embeddings
             return stale_snapshot
         return await original_get(self, uid, fid)
 
-    monkeypatch.setattr(GoogleDriveIndexedFileRepository, "get_by_user_and_file", controlled_get)
+    monkeypatch.setattr(
+        GoogleDriveIndexedFileRepository, "get_by_user_and_file", controlled_get
+    )
 
     async with session_factory() as session:
-        await _index_one(ToolContext(db=session, user=user_a), provider, "access-for-rt-a", "f-a")
+        await _index_one(
+            ToolContext(db=session, user=user_a), provider, "access-for-rt-a", "f-a"
+        )
 
     async with session_factory() as session:
-        final = await GoogleDriveIndexedFileRepository(session).get_by_user_and_file(user_a.id, "f-a")
+        final = await GoogleDriveIndexedFileRepository(session).get_by_user_and_file(
+            user_a.id, "f-a"
+        )
 
     all_forgotten = {embedding_id for batch in forgotten for embedding_id in batch}
     task_a_ids = {201}  # single chunk, task A's remember() call
@@ -610,9 +788,13 @@ async def test_concurrent_reindexing_of_the_same_file_does_not_orphan_embeddings
 
 # --- summarize ---------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_summarize_document_tool_calls_the_llm(session_factory, user_a, monkeypatch):
+async def test_summarize_document_tool_calls_the_llm(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
-    provider = FakeDriveProvider({"access-for-rt-a": [_file("a", "f-a")]}, {"f-a": "conteúdo do documento"})
+    provider = FakeDriveProvider(
+        {"access-for-rt-a": [_file("a", "f-a")]}, {"f-a": "conteúdo do documento"}
+    )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
 
     from providers.llm.base import LLMResult
@@ -624,7 +806,9 @@ async def test_summarize_document_tool_calls_the_llm(session_factory, user_a, mo
     monkeypatch.setattr("agents.tools.gdrive.get_llm_provider", lambda: _FakeLLM())
 
     async with session_factory() as session:
-        result = await summarize_google_drive_document_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"})
+        result = await summarize_google_drive_document_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+        )
     payload = json.loads(result)
     assert payload["ok"] is True
     assert payload["summary"] == "Resumo do documento."
@@ -632,7 +816,9 @@ async def test_summarize_document_tool_calls_the_llm(session_factory, user_a, mo
 
 # --- multiusuário: each user's indexing reads only their own Drive -------------
 @pytest.mark.asyncio
-async def test_multiuser_indexing_each_reads_only_their_own_drive(session_factory, user_a, user_b, monkeypatch):
+async def test_multiuser_indexing_each_reads_only_their_own_drive(
+    session_factory, user_a, user_b, monkeypatch
+):
     """Dario OS's knowledge base is deliberately global (single-owner
     system, same as `knowledge_search` today) — what must stay isolated is
     *which Drive* gets read, never the resulting knowledge partition. This
@@ -641,7 +827,10 @@ async def test_multiuser_indexing_each_reads_only_their_own_drive(session_factor
     await _connect(session_factory, user_a, "rt-a", "a")
     await _connect(session_factory, user_b, "rt-b", "b")
     provider = FakeDriveProvider(
-        {"access-for-rt-a": [_file("a", "f-a")], "access-for-rt-b": [_file("b", "f-b")]},
+        {
+            "access-for-rt-a": [_file("a", "f-a")],
+            "access-for-rt-b": [_file("b", "f-b")],
+        },
         {"f-a": "conteúdo de a", "f-b": "conteúdo de b"},
     )
     monkeypatch.setattr("agents.tools.gdrive.get_drive_provider", lambda: provider)
@@ -649,9 +838,13 @@ async def test_multiuser_indexing_each_reads_only_their_own_drive(session_factor
     monkeypatch.setattr("agents.tools.gdrive.memory_manager.remember", remember)
 
     async with session_factory() as session:
-        await index_google_drive_file_tool.run(ToolContext(db=session, user=user_a), {"file_id": "f-a"})
+        await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_a), {"file_id": "f-a"}
+        )
     async with session_factory() as session:
-        await index_google_drive_file_tool.run(ToolContext(db=session, user=user_b), {"file_id": "f-b"})
+        await index_google_drive_file_tool.run(
+            ToolContext(db=session, user=user_b), {"file_id": "f-b"}
+        )
 
     contents = [call.kwargs["content"] for call in remember.await_args_list]
     assert any("conteúdo de a" in c for c in contents)

@@ -5,6 +5,7 @@ Register with the decorator:
     @job_handler("contact.summarize")
     async def summarize(db: AsyncSession, payload: dict) -> None: ...
 """
+
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession

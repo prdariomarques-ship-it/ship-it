@@ -20,6 +20,7 @@ This is a Facade over already-tested components (`MemoryService`,
 reimplement. Nothing outside `memory/` talks to Qdrant or the Contact model's
 memory fields directly anymore.
 """
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memory.contact_memory import contact_memory_service
@@ -34,7 +35,9 @@ KNOWLEDGE_SOURCE = "knowledge"
 class MemoryManager:
     """Facade unifying short-term, long-term, knowledge and preference memory."""
 
-    async def short_term(self, db: AsyncSession, contact_id: int, limit: int = 20) -> list[Message]:
+    async def short_term(
+        self, db: AsyncSession, contact_id: int, limit: int = 20
+    ) -> list[Message]:
         """Recent conversation transcript for a contact, oldest first."""
         return await MessageRepository(db).recent_for_contact(contact_id, limit=limit)
 
@@ -42,7 +45,9 @@ class MemoryManager:
         self, query: str, contact_id: int | None = None, limit: int = 5
     ) -> list[dict]:
         """Semantic search over past interactions (optionally scoped to one contact)."""
-        return await memory_service.search(query=query, limit=limit, contact_id=contact_id)
+        return await memory_service.search(
+            query=query, limit=limit, contact_id=contact_id
+        )
 
     async def knowledge_search(self, query: str, limit: int = 5) -> list[dict]:
         """Semantic search over ingested knowledge (documents, facts, policies).
@@ -54,7 +59,9 @@ class MemoryManager:
         # Over-fetch then filter by tag: the Qdrant client version in use has
         # no server-side payload filter combinator for this collection yet.
         results = await memory_service.search(query=query, limit=max(limit * 4, 20))
-        return [item for item in results if item.get("source") == KNOWLEDGE_SOURCE][:limit]
+        return [item for item in results if item.get("source") == KNOWLEDGE_SOURCE][
+            :limit
+        ]
 
     async def remember(
         self, db: AsyncSession, content: str, source: str, contact_id: int | None = None
@@ -68,7 +75,9 @@ class MemoryManager:
         `ContactMemoryService.record_interaction`, which enqueues
         `memory.embed` rather than calling this synchronously.
         """
-        record = await memory_service.store(db, content=content, source=source, contact_id=contact_id)
+        record = await memory_service.store(
+            db, content=content, source=source, contact_id=contact_id
+        )
         return record.id
 
     async def forget(self, db: AsyncSession, embedding_ids: list[int]) -> None:
@@ -86,7 +95,9 @@ class MemoryManager:
         contact = await ContactRepository(db).get(contact_id)
         return contact.summary if contact else None
 
-    async def add_categories(self, db: AsyncSession, contact_id: int, categories: list[str]) -> list[str]:
+    async def add_categories(
+        self, db: AsyncSession, contact_id: int, categories: list[str]
+    ) -> list[str]:
         """Merge new categories into a contact's tags; skips ones already
         present so learning never writes the same fact twice. Returns only
         the categories that were actually new."""
@@ -94,13 +105,17 @@ class MemoryManager:
         contact = await repository.get(contact_id)
         if contact is None:
             return []
-        new_ones = [category for category in categories if category not in contact.categories]
+        new_ones = [
+            category for category in categories if category not in contact.categories
+        ]
         if not new_ones:
             return []
         await repository.update(contact, categories=[*contact.categories, *new_ones])
         return new_ones
 
-    async def set_preference(self, db: AsyncSession, contact_id: int, key: str, value: object) -> dict:
+    async def set_preference(
+        self, db: AsyncSession, contact_id: int, key: str, value: object
+    ) -> dict:
         """Merge one preference into the contact's preferences; returns the full dict."""
         repository = ContactRepository(db)
         contact = await repository.get(contact_id)

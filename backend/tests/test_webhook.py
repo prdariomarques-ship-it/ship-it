@@ -62,7 +62,9 @@ async def test_webhook_reuses_existing_contact(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_webhook_ignores_non_message_events(client):
-    response = await client.post("/api/webhooks/whatsapp", json={"event": "battery", "data": {}})
+    response = await client.post(
+        "/api/webhooks/whatsapp", json={"event": "battery", "data": {}}
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "ignored"
 
@@ -72,7 +74,12 @@ async def test_webhook_ignores_non_message_events(client):
 async def test_webhook_delivery_ack_updates_message_status(client, db_engine):
     inbound = await client.post(
         "/api/webhooks/whatsapp",
-        json={"from": "5511900001234@c.us", "body": "oi", "notifyName": "Ack", "id": "wamid-ack-1"},
+        json={
+            "from": "5511900001234@c.us",
+            "body": "oi",
+            "notifyName": "Ack",
+            "id": "wamid-ack-1",
+        },
     )
     message_id = inbound.json()["message_id"]
 
@@ -89,7 +96,9 @@ async def test_webhook_delivery_ack_updates_message_status(client, db_engine):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "delivery_ack"
-    assert received == [{"provider": "openwa", "external_id": "wamid-ack-1", "status": "delivered"}]
+    assert received == [
+        {"provider": "openwa", "external_id": "wamid-ack-1", "status": "delivered"}
+    ]
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
@@ -124,7 +133,9 @@ async def test_webhook_connection_event_publishes_session_changed(client):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "session_event"
-    assert received == [{"provider": "openwa", "status": "connected", "detail": "CONNECTED"}]
+    assert received == [
+        {"provider": "openwa", "status": "connected", "detail": "CONNECTED"}
+    ]
 
 
 @pytest.mark.asyncio

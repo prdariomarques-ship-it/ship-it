@@ -1,4 +1,5 @@
 """Durable job queue: enqueue, execution, retry with backoff, terminal failure."""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -153,7 +154,11 @@ async def test_failed_handler_changes_are_rolled_back(session_factory, worker):
         assert refreshed.status == JobStatus.FAILED
 
         leaked = (
-            (await session.execute(select(LogEntry).where(LogEntry.source == "dirty-handler")))
+            (
+                await session.execute(
+                    select(LogEntry).where(LogEntry.source == "dirty-handler")
+                )
+            )
             .scalars()
             .all()
         )
@@ -230,7 +235,9 @@ async def test_jobs_api_enqueue_and_cancel(client, auth_headers):
     assert created.status_code == 201
     job_id = created.json()["id"]
 
-    unknown = await client.post("/api/jobs", json={"name": "nope"}, headers=auth_headers)
+    unknown = await client.post(
+        "/api/jobs", json={"name": "nope"}, headers=auth_headers
+    )
     assert unknown.status_code == 422
 
     cancelled = await client.post(f"/api/jobs/{job_id}/cancel", headers=auth_headers)

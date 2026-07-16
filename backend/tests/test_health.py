@@ -46,7 +46,12 @@ async def test_readiness_all_healthy(client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["checks"] == {"database": "ok", "redis": "ok", "qdrant": "ok", "whatsapp": "ok"}
+    assert body["checks"] == {
+        "database": "ok",
+        "redis": "ok",
+        "qdrant": "ok",
+        "whatsapp": "ok",
+    }
 
 
 @pytest.mark.asyncio

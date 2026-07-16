@@ -4,6 +4,7 @@ admin-only HTTP endpoint (`POST /api/goals/{id}/approve`), never as a tool an
 agent (i.e. the LLM) can call -- that is the human-approval boundary itself,
 not an oversight.
 """
+
 from datetime import datetime
 
 from agents.tools.base import Tool, ToolContext, ok
@@ -51,13 +52,19 @@ async def _list_goals(context: ToolContext, status: str | None = None) -> str:
     )
 
 
-async def _update_goal_progress(context: ToolContext, goal_id: int, progress_percent: int) -> str:
+async def _update_goal_progress(
+    context: ToolContext, goal_id: int, progress_percent: int
+) -> str:
     repository = GoalRepository(context.db)
     goal = await repository.get(int(goal_id))
     if goal is None or goal.user_id != context.user.id:
         return ok(found=False)
     updated = await GoalService(context.db).update_progress(goal, progress_percent)
-    return ok(goal_id=updated.id, progress_percent=updated.progress_percent, status=updated.status.value)
+    return ok(
+        goal_id=updated.id,
+        progress_percent=updated.progress_percent,
+        status=updated.status.value,
+    )
 
 
 async def _complete_goal(context: ToolContext, goal_id: int) -> str:
@@ -66,7 +73,9 @@ async def _complete_goal(context: ToolContext, goal_id: int) -> str:
     if goal is None or goal.user_id != context.user.id:
         return ok(found=False)
     try:
-        updated = await GoalService(context.db).update_status(goal, GoalStatus.COMPLETED)
+        updated = await GoalService(context.db).update_status(
+            goal, GoalStatus.COMPLETED
+        )
     except ApprovalRequiredError as exc:
         return ok(found=True, error=str(exc))
     return ok(goal_id=updated.id, status=updated.status.value)
@@ -104,7 +113,13 @@ list_goals_tool = Tool(
         "properties": {
             "status": {
                 "type": "string",
-                "enum": ["awaiting_approval", "pending", "in_progress", "completed", "cancelled"],
+                "enum": [
+                    "awaiting_approval",
+                    "pending",
+                    "in_progress",
+                    "completed",
+                    "cancelled",
+                ],
             }
         },
         "required": [],

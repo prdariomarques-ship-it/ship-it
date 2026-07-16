@@ -1,6 +1,7 @@
 """Google Contacts agent tools (Sprint 2) — unit, authorization and
 cross-user isolation tests. Mirrors `tests/test_gcalendar_tools.py`.
 """
+
 import json
 from datetime import datetime, timezone
 
@@ -26,7 +27,9 @@ from utils.config import get_settings
 
 @pytest.fixture(autouse=True)
 def _encryption_key(monkeypatch):
-    monkeypatch.setattr(get_settings(), "email_token_encryption_key", Fernet.generate_key().decode())
+    monkeypatch.setattr(
+        get_settings(), "email_token_encryption_key", Fernet.generate_key().decode()
+    )
 
 
 @pytest.fixture
@@ -56,7 +59,9 @@ async def user_b(session_factory) -> User:
         return user
 
 
-async def _connect(session_factory, user: User, refresh_token: str, label: str) -> GoogleContactsAccount:
+async def _connect(
+    session_factory, user: User, refresh_token: str, label: str
+) -> GoogleContactsAccount:
     async with session_factory() as session:
         return await GoogleContactsAccountRepository(session).create(
             user_id=user.id,
@@ -81,7 +86,9 @@ def _contact(tag: str, resource_name: str = "people/c1") -> Contact:
 class FakeContactsProvider(ContactsProvider):
     name = "google"
 
-    def __init__(self, contacts_by_token: dict[str, list[Contact]] | None = None) -> None:
+    def __init__(
+        self, contacts_by_token: dict[str, list[Contact]] | None = None
+    ) -> None:
         self.contacts_by_token = contacts_by_token or {}
         self.calls: list[str] = []
 
@@ -111,7 +118,9 @@ class FakeContactsProvider(ContactsProvider):
         self.calls.append(access_token)
         return _contact("new", "people/new")
 
-    async def update_contact(self, access_token: str, resource_name: str, update) -> Contact:
+    async def update_contact(
+        self, access_token: str, resource_name: str, update
+    ) -> Contact:
         self.calls.append(access_token)
         # Mirrors the real GoogleContactsProvider: fetch first (for the
         # etag) — this is what actually enforces the isolation boundary,
@@ -125,10 +134,14 @@ class FakeContactsProvider(ContactsProvider):
 
 # --- _get_access_token -----------------------------------------------------------
 @pytest.mark.asyncio
-async def test_get_access_token_resolves_strictly_from_context_user_id(session_factory, user_a, user_b, monkeypatch):
+async def test_get_access_token_resolves_strictly_from_context_user_id(
+    session_factory, user_a, user_b, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     await _connect(session_factory, user_b, "rt-b", "b")
-    monkeypatch.setattr("agents.tools.gcontacts.get_contacts_provider", lambda: FakeContactsProvider())
+    monkeypatch.setattr(
+        "agents.tools.gcontacts.get_contacts_provider", lambda: FakeContactsProvider()
+    )
 
     async with session_factory() as session:
         token_a = await _get_access_token(ToolContext(db=session, user=user_a))
@@ -156,7 +169,9 @@ async def test_get_access_token_treats_a_revoked_refresh_token_as_not_connected(
         async def refresh_access_token(self, refresh_token):
             raise ContactsProviderError("invalid_grant")
 
-    monkeypatch.setattr("agents.tools.gcontacts.get_contacts_provider", lambda: _RevokedProvider())
+    monkeypatch.setattr(
+        "agents.tools.gcontacts.get_contacts_provider", lambda: _RevokedProvider()
+    )
     async with session_factory() as session:
         with pytest.raises(ContactsNotConnectedError, match="reconectar"):
             await _get_access_token(ToolContext(db=session, user=user_a))
@@ -166,14 +181,18 @@ async def test_get_access_token_treats_a_revoked_refresh_token_as_not_connected(
 @pytest.mark.asyncio
 async def test_search_contacts_tool_rejects_when_not_connected(session_factory, user_a):
     async with session_factory() as session:
-        result = await search_google_contacts_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await search_google_contacts_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
 async def test_create_contact_tool_rejects_when_not_connected(session_factory, user_a):
     async with session_factory() as session:
-        result = await create_google_contact_tool.run(ToolContext(db=session, user=user_a), {"given_name": "X"})
+        result = await create_google_contact_tool.run(
+            ToolContext(db=session, user=user_a), {"given_name": "X"}
+        )
     assert "error" in json.loads(result)
 
 
@@ -187,12 +206,18 @@ async def test_search_contacts_tool_never_returns_another_users_address_book(
     provider = FakeContactsProvider(
         {"access-for-rt-a": [_contact("a")], "access-for-rt-b": [_contact("b")]}
     )
-    monkeypatch.setattr("agents.tools.gcontacts.get_contacts_provider", lambda: provider)
+    monkeypatch.setattr(
+        "agents.tools.gcontacts.get_contacts_provider", lambda: provider
+    )
 
     async with session_factory() as session:
-        result_a = await search_google_contacts_tool.run(ToolContext(db=session, user=user_a), {})
+        result_a = await search_google_contacts_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     async with session_factory() as session:
-        result_b = await search_google_contacts_tool.run(ToolContext(db=session, user=user_b), {})
+        result_b = await search_google_contacts_tool.run(
+            ToolContext(db=session, user=user_b), {}
+        )
 
     contacts_a = json.loads(result_a)["contacts"]
     contacts_b = json.loads(result_b)["contacts"]
@@ -213,23 +238,33 @@ async def test_update_contact_tool_cannot_be_pointed_at_another_users_contact(
     await _connect(session_factory, user_a, "rt-a", "a")
     await _connect(session_factory, user_b, "rt-b", "b")
     provider = FakeContactsProvider(
-        {"access-for-rt-a": [_contact("a", "people/c-a")], "access-for-rt-b": [_contact("b", "people/c-b")]}
+        {
+            "access-for-rt-a": [_contact("a", "people/c-a")],
+            "access-for-rt-b": [_contact("b", "people/c-b")],
+        }
     )
-    monkeypatch.setattr("agents.tools.gcontacts.get_contacts_provider", lambda: provider)
+    monkeypatch.setattr(
+        "agents.tools.gcontacts.get_contacts_provider", lambda: provider
+    )
 
     async with session_factory() as session:
         result = await update_google_contact_tool.run(
-            ToolContext(db=session, user=user_b), {"resource_name": "people/c-a", "given_name": "Hacked"}
+            ToolContext(db=session, user=user_b),
+            {"resource_name": "people/c-a", "given_name": "Hacked"},
         )
     payload = json.loads(result)
     assert "error" in payload  # not found under B's address book — no leak, no crash
 
 
 @pytest.mark.asyncio
-async def test_create_contact_tool_uses_the_requesting_users_own_address_book(session_factory, user_a, monkeypatch):
+async def test_create_contact_tool_uses_the_requesting_users_own_address_book(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
     provider = FakeContactsProvider()
-    monkeypatch.setattr("agents.tools.gcontacts.get_contacts_provider", lambda: provider)
+    monkeypatch.setattr(
+        "agents.tools.gcontacts.get_contacts_provider", lambda: provider
+    )
 
     async with session_factory() as session:
         result = await create_google_contact_tool.run(
@@ -241,16 +276,22 @@ async def test_create_contact_tool_uses_the_requesting_users_own_address_book(se
 
 
 @pytest.mark.asyncio
-async def test_search_contacts_tool_maps_provider_error_to_a_tool_error(session_factory, user_a, monkeypatch):
+async def test_search_contacts_tool_maps_provider_error_to_a_tool_error(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a")
 
     class _FailingProvider(FakeContactsProvider):
         async def search_contacts(self, access_token, query):
             raise ContactsProviderError("google is down")
 
-    monkeypatch.setattr("agents.tools.gcontacts.get_contacts_provider", lambda: _FailingProvider())
+    monkeypatch.setattr(
+        "agents.tools.gcontacts.get_contacts_provider", lambda: _FailingProvider()
+    )
     async with session_factory() as session:
-        result = await search_google_contacts_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await search_google_contacts_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     assert "error" in json.loads(result)
 
 
@@ -258,7 +299,9 @@ async def test_search_contacts_tool_maps_provider_error_to_a_tool_error(session_
 async def test_delete_contact_tool_success(session_factory, user_a, monkeypatch):
     await _connect(session_factory, user_a, "rt-a", "a")
     provider = FakeContactsProvider()
-    monkeypatch.setattr("agents.tools.gcontacts.get_contacts_provider", lambda: provider)
+    monkeypatch.setattr(
+        "agents.tools.gcontacts.get_contacts_provider", lambda: provider
+    )
     async with session_factory() as session:
         result = await delete_google_contact_tool.run(
             ToolContext(db=session, user=user_a), {"resource_name": "people/c1"}

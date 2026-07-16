@@ -1,5 +1,6 @@
 """OpenTelemetry setup: safe no-op when disabled, and initializes without
 error when enabled (both with and without an OTLP endpoint configured)."""
+
 import pytest
 from fastapi import FastAPI
 from opentelemetry import trace

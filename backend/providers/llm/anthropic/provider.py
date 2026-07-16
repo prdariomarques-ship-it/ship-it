@@ -1,4 +1,5 @@
 """Anthropic (Claude) LLM provider."""
+
 from anthropic import AsyncAnthropic
 
 from providers.llm.base import (
@@ -37,7 +38,9 @@ class AnthropicProvider(LLMProvider):
             self._client = AsyncAnthropic(api_key=self._api_key)
         return self._client
 
-    def _to_anthropic_messages(self, messages: list[ChatMessage]) -> tuple[str, list[dict]]:
+    def _to_anthropic_messages(
+        self, messages: list[ChatMessage]
+    ) -> tuple[str, list[dict]]:
         """Split the system prompt out and map tool traffic to content blocks."""
         system = "\n\n".join(m.content for m in messages if m.role == "system")
         converted: list[dict] = []
@@ -75,7 +78,9 @@ class AnthropicProvider(LLMProvider):
                 converted.append({"role": message.role, "content": message.content})
         return system, converted
 
-    async def chat(self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None) -> LLMResult:
+    async def chat(
+        self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None
+    ) -> LLMResult:
         if not self.enabled:
             logger.warning("Anthropic provider not configured; returning stub response")
             return LLMResult(content=STUB_REPLY)
@@ -107,13 +112,21 @@ class AnthropicProvider(LLMProvider):
                 content_parts.append(block.text)
             elif block.type == "tool_use":
                 tool_calls.append(
-                    ToolCallRequest(id=block.id, name=block.name, arguments=dict(block.input or {}))
+                    ToolCallRequest(
+                        id=block.id, name=block.name, arguments=dict(block.input or {})
+                    )
                 )
-        usage = TokenUsage(
-            prompt_tokens=getattr(response.usage, "input_tokens", 0) or 0,
-            completion_tokens=getattr(response.usage, "output_tokens", 0) or 0,
-        ) if response.usage else TokenUsage()
-        return LLMResult(content="".join(content_parts), tool_calls=tool_calls, usage=usage)
+        usage = (
+            TokenUsage(
+                prompt_tokens=getattr(response.usage, "input_tokens", 0) or 0,
+                completion_tokens=getattr(response.usage, "output_tokens", 0) or 0,
+            )
+            if response.usage
+            else TokenUsage()
+        )
+        return LLMResult(
+            content="".join(content_parts), tool_calls=tool_calls, usage=usage
+        )
 
     async def embed(self, text: str) -> list[float]:
         raise EmbeddingsNotSupportedError(

@@ -1,4 +1,5 @@
 """Webhook security: signature verification and duplicate-message protection."""
+
 import hashlib
 import hmac
 
@@ -16,7 +17,9 @@ _OFFICIAL_PAYLOAD = {
             "changes": [
                 {
                     "value": {
-                        "contacts": [{"profile": {"name": "Sig"}, "wa_id": "5511900000099"}],
+                        "contacts": [
+                            {"profile": {"name": "Sig"}, "wa_id": "5511900000099"}
+                        ],
                         "messages": [
                             {
                                 "from": "5511900000099",
@@ -38,7 +41,9 @@ def test_official_signature_verification_accepts_correct_hmac():
     provider = OfficialProvider()
     provider._app_secret = "app-secret-123"
     body = b'{"hello":"world"}'
-    signature = "sha256=" + hmac.new(b"app-secret-123", body, hashlib.sha256).hexdigest()
+    signature = (
+        "sha256=" + hmac.new(b"app-secret-123", body, hashlib.sha256).hexdigest()
+    )
     assert provider.verify_signature(body, {"x-hub-signature-256": signature})
 
 
@@ -46,7 +51,9 @@ def test_official_signature_verification_rejects_wrong_hmac():
     provider = OfficialProvider()
     provider._app_secret = "app-secret-123"
     body = b'{"hello":"world"}'
-    assert not provider.verify_signature(body, {"x-hub-signature-256": "sha256=deadbeef"})
+    assert not provider.verify_signature(
+        body, {"x-hub-signature-256": "sha256=deadbeef"}
+    )
 
 
 def test_official_signature_verification_rejects_missing_header():
@@ -84,15 +91,23 @@ async def test_webhook_enforces_official_signature_when_configured(client, monke
         wrong = await client.post(
             "/api/webhooks/whatsapp",
             content=body,
-            headers={"Content-Type": "application/json", "X-Hub-Signature-256": "sha256=deadbeef"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": "sha256=deadbeef",
+            },
         )
         assert wrong.status_code == 401
 
-        correct_signature = "sha256=" + hmac.new(b"top-secret", body, hashlib.sha256).hexdigest()
+        correct_signature = (
+            "sha256=" + hmac.new(b"top-secret", body, hashlib.sha256).hexdigest()
+        )
         right = await client.post(
             "/api/webhooks/whatsapp",
             content=body,
-            headers={"Content-Type": "application/json", "X-Hub-Signature-256": correct_signature},
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": correct_signature,
+            },
         )
         assert right.status_code == 200
     finally:
@@ -104,7 +119,9 @@ async def test_webhook_enforces_official_signature_when_configured(client, monke
 @pytest.mark.asyncio
 async def test_webhook_rejects_malformed_json_body(client):
     response = await client.post(
-        "/api/webhooks/whatsapp", content=b"not json", headers={"Content-Type": "application/json"}
+        "/api/webhooks/whatsapp",
+        content=b"not json",
+        headers={"Content-Type": "application/json"},
     )
     assert response.status_code == 422
 
@@ -112,7 +129,12 @@ async def test_webhook_rejects_malformed_json_body(client):
 # --- Duplicate message protection --------------------------------------------
 @pytest.mark.asyncio
 async def test_duplicate_external_id_is_not_reprocessed(client, db_engine):
-    payload = {"from": "5511900000077@c.us", "body": "oi", "notifyName": "Dup", "id": "wamid-dup-1"}
+    payload = {
+        "from": "5511900000077@c.us",
+        "body": "oi",
+        "notifyName": "Dup",
+        "id": "wamid-dup-1",
+    }
 
     first = await client.post("/api/webhooks/whatsapp", json=payload)
     assert first.status_code == 200
@@ -126,7 +148,11 @@ async def test_duplicate_external_id_is_not_reprocessed(client, db_engine):
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
         rows = (
-            (await session.execute(select(Message).where(Message.external_id == "wamid-dup-1")))
+            (
+                await session.execute(
+                    select(Message).where(Message.external_id == "wamid-dup-1")
+                )
+            )
             .scalars()
             .all()
         )
@@ -134,7 +160,9 @@ async def test_duplicate_external_id_is_not_reprocessed(client, db_engine):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_duplicate_delivery_recovers_from_integrity_error(client, db_engine, monkeypatch):
+async def test_concurrent_duplicate_delivery_recovers_from_integrity_error(
+    client, db_engine, monkeypatch
+):
     """Simulate the race: the dedup pre-check misses (another request is
     mid-flight with the same external_id), so the insert collides at the DB
     level — the webhook must recover, not 500."""
@@ -177,7 +205,12 @@ async def test_concurrent_duplicate_delivery_recovers_from_integrity_error(clien
 
     response = await client.post(
         "/api/webhooks/whatsapp",
-        json={"from": "5511900000088@c.us", "body": "ja chegou", "notifyName": "Race", "id": "wamid-race-1"},
+        json={
+            "from": "5511900000088@c.us",
+            "body": "ja chegou",
+            "notifyName": "Race",
+            "id": "wamid-race-1",
+        },
     )
     assert response.status_code == 200
     assert response.json()["status"] == "duplicate"

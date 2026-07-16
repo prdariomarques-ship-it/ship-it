@@ -1,8 +1,16 @@
 """Permanent semantic memory: provider embeddings stored in Qdrant, metadata in Postgres."""
+
 import uuid
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,12 +66,18 @@ class MemoryService:
                 PointStruct(
                     id=vector_id,
                     vector=vector,
-                    payload={"content": content, "source": source, "contact_id": contact_id},
+                    payload={
+                        "content": content,
+                        "source": source,
+                        "contact_id": contact_id,
+                    },
                 )
             ],
         )
 
-        record = Embedding(contact_id=contact_id, source=source, content=content, vector_id=vector_id)
+        record = Embedding(
+            contact_id=contact_id, source=source, content=content, vector_id=vector_id
+        )
         db.add(record)
         await db.commit()
         await db.refresh(record)
@@ -78,7 +92,11 @@ class MemoryService:
         used for `auth/jwt.py::create_oauth_state_token`'s `purpose` param."""
         if not embedding_ids:
             return
-        rows = (await db.execute(select(Embedding).where(Embedding.id.in_(embedding_ids)))).scalars().all()
+        rows = (
+            (await db.execute(select(Embedding).where(Embedding.id.in_(embedding_ids))))
+            .scalars()
+            .all()
+        )
         vector_ids = [row.vector_id for row in rows]
         if vector_ids:
             await self._ensure_collection()
@@ -100,7 +118,9 @@ class MemoryService:
         query_filter = None
         if contact_id is not None:
             query_filter = Filter(
-                must=[FieldCondition(key="contact_id", match=MatchValue(value=contact_id))]
+                must=[
+                    FieldCondition(key="contact_id", match=MatchValue(value=contact_id))
+                ]
             )
 
         response = await self.client.query_points(
@@ -113,7 +133,9 @@ class MemoryService:
             {
                 "content": point.payload.get("content", "") if point.payload else "",
                 "source": point.payload.get("source", "") if point.payload else "",
-                "contact_id": point.payload.get("contact_id") if point.payload else None,
+                "contact_id": point.payload.get("contact_id")
+                if point.payload
+                else None,
                 "score": point.score,
             }
             for point in response.points

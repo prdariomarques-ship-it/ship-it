@@ -10,6 +10,7 @@ reuses the same heuristic keyword table as the fallback, just exposed
 directly, and lets urgent messages jump the job queue via a shorter
 `delay_seconds` when enqueued (`webhooks/router.py`).
 """
+
 from enum import Enum
 
 from pydantic import BaseModel
@@ -54,10 +55,23 @@ _PRIORITY_SYSTEM_PROMPT = (
 )
 
 _URGENT_KEYWORDS = (
-    "urgente", "urgência", "urgencia", "emergência", "emergencia", "socorro",
-    "agora mesmo", "imediato", "imediatamente",
+    "urgente",
+    "urgência",
+    "urgencia",
+    "emergência",
+    "emergencia",
+    "socorro",
+    "agora mesmo",
+    "imediato",
+    "imediatamente",
 )
-_HIGH_KEYWORDS = ("hoje", "o quanto antes", "o mais rápido possível", "o mais rapido possivel", "importante")
+_HIGH_KEYWORDS = (
+    "hoje",
+    "o quanto antes",
+    "o mais rápido possível",
+    "o mais rapido possivel",
+    "importante",
+)
 _LOW_INTENTS = (Intent.GREETING, Intent.SMALL_TALK)
 
 
@@ -96,19 +110,26 @@ class PriorityEngine:
             )
         except Exception:  # noqa: BLE001 - classification is best-effort, never blocks the pipeline
             return self._fallback(message, intent)
-        call = next((c for c in result.tool_calls if c.name == "classify_priority"), None)
+        call = next(
+            (c for c in result.tool_calls if c.name == "classify_priority"), None
+        )
         if call is None or call.arguments.get("level") not in _PRIORITY_VALUES:
             return self._fallback(message, intent)
         return PriorityResult(
-            level=Priority(call.arguments["level"]), reason=str(call.arguments.get("reason", ""))
+            level=Priority(call.arguments["level"]),
+            reason=str(call.arguments.get("reason", "")),
         )
 
     def _fallback(self, message: str, intent: IntentResult) -> PriorityResult:
         hint = quick_priority_hint(message)
         if hint is Priority.URGENT:
-            return PriorityResult(level=Priority.URGENT, reason="palavra-chave de urgência detectada")
+            return PriorityResult(
+                level=Priority.URGENT, reason="palavra-chave de urgência detectada"
+            )
         if hint is Priority.HIGH:
-            return PriorityResult(level=Priority.HIGH, reason="palavra-chave de prioridade alta detectada")
+            return PriorityResult(
+                level=Priority.HIGH, reason="palavra-chave de prioridade alta detectada"
+            )
         if intent.top == Intent.ADMIN_COMMAND:
             return PriorityResult(level=Priority.HIGH, reason="comando administrativo")
         if intent.top in _LOW_INTENTS:

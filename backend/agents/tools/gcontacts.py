@@ -16,6 +16,7 @@ tools (`agents/tools/communication.py`, backed by `models.contact.Contact`,
 the WhatsApp-conversation contact book with its own PROD-005 isolation).
 Neither domain reads or writes the other's data.
 """
+
 from agents.tools.base import Tool, ToolContext, ok
 from providers.contacts.base import (
     ContactsProviderError,
@@ -43,7 +44,9 @@ async def _get_access_token(context: ToolContext) -> str:
         raise ContactsNotConnectedError("No authenticated user in context")
 
     provider = get_contacts_provider()
-    account = await GoogleContactsAccountRepository(context.db).get_by_user(context.user.id, provider.name)
+    account = await GoogleContactsAccountRepository(context.db).get_by_user(
+        context.user.id, provider.name
+    )
     if account is None:
         raise ContactsNotConnectedError(
             "Nenhum Google Contacts conectado. Peça ao administrador para conectar em /api/gcontacts/connect."
@@ -74,11 +77,15 @@ def _contact_to_dict(contact) -> dict:
     }
 
 
-async def _search_contacts(context: ToolContext, query: str | None = None, limit: int = 50) -> str:
+async def _search_contacts(
+    context: ToolContext, query: str | None = None, limit: int = 50
+) -> str:
     access_token = await _get_access_token(context)
     provider = get_contacts_provider()
     try:
-        contacts = await provider.search_contacts(access_token, ContactSearchQuery(query=query, limit=min(limit, 200)))
+        contacts = await provider.search_contacts(
+            access_token, ContactSearchQuery(query=query, limit=min(limit, 200))
+        )
     except ContactsProviderError as exc:
         raise RuntimeError(f"Falha ao buscar contatos: {exc}") from exc
     return ok(contacts=[_contact_to_dict(c) for c in contacts])
@@ -93,7 +100,12 @@ async def _create_contact(
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_contacts_provider()
-    new_contact = NewContact(given_name=given_name, family_name=family_name, emails=emails or [], phones=phones or [])
+    new_contact = NewContact(
+        given_name=given_name,
+        family_name=family_name,
+        emails=emails or [],
+        phones=phones or [],
+    )
     try:
         contact = await provider.create_contact(access_token, new_contact)
     except ContactsProviderError as exc:
@@ -111,7 +123,9 @@ async def _update_contact(
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_contacts_provider()
-    update = ContactUpdate(given_name=given_name, family_name=family_name, emails=emails, phones=phones)
+    update = ContactUpdate(
+        given_name=given_name, family_name=family_name, emails=emails, phones=phones
+    )
     try:
         contact = await provider.update_contact(access_token, resource_name, update)
     except ContactsProviderError as exc:
@@ -139,8 +153,14 @@ search_google_contacts_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Nome, telefone ou e-mail (parcial) do contato"},
-            "limit": {"type": "integer", "description": "Máximo de resultados (padrão 50)"},
+            "query": {
+                "type": "string",
+                "description": "Nome, telefone ou e-mail (parcial) do contato",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Máximo de resultados (padrão 50)",
+            },
         },
         "required": [],
     },
@@ -169,7 +189,10 @@ update_google_contact_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "resource_name": {"type": "string", "description": "Id do contato (ex: 'people/c123...')"},
+            "resource_name": {
+                "type": "string",
+                "description": "Id do contato (ex: 'people/c123...')",
+            },
             "given_name": {"type": "string"},
             "family_name": {"type": "string"},
             "emails": {"type": "array", "items": {"type": "string"}},
@@ -185,7 +208,12 @@ delete_google_contact_tool = Tool(
     handler=_delete_contact,
     parameters={
         "type": "object",
-        "properties": {"resource_name": {"type": "string", "description": "Id do contato (ex: 'people/c123...')"}},
+        "properties": {
+            "resource_name": {
+                "type": "string",
+                "description": "Id do contato (ex: 'people/c123...')",
+            }
+        },
         "required": ["resource_name"],
     },
 )

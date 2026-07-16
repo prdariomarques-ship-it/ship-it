@@ -17,6 +17,7 @@ OS's own internal `create_task`/`create_event`/`list_events` tools
 (`agents/tools/productivity.py`, backed by `models.calendar.CalendarEvent`),
 which remain untouched and unaffected by this file.
 """
+
 from datetime import datetime, timezone
 
 from agents.tools.base import Tool, ToolContext, ok
@@ -47,7 +48,9 @@ async def _get_access_token(context: ToolContext) -> str:
         raise CalendarNotConnectedError("No authenticated user in context")
 
     provider = get_calendar_provider()
-    account = await GoogleCalendarAccountRepository(context.db).get_by_user(context.user.id, provider.name)
+    account = await GoogleCalendarAccountRepository(context.db).get_by_user(
+        context.user.id, provider.name
+    )
     if account is None:
         raise CalendarNotConnectedError(
             "Nenhum Google Calendar conectado. Peça ao administrador para conectar em /api/gcalendar/connect."
@@ -84,7 +87,9 @@ def _parse_datetime(value: str | None) -> datetime | None:
 def _require_datetime(value: str, field_name: str) -> datetime:
     parsed = _parse_datetime(value)
     if parsed is None:
-        raise ValueError(f"{field_name} deve ser uma data/hora ISO válida (ex: 2026-01-15T10:00:00)")
+        raise ValueError(
+            f"{field_name} deve ser uma data/hora ISO válida (ex: 2026-01-15T10:00:00)"
+        )
     return parsed
 
 
@@ -97,7 +102,13 @@ async def _list_calendars(context: ToolContext) -> str:
         raise RuntimeError(f"Falha ao listar agendas: {exc}") from exc
     return ok(
         calendars=[
-            {"id": c.id, "summary": c.summary, "primary": c.primary, "time_zone": c.time_zone} for c in calendars
+            {
+                "id": c.id,
+                "summary": c.summary,
+                "primary": c.primary,
+                "time_zone": c.time_zone,
+            }
+            for c in calendars
         ]
     )
 
@@ -181,7 +192,9 @@ async def _update_event(
     return ok(event=_event_to_dict(event))
 
 
-async def _delete_event(context: ToolContext, event_id: str, calendar_id: str = "primary") -> str:
+async def _delete_event(
+    context: ToolContext, event_id: str, calendar_id: str = "primary"
+) -> str:
     access_token = await _get_access_token(context)
     provider = get_calendar_provider()
     try:
@@ -247,11 +260,20 @@ search_google_calendar_events_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "calendar_id": {"type": "string", "description": "Id da agenda (padrão 'primary')"},
+            "calendar_id": {
+                "type": "string",
+                "description": "Id da agenda (padrão 'primary')",
+            },
             "query": {"type": "string", "description": "Palavras-chave livres"},
-            "since": {"type": "string", "description": "Data/hora ISO, início do período"},
+            "since": {
+                "type": "string",
+                "description": "Data/hora ISO, início do período",
+            },
             "until": {"type": "string", "description": "Data/hora ISO, fim do período"},
-            "limit": {"type": "integer", "description": "Máximo de resultados (padrão 20)"},
+            "limit": {
+                "type": "integer",
+                "description": "Máximo de resultados (padrão 20)",
+            },
         },
         "required": [],
     },
@@ -267,10 +289,17 @@ create_google_calendar_event_tool = Tool(
             "summary": {"type": "string", "description": "Título do evento"},
             "start": {"type": "string", "description": "Data/hora ISO de início"},
             "end": {"type": "string", "description": "Data/hora ISO de término"},
-            "calendar_id": {"type": "string", "description": "Id da agenda (padrão 'primary')"},
+            "calendar_id": {
+                "type": "string",
+                "description": "Id da agenda (padrão 'primary')",
+            },
             "description": {"type": "string"},
             "location": {"type": "string"},
-            "attendees": {"type": "array", "items": {"type": "string"}, "description": "E-mails dos convidados"},
+            "attendees": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "E-mails dos convidados",
+            },
         },
         "required": ["summary", "start", "end"],
     },
@@ -284,7 +313,10 @@ update_google_calendar_event_tool = Tool(
         "type": "object",
         "properties": {
             "event_id": {"type": "string"},
-            "calendar_id": {"type": "string", "description": "Id da agenda (padrão 'primary')"},
+            "calendar_id": {
+                "type": "string",
+                "description": "Id da agenda (padrão 'primary')",
+            },
             "summary": {"type": "string"},
             "description": {"type": "string"},
             "location": {"type": "string"},
@@ -304,7 +336,10 @@ delete_google_calendar_event_tool = Tool(
         "type": "object",
         "properties": {
             "event_id": {"type": "string"},
-            "calendar_id": {"type": "string", "description": "Id da agenda (padrão 'primary')"},
+            "calendar_id": {
+                "type": "string",
+                "description": "Id da agenda (padrão 'primary')",
+            },
         },
         "required": ["event_id"],
     },
@@ -320,8 +355,14 @@ check_google_calendar_availability_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "start": {"type": "string", "description": "Data/hora ISO de início do período"},
-            "end": {"type": "string", "description": "Data/hora ISO de término do período"},
+            "start": {
+                "type": "string",
+                "description": "Data/hora ISO de início do período",
+            },
+            "end": {
+                "type": "string",
+                "description": "Data/hora ISO de término do período",
+            },
             "calendar_ids": {
                 "type": "array",
                 "items": {"type": "string"},

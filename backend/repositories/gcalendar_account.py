@@ -7,10 +7,14 @@ from repositories.base import SQLAlchemyRepository
 class GoogleCalendarAccountRepository(SQLAlchemyRepository[GoogleCalendarAccount]):
     model = GoogleCalendarAccount
 
-    async def get_by_user(self, user_id: int, provider: str) -> GoogleCalendarAccount | None:
+    async def get_by_user(
+        self, user_id: int, provider: str
+    ) -> GoogleCalendarAccount | None:
         return await self.find_one(user_id=user_id, provider=provider)
 
-    async def upsert_for_user(self, user_id: int, provider: str, **fields: object) -> GoogleCalendarAccount:
+    async def upsert_for_user(
+        self, user_id: int, provider: str, **fields: object
+    ) -> GoogleCalendarAccount:
         """Create or update the (user, provider) row, recovering from the
         unique-constraint race where two concurrent OAuth callbacks for the
         same user both see no existing row and both attempt to create one —

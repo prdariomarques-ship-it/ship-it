@@ -3,6 +3,7 @@
 a thin HTTP wrapper is required; endpoints follow the common gateway layout
 `POST /{session}/messages/send` with Baileys' native message payloads.
 """
+
 from providers.whatsapp.base import (
     InboundMessage,
     WhatsAppProvider,
@@ -39,10 +40,14 @@ class BaileysProvider(WhatsAppProvider):
     async def send_text(self, to: str, content: str) -> dict:
         return await self._send(to, {"text": content})
 
-    async def send_image(self, to: str, url: str, filename: str = "image", caption: str = "") -> dict:
+    async def send_image(
+        self, to: str, url: str, filename: str = "image", caption: str = ""
+    ) -> dict:
         return await self._send(to, {"image": {"url": url}, "caption": caption})
 
-    async def send_file(self, to: str, url: str, filename: str = "file", caption: str = "") -> dict:
+    async def send_file(
+        self, to: str, url: str, filename: str = "file", caption: str = ""
+    ) -> dict:
         return await self._send(
             to, {"document": {"url": url}, "fileName": filename, "caption": caption}
         )
@@ -50,9 +55,12 @@ class BaileysProvider(WhatsAppProvider):
     async def send_audio(self, to: str, url: str) -> dict:
         return await self._send(to, {"audio": {"url": url}})
 
-    async def send_location(self, to: str, latitude: float, longitude: float, caption: str = "") -> dict:
+    async def send_location(
+        self, to: str, latitude: float, longitude: float, caption: str = ""
+    ) -> dict:
         return await self._send(
-            to, {"location": {"degreesLatitude": latitude, "degreesLongitude": longitude}}
+            to,
+            {"location": {"degreesLatitude": latitude, "degreesLongitude": longitude}},
         )
 
     def parse_webhook(self, payload: dict) -> InboundMessage | None:

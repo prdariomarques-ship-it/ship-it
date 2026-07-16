@@ -10,7 +10,9 @@ class EmailAccountRepository(SQLAlchemyRepository[EmailAccount]):
     async def get_by_user(self, user_id: int, provider: str) -> EmailAccount | None:
         return await self.find_one(user_id=user_id, provider=provider)
 
-    async def upsert_for_user(self, user_id: int, provider: str, **fields: object) -> EmailAccount:
+    async def upsert_for_user(
+        self, user_id: int, provider: str, **fields: object
+    ) -> EmailAccount:
         """Create or update the (user, provider) row, recovering from the
         unique-constraint race where two concurrent OAuth callbacks for the
         same user both see no existing row and both attempt to create one —

@@ -10,7 +10,13 @@ class Embedding(Base, TimestampMixin):
     __tablename__ = "embeddings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"), index=True)
-    source: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g. "whatsapp", "note"
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), index=True
+    )
+    source: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )  # e.g. "whatsapp", "note"
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    vector_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)  # Qdrant point id
+    vector_id: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False
+    )  # Qdrant point id

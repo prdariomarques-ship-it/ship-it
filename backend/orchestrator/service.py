@@ -26,6 +26,7 @@ This is deliberately thin: it does not decide *how* an agent thinks (that's
 `MemoryManager`). It only coordinates "which agent, with which events and
 metrics."
 """
+
 import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,12 +90,24 @@ class AIOrchestrator:
                 timeout=timeout,
             )
         except asyncio.TimeoutError as exc:
-            record_agent_run(agent=agent.name, provider=provider_name, status="timeout", duration_seconds=timeout)
+            record_agent_run(
+                agent=agent.name,
+                provider=provider_name,
+                status="timeout",
+                duration_seconds=timeout,
+            )
             await event_bus.publish(
                 "agent.failed",
-                {"agent": agent.name, "contact_id": contact_id, "user_id": user.id, "reason": "timeout"},
+                {
+                    "agent": agent.name,
+                    "contact_id": contact_id,
+                    "user_id": user.id,
+                    "reason": "timeout",
+                },
             )
-            raise AgentTimeoutError(f"Agent {agent.name!r} exceeded {timeout}s") from exc
+            raise AgentTimeoutError(
+                f"Agent {agent.name!r} exceeded {timeout}s"
+            ) from exc
 
         cost_usd = estimate_cost_usd(provider_name, result.usage)
         record_agent_run(

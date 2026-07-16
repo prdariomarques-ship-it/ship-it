@@ -8,6 +8,7 @@ argument, so there is no parameter a manipulated LLM could supply to reach
 someone else's inbox — these tests prove that in practice, not just by
 reading the code.
 """
+
 import json
 from datetime import datetime, timezone
 
@@ -27,7 +28,13 @@ from agents.tools.mail import (
 from models.email_account import EmailAccount
 from models.user import User
 from providers.llm.base import LLMResult, ToolCallRequest
-from providers.mail.base import EmailMessage, EmailSearchQuery, EmailThread, MailProvider, MailProviderError
+from providers.mail.base import (
+    EmailMessage,
+    EmailSearchQuery,
+    EmailThread,
+    MailProvider,
+    MailProviderError,
+)
 from repositories.email_account import EmailAccountRepository
 from services.token_crypto import encrypt_token
 from utils.config import get_settings
@@ -35,7 +42,9 @@ from utils.config import get_settings
 
 @pytest.fixture(autouse=True)
 def _encryption_key(monkeypatch):
-    monkeypatch.setattr(get_settings(), "email_token_encryption_key", Fernet.generate_key().decode())
+    monkeypatch.setattr(
+        get_settings(), "email_token_encryption_key", Fernet.generate_key().decode()
+    )
 
 
 @pytest.fixture
@@ -65,7 +74,9 @@ async def user_b(session_factory) -> User:
         return user
 
 
-async def _connect(session_factory, user: User, refresh_token: str, email_address: str) -> EmailAccount:
+async def _connect(
+    session_factory, user: User, refresh_token: str, email_address: str
+) -> EmailAccount:
     async with session_factory() as session:
         account = await EmailAccountRepository(session).create(
             user_id=user.id,
@@ -102,7 +113,9 @@ class FakeMailProvider(MailProvider):
 
         return OAuthTokens(access_token=f"access-for-{refresh_token}")
 
-    async def search(self, access_token: str, query: EmailSearchQuery) -> list[EmailMessage]:
+    async def search(
+        self, access_token: str, query: EmailSearchQuery
+    ) -> list[EmailMessage]:
         self.search_calls.append(access_token)
         return self.mailboxes.get(access_token, [])
 
@@ -110,7 +123,9 @@ class FakeMailProvider(MailProvider):
         self.thread_calls.append(access_token)
         for message in self.mailboxes.get(access_token, []):
             if message.thread_id == thread_id:
-                return EmailThread(id=thread_id, subject=message.subject, messages=[message])
+                return EmailThread(
+                    id=thread_id, subject=message.subject, messages=[message]
+                )
         # Gmail itself scopes threads by the authorized mailbox — a thread_id
         # belonging to a *different* mailbox simply doesn't exist for this
         # access_token, exactly like a real 404 from the Gmail API.
@@ -130,10 +145,14 @@ def _message(mailbox_tag: str) -> EmailMessage:
 
 # --- _get_access_token: the sole authorization chokepoint ----------------------
 @pytest.mark.asyncio
-async def test_get_access_token_resolves_strictly_from_context_user_id(session_factory, user_a, user_b, monkeypatch):
+async def test_get_access_token_resolves_strictly_from_context_user_id(
+    session_factory, user_a, user_b, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
     await _connect(session_factory, user_b, "rt-b", "b@gmail.com")
-    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: FakeMailProvider())
+    monkeypatch.setattr(
+        "agents.tools.mail.get_mail_provider", lambda: FakeMailProvider()
+    )
 
     async with session_factory() as session:
         token_a = await _get_access_token(ToolContext(db=session, user=user_a))
@@ -150,7 +169,9 @@ def test_parse_date_attaches_utc_to_a_naive_date():
 
 
 def test_parse_date_converts_an_offset_aware_datetime_to_utc_instead_of_discarding_it():
-    assert _parse_date("2026-01-15T10:00:00-03:00") == datetime(2026, 1, 15, 13, 0, tzinfo=timezone.utc)
+    assert _parse_date("2026-01-15T10:00:00-03:00") == datetime(
+        2026, 1, 15, 13, 0, tzinfo=timezone.utc
+    )
 
 
 def test_parse_date_returns_none_for_garbage():
@@ -159,7 +180,9 @@ def test_parse_date_returns_none_for_garbage():
 
 
 @pytest.mark.asyncio
-async def test_get_access_token_raises_when_user_has_no_connected_account(session_factory, user_a):
+async def test_get_access_token_raises_when_user_has_no_connected_account(
+    session_factory, user_a
+):
     async with session_factory() as session:
         with pytest.raises(MailNotConnectedError):
             await _get_access_token(ToolContext(db=session, user=user_a))
@@ -179,7 +202,9 @@ async def test_get_access_token_treats_a_revoked_refresh_token_as_not_connected(
         async def refresh_access_token(self, refresh_token):
             raise MailProviderError("invalid_grant: token has been revoked")
 
-    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: _RevokedProvider())
+    monkeypatch.setattr(
+        "agents.tools.mail.get_mail_provider", lambda: _RevokedProvider()
+    )
 
     async with session_factory() as session:
         with pytest.raises(MailNotConnectedError, match="reconectar"):
@@ -196,7 +221,9 @@ async def test_search_emails_tool_surfaces_a_revoked_token_as_a_clean_tool_error
         async def refresh_access_token(self, refresh_token):
             raise MailProviderError("invalid_grant")
 
-    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: _RevokedProvider())
+    monkeypatch.setattr(
+        "agents.tools.mail.get_mail_provider", lambda: _RevokedProvider()
+    )
 
     async with session_factory() as session:
         result = await search_emails_tool.run(ToolContext(db=session, user=user_a), {})
@@ -215,29 +242,43 @@ async def test_search_emails_tool_rejects_when_not_connected(session_factory, us
 
 
 @pytest.mark.asyncio
-async def test_read_email_thread_tool_rejects_when_not_connected(session_factory, user_a):
+async def test_read_email_thread_tool_rejects_when_not_connected(
+    session_factory, user_a
+):
     async with session_factory() as session:
-        result = await read_email_thread_tool.run(ToolContext(db=session, user=user_a), {"thread_id": "t-1"})
+        result = await read_email_thread_tool.run(
+            ToolContext(db=session, user=user_a), {"thread_id": "t-1"}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
-async def test_summarize_email_thread_tool_rejects_when_not_connected(session_factory, user_a):
+async def test_summarize_email_thread_tool_rejects_when_not_connected(
+    session_factory, user_a
+):
     async with session_factory() as session:
-        result = await summarize_email_thread_tool.run(ToolContext(db=session, user=user_a), {"thread_id": "t-1"})
+        result = await summarize_email_thread_tool.run(
+            ToolContext(db=session, user=user_a), {"thread_id": "t-1"}
+        )
     assert "error" in json.loads(result)
 
 
 @pytest.mark.asyncio
-async def test_detect_pending_email_actions_tool_rejects_when_not_connected(session_factory, user_a):
+async def test_detect_pending_email_actions_tool_rejects_when_not_connected(
+    session_factory, user_a
+):
     async with session_factory() as session:
-        result = await detect_pending_email_actions_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await detect_pending_email_actions_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     assert "error" in json.loads(result)
 
 
 # --- isolation: two connected users, zero cross-user leakage -------------------
 @pytest.mark.asyncio
-async def test_search_emails_tool_never_returns_another_users_mailbox(session_factory, user_a, user_b, monkeypatch):
+async def test_search_emails_tool_never_returns_another_users_mailbox(
+    session_factory, user_a, user_b, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
     await _connect(session_factory, user_b, "rt-b", "b@gmail.com")
     provider = FakeMailProvider(
@@ -246,9 +287,13 @@ async def test_search_emails_tool_never_returns_another_users_mailbox(session_fa
     monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
 
     async with session_factory() as session:
-        result_a = await search_emails_tool.run(ToolContext(db=session, user=user_a), {})
+        result_a = await search_emails_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
     async with session_factory() as session:
-        result_b = await search_emails_tool.run(ToolContext(db=session, user=user_b), {})
+        result_b = await search_emails_tool.run(
+            ToolContext(db=session, user=user_b), {}
+        )
 
     payload_a = json.loads(result_a)
     payload_b = json.loads(result_b)
@@ -273,7 +318,9 @@ async def test_read_email_thread_tool_cannot_be_pointed_at_another_users_thread(
     monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
 
     async with session_factory() as session:
-        result = await read_email_thread_tool.run(ToolContext(db=session, user=user_b), {"thread_id": "t-a"})
+        result = await read_email_thread_tool.run(
+            ToolContext(db=session, user=user_b), {"thread_id": "t-a"}
+        )
 
     payload = json.loads(result)
     assert "error" in payload  # not found under B's mailbox — no leak, no crash
@@ -281,13 +328,17 @@ async def test_read_email_thread_tool_cannot_be_pointed_at_another_users_thread(
 
 
 @pytest.mark.asyncio
-async def test_read_email_thread_tool_returns_the_requesting_users_own_thread(session_factory, user_a, monkeypatch):
+async def test_read_email_thread_tool_returns_the_requesting_users_own_thread(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
     provider = FakeMailProvider({"access-for-rt-a": [_message("a")]})
     monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
 
     async with session_factory() as session:
-        result = await read_email_thread_tool.run(ToolContext(db=session, user=user_a), {"thread_id": "t-a"})
+        result = await read_email_thread_tool.run(
+            ToolContext(db=session, user=user_a), {"thread_id": "t-a"}
+        )
 
     payload = json.loads(result)
     assert payload["ok"] is True
@@ -295,14 +346,18 @@ async def test_read_email_thread_tool_returns_the_requesting_users_own_thread(se
 
 
 @pytest.mark.asyncio
-async def test_search_emails_tool_maps_provider_error_to_a_tool_error(session_factory, user_a, monkeypatch):
+async def test_search_emails_tool_maps_provider_error_to_a_tool_error(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
 
     class _FailingProvider(FakeMailProvider):
         async def search(self, access_token, query):
             raise MailProviderError("gmail is down")
 
-    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: _FailingProvider())
+    monkeypatch.setattr(
+        "agents.tools.mail.get_mail_provider", lambda: _FailingProvider()
+    )
 
     async with session_factory() as session:
         result = await search_emails_tool.run(ToolContext(db=session, user=user_a), {})
@@ -325,7 +380,9 @@ async def test_summarize_email_thread_tool_calls_the_llm_and_returns_its_summary
     monkeypatch.setattr("agents.tools.mail.get_llm_provider", lambda: _FakeLLM())
 
     async with session_factory() as session:
-        result = await summarize_email_thread_tool.run(ToolContext(db=session, user=user_a), {"thread_id": "t-a"})
+        result = await summarize_email_thread_tool.run(
+            ToolContext(db=session, user=user_a), {"thread_id": "t-a"}
+        )
 
     payload = json.loads(result)
     assert payload["ok"] is True
@@ -333,7 +390,9 @@ async def test_summarize_email_thread_tool_calls_the_llm_and_returns_its_summary
 
 
 @pytest.mark.asyncio
-async def test_summarize_email_thread_tool_empty_thread_skips_the_llm_call(session_factory, user_a, monkeypatch):
+async def test_summarize_email_thread_tool_empty_thread_skips_the_llm_call(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
     provider = FakeMailProvider({"access-for-rt-a": []})
 
@@ -353,7 +412,9 @@ async def test_summarize_email_thread_tool_empty_thread_skips_the_llm_call(sessi
     monkeypatch.setattr("agents.tools.mail.get_llm_provider", lambda: _CountingLLM())
 
     async with session_factory() as session:
-        result = await summarize_email_thread_tool.run(ToolContext(db=session, user=user_a), {"thread_id": "t-a"})
+        result = await summarize_email_thread_tool.run(
+            ToolContext(db=session, user=user_a), {"thread_id": "t-a"}
+        )
 
     payload = json.loads(result)
     assert payload["ok"] is True
@@ -394,7 +455,9 @@ async def test_detect_pending_actions_tool_reports_actions_from_the_llm_tool_cal
     monkeypatch.setattr("agents.tools.mail.get_llm_provider", lambda: _FakeLLM())
 
     async with session_factory() as session:
-        result = await detect_pending_email_actions_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await detect_pending_email_actions_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
 
     payload = json.loads(result)
     assert payload["ok"] is True
@@ -403,7 +466,9 @@ async def test_detect_pending_actions_tool_reports_actions_from_the_llm_tool_cal
 
 
 @pytest.mark.asyncio
-async def test_detect_pending_actions_tool_no_tool_call_returns_empty_list(session_factory, user_a, monkeypatch):
+async def test_detect_pending_actions_tool_no_tool_call_returns_empty_list(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
     provider = FakeMailProvider({"access-for-rt-a": [_message("a")]})
     monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
@@ -415,13 +480,17 @@ async def test_detect_pending_actions_tool_no_tool_call_returns_empty_list(sessi
     monkeypatch.setattr("agents.tools.mail.get_llm_provider", lambda: _SilentLLM())
 
     async with session_factory() as session:
-        result = await detect_pending_email_actions_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await detect_pending_email_actions_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
 
     assert json.loads(result) == {"ok": True, "actions": []}
 
 
 @pytest.mark.asyncio
-async def test_detect_pending_actions_tool_no_messages_skips_the_llm_call(session_factory, user_a, monkeypatch):
+async def test_detect_pending_actions_tool_no_messages_skips_the_llm_call(
+    session_factory, user_a, monkeypatch
+):
     await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
     provider = FakeMailProvider({"access-for-rt-a": []})
     monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
@@ -436,7 +505,9 @@ async def test_detect_pending_actions_tool_no_messages_skips_the_llm_call(sessio
     monkeypatch.setattr("agents.tools.mail.get_llm_provider", lambda: _CountingLLM())
 
     async with session_factory() as session:
-        result = await detect_pending_email_actions_tool.run(ToolContext(db=session, user=user_a), {})
+        result = await detect_pending_email_actions_tool.run(
+            ToolContext(db=session, user=user_a), {}
+        )
 
     assert json.loads(result) == {"ok": True, "actions": []}
     assert calls["n"] == 0

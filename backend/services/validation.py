@@ -1,4 +1,5 @@
 """Input validation services — SSRF, path traversal, email, phone prevention."""
+
 import ipaddress
 import re
 from pathlib import Path

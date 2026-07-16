@@ -3,6 +3,7 @@
 
 Docs: https://developers.google.com/people/api/rest
 """
+
 import re
 from urllib.parse import urlencode
 
@@ -46,7 +47,9 @@ class InvalidResourceNameError(ContactsProviderError):
 
 def _validate_resource_name(resource_name: str) -> None:
     if not _RESOURCE_NAME_RE.match(resource_name):
-        raise InvalidResourceNameError(f"Invalid contact resource_name: {resource_name!r}")
+        raise InvalidResourceNameError(
+            f"Invalid contact resource_name: {resource_name!r}"
+        )
 
 
 class GoogleContactsProvider(ContactsProvider):
@@ -102,7 +105,9 @@ class GoogleContactsProvider(ContactsProvider):
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.error("Google Contacts OAuth token request failed: %s", exc)
-            raise ContactsProviderError(f"Google Contacts OAuth token request failed: {exc}") from exc
+            raise ContactsProviderError(
+                f"Google Contacts OAuth token request failed: {exc}"
+            ) from exc
         body = response.json()
         return OAuthTokens(
             access_token=body["access_token"],
@@ -114,21 +119,32 @@ class GoogleContactsProvider(ContactsProvider):
     def _headers(self, access_token: str) -> dict:
         return {"Authorization": f"Bearer {access_token}"}
 
-    async def _request(self, method: str, access_token: str, path: str, **kwargs) -> dict:
+    async def _request(
+        self, method: str, access_token: str, path: str, **kwargs
+    ) -> dict:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.request(
-                    method, f"{self._api_base_url}{path}", headers=self._headers(access_token), **kwargs
+                    method,
+                    f"{self._api_base_url}{path}",
+                    headers=self._headers(access_token),
+                    **kwargs,
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.error("Google People API request failed (%s %s): %s", method, path, exc)
-            raise ContactsProviderError(f"Google People API request failed: {exc}") from exc
+            logger.error(
+                "Google People API request failed (%s %s): %s", method, path, exc
+            )
+            raise ContactsProviderError(
+                f"Google People API request failed: {exc}"
+            ) from exc
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
 
-    async def search_contacts(self, access_token: str, query: ContactSearchQuery) -> list[Contact]:
+    async def search_contacts(
+        self, access_token: str, query: ContactSearchQuery
+    ) -> list[Contact]:
         result = await self._request(
             "GET",
             access_token,
@@ -144,20 +160,29 @@ class GoogleContactsProvider(ContactsProvider):
     async def get_contact(self, access_token: str, resource_name: str) -> Contact:
         _validate_resource_name(resource_name)
         raw = await self._request(
-            "GET", access_token, f"/{resource_name}", params={"personFields": _PERSON_FIELDS}
+            "GET",
+            access_token,
+            f"/{resource_name}",
+            params={"personFields": _PERSON_FIELDS},
         )
         return _parse_person(raw)
 
     async def create_contact(self, access_token: str, contact: NewContact) -> Contact:
         body = {
-            "names": [{"givenName": contact.given_name, "familyName": contact.family_name}],
+            "names": [
+                {"givenName": contact.given_name, "familyName": contact.family_name}
+            ],
             "emailAddresses": [{"value": address} for address in contact.emails],
             "phoneNumbers": [{"value": number} for number in contact.phones],
         }
-        raw = await self._request("POST", access_token, "/people:createContact", json=body)
+        raw = await self._request(
+            "POST", access_token, "/people:createContact", json=body
+        )
         return _parse_person(raw)
 
-    async def update_contact(self, access_token: str, resource_name: str, update: ContactUpdate) -> Contact:
+    async def update_contact(
+        self, access_token: str, resource_name: str, update: ContactUpdate
+    ) -> Contact:
         # The People API requires the current etag for optimistic-concurrency
         # updates — fetch it first, then send exactly the fields being changed.
         current = await self.get_contact(access_token, resource_name)
@@ -166,8 +191,12 @@ class GoogleContactsProvider(ContactsProvider):
         if update.given_name is not None or update.family_name is not None:
             body["names"] = [
                 {
-                    "givenName": update.given_name if update.given_name is not None else current.given_name,
-                    "familyName": update.family_name if update.family_name is not None else current.family_name,
+                    "givenName": update.given_name
+                    if update.given_name is not None
+                    else current.given_name,
+                    "familyName": update.family_name
+                    if update.family_name is not None
+                    else current.family_name,
                 }
             ]
             update_fields.append("names")
@@ -193,7 +222,15 @@ class GoogleContactsProvider(ContactsProvider):
 
 
 def _matches(contact: Contact, needle: str) -> bool:
-    haystack = " ".join([contact.display_name, contact.given_name, contact.family_name, *contact.emails, *contact.phones])
+    haystack = " ".join(
+        [
+            contact.display_name,
+            contact.given_name,
+            contact.family_name,
+            *contact.emails,
+            *contact.phones,
+        ]
+    )
     return needle in haystack.lower()
 
 

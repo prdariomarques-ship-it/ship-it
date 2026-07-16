@@ -13,6 +13,7 @@ Gemini's wire format differs from the two families already supported:
   `role="tool"` message can be turned back into a correctly named
   `functionResponse`.
 """
+
 from typing import Any
 
 import httpx
@@ -52,7 +53,9 @@ class GeminiProvider(LLMProvider):
     def enabled(self) -> bool:
         return bool(self._api_key)
 
-    def _to_gemini_contents(self, messages: list[ChatMessage]) -> tuple[dict | None, list[dict]]:
+    def _to_gemini_contents(
+        self, messages: list[ChatMessage]
+    ) -> tuple[dict | None, list[dict]]:
         system_instruction = None
         contents: list[dict] = []
         call_id_to_name: dict[str, str] = {}
@@ -68,17 +71,26 @@ class GeminiProvider(LLMProvider):
                     {
                         "role": "user",
                         "parts": [
-                            {"functionResponse": {"name": name, "response": {"result": message.content}}}
+                            {
+                                "functionResponse": {
+                                    "name": name,
+                                    "response": {"result": message.content},
+                                }
+                            }
                         ],
                     }
                 )
                 continue
 
             if message.role == "assistant" and message.tool_calls:
-                parts: list[dict[str, Any]] = [{"text": message.content}] if message.content else []
+                parts: list[dict[str, Any]] = (
+                    [{"text": message.content}] if message.content else []
+                )
                 for call in message.tool_calls:
                     call_id_to_name[call.id] = call.name
-                    parts.append({"functionCall": {"name": call.name, "args": call.arguments}})
+                    parts.append(
+                        {"functionCall": {"name": call.name, "args": call.arguments}}
+                    )
                 contents.append({"role": "model", "parts": parts})
                 continue
 
@@ -87,7 +99,9 @@ class GeminiProvider(LLMProvider):
 
         return system_instruction, contents
 
-    async def chat(self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None) -> LLMResult:
+    async def chat(
+        self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None
+    ) -> LLMResult:
         if not self.enabled:
             logger.warning("Gemini provider not configured; returning stub response")
             return LLMResult(content=STUB_REPLY)
@@ -100,7 +114,11 @@ class GeminiProvider(LLMProvider):
             body["tools"] = [
                 {
                     "functionDeclarations": [
-                        {"name": tool.name, "description": tool.description, "parameters": tool.parameters}
+                        {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
                         for tool in tools
                     ]
                 }
@@ -122,7 +140,9 @@ class GeminiProvider(LLMProvider):
                 call = part["functionCall"]
                 tool_calls.append(
                     ToolCallRequest(
-                        id=f"gemini_call_{index}", name=call["name"], arguments=dict(call.get("args", {}))
+                        id=f"gemini_call_{index}",
+                        name=call["name"],
+                        arguments=dict(call.get("args", {})),
                     )
                 )
 
@@ -131,7 +151,9 @@ class GeminiProvider(LLMProvider):
             prompt_tokens=usage_meta.get("promptTokenCount", 0),
             completion_tokens=usage_meta.get("candidatesTokenCount", 0),
         )
-        return LLMResult(content="".join(text_parts), tool_calls=tool_calls, usage=usage)
+        return LLMResult(
+            content="".join(text_parts), tool_calls=tool_calls, usage=usage
+        )
 
     async def embed(self, text: str) -> list[float]:
         if not self.enabled:

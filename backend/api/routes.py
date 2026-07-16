@@ -1,4 +1,5 @@
 """All resource routers, assembled from the CRUD factory plus custom endpoints."""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -116,7 +117,9 @@ async def list_logs(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[LogEntry]:
-    statement = select(LogEntry).order_by(LogEntry.id.desc()).limit(limit).offset(offset)
+    statement = (
+        select(LogEntry).order_by(LogEntry.id.desc()).limit(limit).offset(offset)
+    )
     if source is not None:
         statement = statement.where(LogEntry.source == source)
     if level is not None:
@@ -145,9 +148,9 @@ async def dashboard_summary(db: DbSession, current_user: CurrentUser) -> dict:
     statement = select(
         _count(Contact).label("contacts"),
         _count(Message).label("messages"),
-        _count(Task, Task.user_id == current_user.id, Task.status == TaskStatus.PENDING).label(
-            "pending_tasks"
-        ),
+        _count(
+            Task, Task.user_id == current_user.id, Task.status == TaskStatus.PENDING
+        ).label("pending_tasks"),
         _count(Note, Note.user_id == current_user.id).label("notes"),
         _count(CalendarEvent, CalendarEvent.user_id == current_user.id).label("events"),
         _count(ChurchMember).label("church_members"),

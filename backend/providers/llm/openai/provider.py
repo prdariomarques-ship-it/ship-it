@@ -1,4 +1,5 @@
 """OpenAI (and OpenAI-compatible) LLM provider."""
+
 import json
 
 from openai import AsyncOpenAI
@@ -30,7 +31,9 @@ class OpenAIProvider(LLMProvider):
     ) -> None:
         settings = get_settings()
         self._api_key = api_key if api_key is not None else settings.openai_api_key
-        self._base_url = base_url if base_url is not None else (settings.openai_base_url or None)
+        self._base_url = (
+            base_url if base_url is not None else (settings.openai_base_url or None)
+        )
         self._model = model or settings.openai_model
         self._embedding_model = embedding_model or settings.openai_embedding_model
         self._dimensions = settings.embedding_dimensions
@@ -51,7 +54,11 @@ class OpenAIProvider(LLMProvider):
         for message in messages:
             if message.role == "tool":
                 converted.append(
-                    {"role": "tool", "tool_call_id": message.tool_call_id, "content": message.content}
+                    {
+                        "role": "tool",
+                        "tool_call_id": message.tool_call_id,
+                        "content": message.content,
+                    }
                 )
             elif message.role == "assistant" and message.tool_calls:
                 converted.append(
@@ -75,12 +82,17 @@ class OpenAIProvider(LLMProvider):
                 converted.append({"role": message.role, "content": message.content})
         return converted
 
-    async def chat(self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None) -> LLMResult:
+    async def chat(
+        self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None
+    ) -> LLMResult:
         if not self.enabled:
             logger.warning("OpenAI provider not configured; returning stub response")
             return LLMResult(content=STUB_REPLY)
 
-        kwargs: dict = {"model": self._model, "messages": self._to_openai_messages(messages)}
+        kwargs: dict = {
+            "model": self._model,
+            "messages": self._to_openai_messages(messages),
+        }
         if tools:
             kwargs["tools"] = [
                 {
@@ -105,14 +117,22 @@ class OpenAIProvider(LLMProvider):
             )
             for call in (choice.tool_calls or [])
         ]
-        usage = TokenUsage(
-            prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
-            completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
-        ) if response.usage else TokenUsage()
-        return LLMResult(content=choice.content or "", tool_calls=tool_calls, usage=usage)
+        usage = (
+            TokenUsage(
+                prompt_tokens=getattr(response.usage, "prompt_tokens", 0) or 0,
+                completion_tokens=getattr(response.usage, "completion_tokens", 0) or 0,
+            )
+            if response.usage
+            else TokenUsage()
+        )
+        return LLMResult(
+            content=choice.content or "", tool_calls=tool_calls, usage=usage
+        )
 
     async def embed(self, text: str) -> list[float]:
         if not self.enabled:
             return [0.0] * self._dimensions
-        response = await self.client.embeddings.create(model=self._embedding_model, input=text)
+        response = await self.client.embeddings.create(
+            model=self._embedding_model, input=text
+        )
         return response.data[0].embedding

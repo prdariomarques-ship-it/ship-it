@@ -22,6 +22,7 @@ calls this today — callers that already choose an explicit agent (the chat
 dashboard, `/api/agents/{name}/run`) keep calling `ai_orchestrator.run`
 directly, unchanged, exactly as before this phase.
 """
+
 import time
 
 from pydantic import BaseModel, Field
@@ -55,7 +56,12 @@ logger = get_logger(__name__)
 _MAX_VALIDATION_ATTEMPTS = 2  # first try + one bounded retry, never unbounded
 _SHORT_TERM_LIMIT = 10
 _LIGHT_INTENTS = (Intent.GREETING, Intent.SMALL_TALK)
-_KNOWLEDGE_INTENTS = (Intent.RESEARCH, Intent.WEB_SEARCH, Intent.DOCUMENT, Intent.QUESTION)
+_KNOWLEDGE_INTENTS = (
+    Intent.RESEARCH,
+    Intent.WEB_SEARCH,
+    Intent.DOCUMENT,
+    Intent.QUESTION,
+)
 
 
 def normalize_message(text: str) -> str:
@@ -121,18 +127,25 @@ class CognitivePipeline:
         intent = await timed("intent", self._intent_engine.classify(normalized))
         record_intent_classification(intent.top.value)
 
-        priority = await timed("priority", self._priority_engine.classify(normalized, intent))
+        priority = await timed(
+            "priority", self._priority_engine.classify(normalized, intent)
+        )
         record_priority_classification(priority.level.value)
 
         history, extra_memories, memories_used = await timed(
-            "load_context", self._load_context(db, contact_id, normalized, intent, priority)
+            "load_context",
+            self._load_context(db, contact_id, normalized, intent, priority),
         )
 
-        plan = await timed("planning", self._planner.create_plan(normalized, intent, priority))
+        plan = await timed(
+            "planning", self._planner.create_plan(normalized, intent, priority)
+        )
 
         if plan.needs_confirmation:
             reply = self._confirmation_reply(plan)
-            await self._log_run(db, contact_id, intent, priority, plan, started, stage_durations)
+            await self._log_run(
+                db, contact_id, intent, priority, plan, started, stage_durations
+            )
             return CognitiveResult(
                 reply=reply,
                 intent=intent,
@@ -157,7 +170,9 @@ class CognitivePipeline:
 
         total_elapsed = time.perf_counter() - started
         record_pipeline_run(total_elapsed)
-        await self._log_run(db, contact_id, intent, priority, plan, started, stage_durations, usage)
+        await self._log_run(
+            db, contact_id, intent, priority, plan, started, stage_durations, usage
+        )
 
         return CognitiveResult(
             reply=reply,
@@ -187,11 +202,15 @@ class CognitivePipeline:
         extra_memories: list[dict] = []
 
         if contact_id is not None:
-            recent = await memory_manager.short_term(db, contact_id, limit=_SHORT_TERM_LIMIT)
+            recent = await memory_manager.short_term(
+                db, contact_id, limit=_SHORT_TERM_LIMIT
+            )
             record_memory_lookup("short_term")
             history = [
                 ChatMessage(
-                    role="user" if entry.direction == MessageDirection.INBOUND else "assistant",
+                    role="user"
+                    if entry.direction == MessageDirection.INBOUND
+                    else "assistant",
                     content=entry.content,
                 )
                 for entry in recent
@@ -201,7 +220,9 @@ class CognitivePipeline:
             preferences = await memory_manager.get_preferences(db, contact_id)
             record_memory_lookup("preferences")
             if preferences:
-                extra_memories.append({"source": "preferences", "content": str(preferences)})
+                extra_memories.append(
+                    {"source": "preferences", "content": str(preferences)}
+                )
 
             summary = await memory_manager.get_summary(db, contact_id)
             record_memory_lookup("summary")
@@ -219,7 +240,9 @@ class CognitivePipeline:
                     record_memory_lookup("knowledge")
                     extra_memories.extend(knowledge)
             except Exception as exc:  # noqa: BLE001 - memory is an enhancement, not a requirement
-                logger.warning("Semantic memory lookup skipped (vector store unavailable): %s", exc)
+                logger.warning(
+                    "Semantic memory lookup skipped (vector store unavailable): %s", exc
+                )
 
         return history, extra_memories, len(extra_memories)
 
@@ -239,7 +262,8 @@ class CognitivePipeline:
 
         for index, step in enumerate(plan.steps):
             blocked = any(
-                dep < index and plan.steps[dep].status != PlanStepStatus.DONE for dep in step.depends_on
+                dep < index and plan.steps[dep].status != PlanStepStatus.DONE
+                for dep in step.depends_on
             )
             if blocked:
                 step.status = PlanStepStatus.SKIPPED
@@ -252,15 +276,23 @@ class CognitivePipeline:
             while attempt < _MAX_VALIDATION_ATTEMPTS and not validation_ok:
                 attempt += 1
                 total_attempts += 1
-                agent_result = await self._run_step(db, user, contact_id, step, memories, history)
-                validation = self._validator.validate(reply=agent_result.reply, steps=agent_result.steps)
+                agent_result = await self._run_step(
+                    db, user, contact_id, step, memories, history
+                )
+                validation = self._validator.validate(
+                    reply=agent_result.reply, steps=agent_result.steps
+                )
                 validation_ok = validation.ok
                 if not validation_ok and attempt < _MAX_VALIDATION_ATTEMPTS:
                     record_validation_retry()
-                    logger.info("Retrying plan step (%s): %s", step.agent, validation.issues)
+                    logger.info(
+                        "Retrying plan step (%s): %s", step.agent, validation.issues
+                    )
 
             assert agent_result is not None, "_MAX_VALIDATION_ATTEMPTS must be >= 1"
-            step.status = PlanStepStatus.DONE if validation_ok else PlanStepStatus.FAILED
+            step.status = (
+                PlanStepStatus.DONE if validation_ok else PlanStepStatus.FAILED
+            )
             step.result = agent_result.reply
             steps.extend(agent_result.steps)
             usage = usage + agent_result.usage
@@ -301,13 +333,26 @@ class CognitivePipeline:
         return "\n\n".join(cleaned)
 
     def _confirmation_reply(self, plan: Plan) -> str:
-        lines = [f"{i + 1}. {step.objective} ({step.agent})" for i, step in enumerate(plan.steps)]
+        lines = [
+            f"{i + 1}. {step.objective} ({step.agent})"
+            for i, step in enumerate(plan.steps)
+        ]
         return (
             "Antes de eu seguir em frente, confirma se é isso mesmo que você quer que eu faça?\n"
             + "\n".join(lines)
         )
 
-    async def _log_run(self, db, contact_id, intent, priority, plan, started, stage_durations, usage=None):
+    async def _log_run(
+        self,
+        db,
+        contact_id,
+        intent,
+        priority,
+        plan,
+        started,
+        stage_durations,
+        usage=None,
+    ):
         await record_log(
             db,
             source="cognitive_pipeline",

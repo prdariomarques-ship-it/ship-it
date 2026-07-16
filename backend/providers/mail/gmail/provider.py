@@ -6,6 +6,7 @@ endpoints.
 
 Docs: https://developers.google.com/gmail/api/reference/rest
 """
+
 import base64
 from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
@@ -104,11 +105,15 @@ class GmailProvider(MailProvider):
     def _headers(self, access_token: str) -> dict:
         return {"Authorization": f"Bearer {access_token}"}
 
-    async def _get(self, access_token: str, path: str, params: dict | None = None) -> dict:
+    async def _get(
+        self, access_token: str, path: str, params: dict | None = None
+    ) -> dict:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.get(
-                    f"{self._api_base_url}{path}", headers=self._headers(access_token), params=params
+                    f"{self._api_base_url}{path}",
+                    headers=self._headers(access_token),
+                    params=params,
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
@@ -116,7 +121,9 @@ class GmailProvider(MailProvider):
             raise MailProviderError(f"Gmail API request failed: {exc}") from exc
         return response.json()
 
-    async def search(self, access_token: str, query: EmailSearchQuery) -> list[EmailMessage]:
+    async def search(
+        self, access_token: str, query: EmailSearchQuery
+    ) -> list[EmailMessage]:
         result = await self._get(
             access_token,
             "/gmail/v1/users/me/messages",
@@ -134,9 +141,13 @@ class GmailProvider(MailProvider):
 
     async def get_thread(self, access_token: str, thread_id: str) -> EmailThread:
         result = await self._get(
-            access_token, f"/gmail/v1/users/me/threads/{quote(thread_id, safe='')}", params={"format": "full"}
+            access_token,
+            f"/gmail/v1/users/me/threads/{quote(thread_id, safe='')}",
+            params={"format": "full"},
         )
-        messages = [_parse_message(raw, include_body=True) for raw in result.get("messages", [])]
+        messages = [
+            _parse_message(raw, include_body=True) for raw in result.get("messages", [])
+        ]
         subject = messages[0].subject if messages else ""
         return EmailThread(id=thread_id, subject=subject, messages=messages)
 

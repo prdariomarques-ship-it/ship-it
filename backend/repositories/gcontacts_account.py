@@ -7,10 +7,14 @@ from repositories.base import SQLAlchemyRepository
 class GoogleContactsAccountRepository(SQLAlchemyRepository[GoogleContactsAccount]):
     model = GoogleContactsAccount
 
-    async def get_by_user(self, user_id: int, provider: str) -> GoogleContactsAccount | None:
+    async def get_by_user(
+        self, user_id: int, provider: str
+    ) -> GoogleContactsAccount | None:
         return await self.find_one(user_id=user_id, provider=provider)
 
-    async def upsert_for_user(self, user_id: int, provider: str, **fields: object) -> GoogleContactsAccount:
+    async def upsert_for_user(
+        self, user_id: int, provider: str, **fields: object
+    ) -> GoogleContactsAccount:
         """Same race-safe create-or-update idiom as
         `GoogleCalendarAccountRepository.upsert_for_user` — see there for
         the full rationale."""

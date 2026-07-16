@@ -1,4 +1,5 @@
 """Tests for security headers middleware."""
+
 import pytest
 from fastapi.testclient import TestClient
 

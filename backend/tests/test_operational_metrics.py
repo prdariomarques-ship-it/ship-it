@@ -1,4 +1,5 @@
 """Operational metrics and exemplar tests."""
+
 import pytest
 
 from observability.operational_metrics import (

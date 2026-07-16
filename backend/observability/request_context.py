@@ -11,6 +11,7 @@ Trace ID is a 32-character hex string (128-bit) derived from the request ID
 (UUID4). This creates a 1:1 correlation between request_id and trace_id so
 every request's logs, metrics, and traces can be queried together.
 """
+
 import uuid
 from contextvars import ContextVar
 

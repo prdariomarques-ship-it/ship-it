@@ -3,6 +3,7 @@
 The fallback keeps development and tests working without Redis; in production
 Redis makes cached values shared across workers.
 """
+
 import json
 import time
 from typing import Any
@@ -24,7 +25,9 @@ class CacheService:
 
     def _get_redis(self) -> aioredis.Redis:
         if self._redis is None:
-            self._redis = aioredis.from_url(self._settings.redis_url, decode_responses=True)
+            self._redis = aioredis.from_url(
+                self._settings.redis_url, decode_responses=True
+            )
         return self._redis
 
     async def get(self, key: str) -> Any | None:
@@ -43,7 +46,11 @@ class CacheService:
         return json.loads(entry[1])
 
     async def set(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:
-        ttl = ttl_seconds if ttl_seconds is not None else self._settings.cache_default_ttl_seconds
+        ttl = (
+            ttl_seconds
+            if ttl_seconds is not None
+            else self._settings.cache_default_ttl_seconds
+        )
         raw = json.dumps(value, default=str)
 
         if self._redis_available:

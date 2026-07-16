@@ -24,7 +24,9 @@ async def test_task_crud(client, auth_headers):
 
     deleted = await client.delete(f"/api/tasks/{task_id}", headers=auth_headers)
     assert deleted.status_code == 204
-    assert (await client.get(f"/api/tasks/{task_id}", headers=auth_headers)).status_code == 404
+    assert (
+        await client.get(f"/api/tasks/{task_id}", headers=auth_headers)
+    ).status_code == 404
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 Every LLM provider translates between these neutral types and its own API,
 so agents, chat and memory never depend on a specific vendor SDK.
 """
+
 from abc import ABC, abstractmethod
 from typing import Literal
 
@@ -14,7 +15,9 @@ class ToolSpec(BaseModel):
 
     name: str
     description: str
-    parameters: dict = Field(default_factory=lambda: {"type": "object", "properties": {}})
+    parameters: dict = Field(
+        default_factory=lambda: {"type": "object", "properties": {}}
+    )
 
 
 class ToolCallRequest(BaseModel):
@@ -79,8 +82,12 @@ _PRICING_PER_MILLION_TOKENS: dict[str, tuple[float, float]] = {
 
 def estimate_cost_usd(provider_name: str, usage: TokenUsage) -> float:
     """Rough cost estimate from the static table above."""
-    prompt_price, completion_price = _PRICING_PER_MILLION_TOKENS.get(provider_name, (0.0, 0.0))
-    return (usage.prompt_tokens * prompt_price + usage.completion_tokens * completion_price) / 1_000_000
+    prompt_price, completion_price = _PRICING_PER_MILLION_TOKENS.get(
+        provider_name, (0.0, 0.0)
+    )
+    return (
+        usage.prompt_tokens * prompt_price + usage.completion_tokens * completion_price
+    ) / 1_000_000
 
 
 class LLMProvider(ABC):
@@ -94,7 +101,9 @@ class LLMProvider(ABC):
         """True when the provider is configured (API key present)."""
 
     @abstractmethod
-    async def chat(self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None) -> LLMResult:
+    async def chat(
+        self, messages: list[ChatMessage], tools: list[ToolSpec] | None = None
+    ) -> LLMResult:
         """Run one chat turn, optionally offering function-calling tools."""
 
     @abstractmethod

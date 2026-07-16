@@ -9,6 +9,7 @@ Format: traceparent = 00-{trace_id}-{span_id}-{trace_flags}
 When a traceparent header is present in the request, use it to correlate
 this request's spans with upstream traces. When absent, a new trace begins.
 """
+
 from contextvars import ContextVar
 from typing import Optional
 
@@ -17,7 +18,9 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-_trace_context: ContextVar[dict[str, str] | None] = ContextVar("trace_context", default=None)
+_trace_context: ContextVar[dict[str, str] | None] = ContextVar(
+    "trace_context", default=None
+)
 
 
 def get_trace_context() -> Optional[dict[str, str]]:
@@ -31,9 +34,19 @@ def parse_traceparent(header: str) -> Optional[dict[str, str]]:
     if len(parts) != 4:
         return None
     version, trace_id, span_id, trace_flags = parts
-    if len(version) != 2 or len(trace_id) != 32 or len(span_id) != 16 or len(trace_flags) != 2:
+    if (
+        len(version) != 2
+        or len(trace_id) != 32
+        or len(span_id) != 16
+        or len(trace_flags) != 2
+    ):
         return None
-    return {"version": version, "trace_id": trace_id, "span_id": span_id, "trace_flags": trace_flags}
+    return {
+        "version": version,
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "trace_flags": trace_flags,
+    }
 
 
 class TraceContextMiddleware(BaseHTTPMiddleware):

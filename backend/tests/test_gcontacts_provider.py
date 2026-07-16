@@ -1,10 +1,19 @@
 """GoogleContactsProvider (People API) — REST via httpx, no SDK."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from providers.contacts.base import ContactSearchQuery, ContactsProviderError, ContactUpdate, NewContact
-from providers.contacts.factory import UnknownContactsProviderError, get_contacts_provider
+from providers.contacts.base import (
+    ContactSearchQuery,
+    ContactsProviderError,
+    ContactUpdate,
+    NewContact,
+)
+from providers.contacts.factory import (
+    UnknownContactsProviderError,
+    get_contacts_provider,
+)
 from providers.contacts.google.provider import GoogleContactsProvider, _parse_person
 from utils.config import get_settings
 
@@ -21,12 +30,18 @@ def _mock_response(json_body: dict, status_code: int = 200) -> MagicMock:
 def _patch_client(request_result=None, post_result=None):
     client = MagicMock()
     if request_result is not None:
-        client.request = AsyncMock(side_effect=request_result if isinstance(request_result, list) else [request_result] * 20)
+        client.request = AsyncMock(
+            side_effect=request_result
+            if isinstance(request_result, list)
+            else [request_result] * 20
+        )
     if post_result is not None:
         client.post = AsyncMock(return_value=post_result)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    return patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client), client
+    return patch(
+        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+    ), client
 
 
 @pytest.fixture
@@ -34,7 +49,9 @@ def provider(monkeypatch):
     monkeypatch.setattr(get_settings(), "google_client_id", "client-id")
     monkeypatch.setattr(get_settings(), "google_client_secret", "client-secret")
     monkeypatch.setattr(
-        get_settings(), "google_contacts_redirect_uri", "https://app.example.com/api/gcontacts/oauth/callback"
+        get_settings(),
+        "google_contacts_redirect_uri",
+        "https://app.example.com/api/gcontacts/oauth/callback",
     )
     return GoogleContactsProvider()
 
@@ -49,7 +66,12 @@ def test_authorization_url_includes_offline_access_full_scope_and_state(provider
 
 @pytest.mark.asyncio
 async def test_exchange_code_returns_tokens(provider):
-    body = {"access_token": "at1", "refresh_token": "rt1", "expires_in": 3600, "scope": "contacts"}
+    body = {
+        "access_token": "at1",
+        "refresh_token": "rt1",
+        "expires_in": 3600,
+        "scope": "contacts",
+    }
     patcher, _ = _patch_client(post_result=_mock_response(body))
     with patcher:
         tokens = await provider.exchange_code("auth-code")
@@ -74,7 +96,9 @@ async def test_token_request_http_failure_raises_provider_error(provider):
     client.post = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(ContactsProviderError):
             await provider.exchange_code("auth-code")
 
@@ -83,7 +107,13 @@ def _person(resource_name, given, family="", emails=None, phones=None, etag="eta
     return {
         "resourceName": resource_name,
         "etag": etag,
-        "names": [{"givenName": given, "familyName": family, "displayName": f"{given} {family}".strip()}],
+        "names": [
+            {
+                "givenName": given,
+                "familyName": family,
+                "displayName": f"{given} {family}".strip(),
+            }
+        ],
         "emailAddresses": [{"value": e} for e in (emails or [])],
         "phoneNumbers": [{"value": p} for p in (phones or [])],
     }
@@ -100,10 +130,17 @@ async def test_search_contacts_lists_everyone_without_a_query(provider):
 
 @pytest.mark.asyncio
 async def test_search_contacts_filters_client_side_by_name(provider):
-    body = {"connections": [_person("people/c1", "Ana", emails=["ana@example.com"]), _person("people/c2", "Beto")]}
+    body = {
+        "connections": [
+            _person("people/c1", "Ana", emails=["ana@example.com"]),
+            _person("people/c2", "Beto"),
+        ]
+    }
     patcher, _ = _patch_client(request_result=[_mock_response(body)])
     with patcher:
-        contacts = await provider.search_contacts("access-token", ContactSearchQuery(query="ana"))
+        contacts = await provider.search_contacts(
+            "access-token", ContactSearchQuery(query="ana")
+        )
     assert len(contacts) == 1
     assert contacts[0].given_name == "Ana"
 
@@ -116,24 +153,34 @@ async def test_search_contacts_filters_by_phone_or_email_substring(provider):
             _person("people/c2", "Beto", emails=["beto@example.com"]),
         ]
     }
-    patcher, _ = _patch_client(request_result=[_mock_response(body), _mock_response(body)])
+    patcher, _ = _patch_client(
+        request_result=[_mock_response(body), _mock_response(body)]
+    )
     with patcher:
-        by_phone = await provider.search_contacts("access-token", ContactSearchQuery(query="999990000"))
-        by_email = await provider.search_contacts("access-token", ContactSearchQuery(query="beto@"))
+        by_phone = await provider.search_contacts(
+            "access-token", ContactSearchQuery(query="999990000")
+        )
+        by_email = await provider.search_contacts(
+            "access-token", ContactSearchQuery(query="beto@")
+        )
     assert [c.given_name for c in by_phone] == ["Ana"]
     assert [c.given_name for c in by_email] == ["Beto"]
 
 
 @pytest.mark.asyncio
 async def test_get_contact_returns_etag_needed_for_updates(provider):
-    patcher, _ = _patch_client(request_result=[_mock_response(_person("people/c1", "Ana", etag="etag-xyz"))])
+    patcher, _ = _patch_client(
+        request_result=[_mock_response(_person("people/c1", "Ana", etag="etag-xyz"))]
+    )
     with patcher:
         contact = await provider.get_contact("access-token", "people/c1")
     assert contact.etag == "etag-xyz"
 
 
 @pytest.mark.asyncio
-async def test_get_contact_rejects_a_resource_name_with_a_path_traversal_attempt(provider):
+async def test_get_contact_rejects_a_resource_name_with_a_path_traversal_attempt(
+    provider,
+):
     """`resource_name` comes straight from a tool argument
     (`update_google_contact`/`delete_google_contact`) and legitimately
     contains a literal '/' (People API format is "people/<id>"), so it
@@ -145,7 +192,9 @@ async def test_get_contact_rejects_a_resource_name_with_a_path_traversal_attempt
     client.request = AsyncMock()
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(ContactsProviderError):
             await provider.get_contact("access-token", "people/c1/../otherContacts/x")
     client.request.assert_not_awaited()  # rejected before any request was made
@@ -157,21 +206,31 @@ async def test_delete_contact_rejects_an_invalid_resource_name(provider):
     client.request = AsyncMock()
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(ContactsProviderError):
             await provider.delete_contact("access-token", "people/c1?admin=true")
     client.request.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_update_contact_rejects_an_invalid_resource_name_before_fetching_the_etag(provider):
+async def test_update_contact_rejects_an_invalid_resource_name_before_fetching_the_etag(
+    provider,
+):
     client = MagicMock()
     client.request = AsyncMock()
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.contacts.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(ContactsProviderError):
-            await provider.update_contact("access-token", "otherContacts/../people/c1", ContactUpdate(given_name="X"))
+            await provider.update_contact(
+                "access-token",
+                "otherContacts/../people/c1",
+                ContactUpdate(given_name="X"),
+            )
     client.request.assert_not_awaited()
 
 
@@ -180,7 +239,9 @@ async def test_get_contact_accepts_the_special_people_me_resource_name(provider)
     """`gcontacts/router.py::_resolve_account_label` relies on this exact
     value (a Google-documented special resource, not user input) staying
     valid after the allowlist was introduced."""
-    patcher, _ = _patch_client(request_result=[_mock_response(_person("people/me", "Dario"))])
+    patcher, _ = _patch_client(
+        request_result=[_mock_response(_person("people/me", "Dario"))]
+    )
     with patcher:
         contact = await provider.get_contact("access-token", "people/me")
     assert contact.given_name == "Dario"
@@ -188,9 +249,13 @@ async def test_get_contact_accepts_the_special_people_me_resource_name(provider)
 
 @pytest.mark.asyncio
 async def test_create_contact_sends_expected_body(provider):
-    response_body = _person("people/new", "Carlos", emails=["c@example.com"], phones=["123"])
+    response_body = _person(
+        "people/new", "Carlos", emails=["c@example.com"], phones=["123"]
+    )
     patcher, client = _patch_client(request_result=[_mock_response(response_body)])
-    new_contact = NewContact(given_name="Carlos", emails=["c@example.com"], phones=["123"])
+    new_contact = NewContact(
+        given_name="Carlos", emails=["c@example.com"], phones=["123"]
+    )
     with patcher:
         contact = await provider.create_contact("access-token", new_contact)
     assert contact.given_name == "Carlos"
@@ -205,7 +270,9 @@ async def test_update_contact_fetches_etag_first_then_patches(provider):
     updates — the provider must GET before PATCH."""
     current = _person("people/c1", "Ana", etag="etag-current")
     updated = _person("people/c1", "Ana Maria", etag="etag-new")
-    patcher, client = _patch_client(request_result=[_mock_response(current), _mock_response(updated)])
+    patcher, client = _patch_client(
+        request_result=[_mock_response(current), _mock_response(updated)]
+    )
     update = ContactUpdate(given_name="Ana Maria")
     with patcher:
         contact = await provider.update_contact("access-token", "people/c1", update)
@@ -219,9 +286,15 @@ async def test_update_contact_fetches_etag_first_then_patches(provider):
 
 @pytest.mark.asyncio
 async def test_update_contact_only_changes_requested_fields(provider):
-    current = _person("people/c1", "Ana", family="Silva", emails=["ana@old.com"], etag="etag-current")
-    updated = _person("people/c1", "Ana", family="Silva", emails=["ana@new.com"], etag="etag-new")
-    patcher, client = _patch_client(request_result=[_mock_response(current), _mock_response(updated)])
+    current = _person(
+        "people/c1", "Ana", family="Silva", emails=["ana@old.com"], etag="etag-current"
+    )
+    updated = _person(
+        "people/c1", "Ana", family="Silva", emails=["ana@new.com"], etag="etag-new"
+    )
+    patcher, client = _patch_client(
+        request_result=[_mock_response(current), _mock_response(updated)]
+    )
     update = ContactUpdate(emails=["ana@new.com"])
     with patcher:
         await provider.update_contact("access-token", "people/c1", update)
@@ -232,7 +305,9 @@ async def test_update_contact_only_changes_requested_fields(provider):
 
 @pytest.mark.asyncio
 async def test_delete_contact_calls_delete(provider):
-    patcher, client = _patch_client(request_result=[_mock_response({}, status_code=204)])
+    patcher, client = _patch_client(
+        request_result=[_mock_response({}, status_code=204)]
+    )
     with patcher:
         result = await provider.delete_contact("access-token", "people/c1")
     assert result is None

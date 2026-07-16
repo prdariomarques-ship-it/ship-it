@@ -21,4 +21,6 @@ async def chat(
     try:
         return await chat_service.respond(db, current_user, payload)
     except UnknownAgentError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc

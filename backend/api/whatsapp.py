@@ -3,6 +3,7 @@
 All sends go through the configured provider (Strategy) and every outbound
 message is persisted and fed into the contact memory.
 """
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -50,51 +51,69 @@ def _bad_gateway(exc: WhatsAppProviderError) -> HTTPException:
 
 
 @router.post("/send-text", response_model=SendResponse)
-async def send_text(payload: SendTextRequest, db: DbSession, _: CurrentUser) -> SendResponse:
+async def send_text(
+    payload: SendTextRequest, db: DbSession, _: CurrentUser
+) -> SendResponse:
     try:
         await get_whatsapp_provider().send_text(payload.to, payload.content)
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await persist_outbound_message(db, payload.to, payload.content, MessageMediaType.TEXT)
+    message = await persist_outbound_message(
+        db, payload.to, payload.content, MessageMediaType.TEXT
+    )
     return SendResponse(message_id=message.id)
 
 
 @router.post("/send-image", response_model=SendResponse)
-async def send_image(payload: SendMediaRequest, db: DbSession, _: CurrentUser) -> SendResponse:
+async def send_image(
+    payload: SendMediaRequest, db: DbSession, _: CurrentUser
+) -> SendResponse:
     try:
         await get_whatsapp_provider().send_image(
             payload.to, payload.url, payload.filename, payload.caption
         )
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await persist_outbound_message(db, payload.to, payload.url, MessageMediaType.IMAGE)
+    message = await persist_outbound_message(
+        db, payload.to, payload.url, MessageMediaType.IMAGE
+    )
     return SendResponse(message_id=message.id)
 
 
 @router.post("/send-file", response_model=SendResponse)
-async def send_file(payload: SendMediaRequest, db: DbSession, _: CurrentUser) -> SendResponse:
+async def send_file(
+    payload: SendMediaRequest, db: DbSession, _: CurrentUser
+) -> SendResponse:
     try:
         await get_whatsapp_provider().send_file(
             payload.to, payload.url, payload.filename, payload.caption
         )
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await persist_outbound_message(db, payload.to, payload.url, MessageMediaType.PDF)
+    message = await persist_outbound_message(
+        db, payload.to, payload.url, MessageMediaType.PDF
+    )
     return SendResponse(message_id=message.id)
 
 
 @router.post("/send-audio", response_model=SendResponse)
-async def send_audio(payload: SendMediaRequest, db: DbSession, _: CurrentUser) -> SendResponse:
+async def send_audio(
+    payload: SendMediaRequest, db: DbSession, _: CurrentUser
+) -> SendResponse:
     try:
         await get_whatsapp_provider().send_audio(payload.to, payload.url)
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
-    message = await persist_outbound_message(db, payload.to, payload.url, MessageMediaType.AUDIO)
+    message = await persist_outbound_message(
+        db, payload.to, payload.url, MessageMediaType.AUDIO
+    )
     return SendResponse(message_id=message.id)
 
 
 @router.post("/send-location", response_model=SendResponse)
-async def send_location(payload: SendLocationRequest, db: DbSession, _: CurrentUser) -> SendResponse:
+async def send_location(
+    payload: SendLocationRequest, db: DbSession, _: CurrentUser
+) -> SendResponse:
     try:
         await get_whatsapp_provider().send_location(
             payload.to, payload.latitude, payload.longitude, payload.caption
@@ -102,6 +121,9 @@ async def send_location(payload: SendLocationRequest, db: DbSession, _: CurrentU
     except WhatsAppProviderError as exc:
         raise _bad_gateway(exc) from exc
     message = await persist_outbound_message(
-        db, payload.to, f"{payload.latitude},{payload.longitude}", MessageMediaType.LOCATION
+        db,
+        payload.to,
+        f"{payload.latitude},{payload.longitude}",
+        MessageMediaType.LOCATION,
     )
     return SendResponse(message_id=message.id)

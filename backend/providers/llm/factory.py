@@ -3,6 +3,7 @@
 Swap vendors by changing LLM_PROVIDER / EMBEDDING_PROVIDER in the environment —
 no application code changes required.
 """
+
 from functools import lru_cache
 
 from providers.llm.anthropic.provider import AnthropicProvider

@@ -3,6 +3,7 @@ choice already made for Gmail and Gemini: httpx is already a dependency).
 
 Docs: https://developers.google.com/calendar/api/v3/reference
 """
+
 from datetime import datetime, timezone
 
 import httpx
@@ -86,7 +87,9 @@ class GoogleCalendarProvider(CalendarProvider):
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.error("Google Calendar OAuth token request failed: %s", exc)
-            raise CalendarProviderError(f"Google Calendar OAuth token request failed: {exc}") from exc
+            raise CalendarProviderError(
+                f"Google Calendar OAuth token request failed: {exc}"
+            ) from exc
         body = response.json()
         return OAuthTokens(
             access_token=body["access_token"],
@@ -98,16 +101,25 @@ class GoogleCalendarProvider(CalendarProvider):
     def _headers(self, access_token: str) -> dict:
         return {"Authorization": f"Bearer {access_token}"}
 
-    async def _request(self, method: str, access_token: str, path: str, **kwargs) -> dict:
+    async def _request(
+        self, method: str, access_token: str, path: str, **kwargs
+    ) -> dict:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.request(
-                    method, f"{self._api_base_url}{path}", headers=self._headers(access_token), **kwargs
+                    method,
+                    f"{self._api_base_url}{path}",
+                    headers=self._headers(access_token),
+                    **kwargs,
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.error("Google Calendar API request failed (%s %s): %s", method, path, exc)
-            raise CalendarProviderError(f"Google Calendar API request failed: {exc}") from exc
+            logger.error(
+                "Google Calendar API request failed (%s %s): %s", method, path, exc
+            )
+            raise CalendarProviderError(
+                f"Google Calendar API request failed: {exc}"
+            ) from exc
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
@@ -124,8 +136,14 @@ class GoogleCalendarProvider(CalendarProvider):
             for item in result.get("items", [])
         ]
 
-    async def search_events(self, access_token: str, query: EventSearchQuery) -> list[CalendarEvent]:
-        params: dict = {"singleEvents": "true", "orderBy": "startTime", "maxResults": query.limit}
+    async def search_events(
+        self, access_token: str, query: EventSearchQuery
+    ) -> list[CalendarEvent]:
+        params: dict = {
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": query.limit,
+        }
         if query.query:
             params["q"] = query.query
         if query.since:
@@ -133,11 +151,16 @@ class GoogleCalendarProvider(CalendarProvider):
         if query.until:
             params["timeMax"] = _to_rfc3339(query.until)
         result = await self._request(
-            "GET", access_token, f"/calendars/{_encode(query.calendar_id)}/events", params=params
+            "GET",
+            access_token,
+            f"/calendars/{_encode(query.calendar_id)}/events",
+            params=params,
         )
         return [_parse_event(raw, query.calendar_id) for raw in result.get("items", [])]
 
-    async def create_event(self, access_token: str, calendar_id: str, event: NewEvent) -> CalendarEvent:
+    async def create_event(
+        self, access_token: str, calendar_id: str, event: NewEvent
+    ) -> CalendarEvent:
         body = {
             "summary": event.summary,
             "description": event.description,
@@ -146,7 +169,9 @@ class GoogleCalendarProvider(CalendarProvider):
             "end": {"dateTime": _to_rfc3339(event.end)},
             "attendees": [{"email": address} for address in event.attendees],
         }
-        raw = await self._request("POST", access_token, f"/calendars/{_encode(calendar_id)}/events", json=body)
+        raw = await self._request(
+            "POST", access_token, f"/calendars/{_encode(calendar_id)}/events", json=body
+        )
         return _parse_event(raw, calendar_id)
 
     async def update_event(
@@ -166,17 +191,28 @@ class GoogleCalendarProvider(CalendarProvider):
         if update.attendees is not None:
             body["attendees"] = [{"email": address} for address in update.attendees]
         raw = await self._request(
-            "PATCH", access_token, f"/calendars/{_encode(calendar_id)}/events/{_encode(event_id)}", json=body
+            "PATCH",
+            access_token,
+            f"/calendars/{_encode(calendar_id)}/events/{_encode(event_id)}",
+            json=body,
         )
         return _parse_event(raw, calendar_id)
 
-    async def delete_event(self, access_token: str, calendar_id: str, event_id: str) -> None:
+    async def delete_event(
+        self, access_token: str, calendar_id: str, event_id: str
+    ) -> None:
         await self._request(
-            "DELETE", access_token, f"/calendars/{_encode(calendar_id)}/events/{_encode(event_id)}"
+            "DELETE",
+            access_token,
+            f"/calendars/{_encode(calendar_id)}/events/{_encode(event_id)}",
         )
 
     async def check_availability(
-        self, access_token: str, calendar_ids: list[str], since: datetime, until: datetime
+        self,
+        access_token: str,
+        calendar_ids: list[str],
+        since: datetime,
+        until: datetime,
     ) -> AvailabilityResult:
         body = {
             "timeMin": _to_rfc3339(since),
@@ -188,7 +224,12 @@ class GoogleCalendarProvider(CalendarProvider):
         for calendar_id in calendar_ids:
             calendar_data = result.get("calendars", {}).get(calendar_id, {})
             for block in calendar_data.get("busy", []):
-                busy.append(FreeBusyBlock(start=_parse_rfc3339(block["start"]), end=_parse_rfc3339(block["end"])))
+                busy.append(
+                    FreeBusyBlock(
+                        start=_parse_rfc3339(block["start"]),
+                        end=_parse_rfc3339(block["end"]),
+                    )
+                )
 
         conflicting_events: list[CalendarEvent] = []
         if busy:
@@ -196,11 +237,16 @@ class GoogleCalendarProvider(CalendarProvider):
             # search on the primary calendar gives the model something
             # actionable ("conflita com X") instead of just a time range.
             events = await self.search_events(
-                access_token, EventSearchQuery(calendar_id=calendar_ids[0], since=since, until=until, limit=10)
+                access_token,
+                EventSearchQuery(
+                    calendar_id=calendar_ids[0], since=since, until=until, limit=10
+                ),
             )
             conflicting_events = events
 
-        return AvailabilityResult(is_free=not busy, busy=busy, conflicting_events=conflicting_events)
+        return AvailabilityResult(
+            is_free=not busy, busy=busy, conflicting_events=conflicting_events
+        )
 
 
 def _encode(value: str) -> str:

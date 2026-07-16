@@ -5,6 +5,7 @@ the same configured webhook URL, distinguished by an `event` field. This
 provider is the only one that translates the session/ack event shapes today —
 see providers/whatsapp/README.md for how to add them to another provider.
 """
+
 from datetime import datetime, timezone
 
 from providers.whatsapp.base import (
@@ -38,7 +39,10 @@ class OpenWAProvider(WhatsAppProvider):
 
     async def _post(self, endpoint: str, args: dict) -> dict:
         return await self._request(
-            "POST", f"{self._base_url}/{endpoint}", json_body={"args": args}, headers=self._headers()
+            "POST",
+            f"{self._base_url}/{endpoint}",
+            json_body={"args": args},
+            headers=self._headers(),
         )
 
     @staticmethod
@@ -46,27 +50,50 @@ class OpenWAProvider(WhatsAppProvider):
         return to if "@" in to else f"{to}@c.us"
 
     async def send_text(self, to: str, content: str) -> dict:
-        return await self._post("sendText", {"to": self._chat_id(to), "content": content})
-
-    async def send_image(self, to: str, url: str, filename: str = "image", caption: str = "") -> dict:
         return await self._post(
-            "sendImage",
-            {"to": self._chat_id(to), "file": url, "filename": filename, "caption": caption},
+            "sendText", {"to": self._chat_id(to), "content": content}
         )
 
-    async def send_file(self, to: str, url: str, filename: str = "file", caption: str = "") -> dict:
+    async def send_image(
+        self, to: str, url: str, filename: str = "image", caption: str = ""
+    ) -> dict:
+        return await self._post(
+            "sendImage",
+            {
+                "to": self._chat_id(to),
+                "file": url,
+                "filename": filename,
+                "caption": caption,
+            },
+        )
+
+    async def send_file(
+        self, to: str, url: str, filename: str = "file", caption: str = ""
+    ) -> dict:
         return await self._post(
             "sendFile",
-            {"to": self._chat_id(to), "file": url, "filename": filename, "caption": caption},
+            {
+                "to": self._chat_id(to),
+                "file": url,
+                "filename": filename,
+                "caption": caption,
+            },
         )
 
     async def send_audio(self, to: str, url: str) -> dict:
         return await self._post("sendAudio", {"to": self._chat_id(to), "file": url})
 
-    async def send_location(self, to: str, latitude: float, longitude: float, caption: str = "") -> dict:
+    async def send_location(
+        self, to: str, latitude: float, longitude: float, caption: str = ""
+    ) -> dict:
         return await self._post(
             "sendLocation",
-            {"to": self._chat_id(to), "lat": str(latitude), "lng": str(longitude), "loc": caption},
+            {
+                "to": self._chat_id(to),
+                "lat": str(latitude),
+                "lng": str(longitude),
+                "loc": caption,
+            },
         )
 
     async def health_check(self) -> bool:
@@ -119,7 +146,9 @@ class OpenWAProvider(WhatsAppProvider):
         return InboundMessage(
             phone=normalize_phone(str(sender)),
             text=str(data.get("body", "") or data.get("caption", "")),
-            sender_name=str(data.get("notifyName", "") or data.get("sender", {}).get("pushname", "")),
+            sender_name=str(
+                data.get("notifyName", "") or data.get("sender", {}).get("pushname", "")
+            ),
             external_id=str(data.get("id", "")),
             media_type=media_type if media_type in _KNOWN_MEDIA else "text",
             timestamp=timestamp,

@@ -1,4 +1,5 @@
 """OpenTelemetry tracing integration tests — end-to-end span creation and export."""
+
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -50,7 +51,9 @@ def test_traced_endpoint_returns_request_id(client):
     assert data["request_id"] is not None
 
 
-def test_tracing_initializes_successfully_with_console_exporter(app_with_tracing_enabled):
+def test_tracing_initializes_successfully_with_console_exporter(
+    app_with_tracing_enabled,
+):
     """TracerProvider is configured and ready to create spans."""
     provider = trace.get_tracer_provider()
     assert provider is not None
@@ -95,7 +98,12 @@ def test_otel_enabled_with_custom_endpoint():
     app = FastAPI()
     # Note: This won't actually connect to the endpoint (it's not running),
     # but the setup should succeed. The span processor will handle export failures gracefully.
-    setup_tracing(app, enabled=True, otlp_endpoint="http://jaeger:4318", service_name="test-custom-endpoint")
+    setup_tracing(
+        app,
+        enabled=True,
+        otlp_endpoint="http://jaeger:4318",
+        service_name="test-custom-endpoint",
+    )
     assert tracing_module._tracing_configured is True
 
 

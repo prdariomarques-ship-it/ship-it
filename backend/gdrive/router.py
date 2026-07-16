@@ -4,6 +4,7 @@ exactly; see those for the full rationale of every design choice repeated
 here (state-token auth for the callback, admin-only management,
 best-effort account label, HTML-escaped result page, race-safe upsert).
 """
+
 from datetime import datetime, timezone
 from html import escape
 from typing import Annotated
@@ -37,7 +38,11 @@ def _require_configured() -> None:
     from utils.config import get_settings
 
     settings = get_settings()
-    if not (settings.google_client_id and settings.google_client_secret and settings.google_drive_redirect_uri):
+    if not (
+        settings.google_client_id
+        and settings.google_client_secret
+        and settings.google_drive_redirect_uri
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Google Drive integration is not configured "
@@ -45,8 +50,14 @@ def _require_configured() -> None:
         )
 
 
-@router.get("/connect", response_model=GDriveConnectResponse, dependencies=[Depends(require_admin)])
-async def connect(current_user: Annotated[User, Depends(require_admin)]) -> GDriveConnectResponse:
+@router.get(
+    "/connect",
+    response_model=GDriveConnectResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def connect(
+    current_user: Annotated[User, Depends(require_admin)],
+) -> GDriveConnectResponse:
     _require_configured()
     provider = get_drive_provider()
     state = create_oauth_state_token(current_user.id, purpose=_STATE_PURPOSE)
@@ -67,7 +78,10 @@ async def oauth_callback(
 
     user_id = decode_oauth_state_token(state, purpose=_STATE_PURPOSE)
     if user_id is None:
-        return _result_page(ok=False, message="Sessão de autorização inválida ou expirada. Tente conectar de novo.")
+        return _result_page(
+            ok=False,
+            message="Sessão de autorização inválida ou expirada. Tente conectar de novo.",
+        )
 
     user = await UserRepository(db).get(user_id)
     if user is None:
@@ -78,7 +92,9 @@ async def oauth_callback(
         tokens = await provider.exchange_code(code)
     except DriveProviderError as exc:
         logger.error("Google Drive OAuth code exchange failed: %s", exc)
-        return _result_page(ok=False, message="Não foi possível concluir a autorização com o Google.")
+        return _result_page(
+            ok=False, message="Não foi possível concluir a autorização com o Google."
+        )
 
     if not tokens.refresh_token:
         return _result_page(
@@ -91,7 +107,10 @@ async def oauth_callback(
         encrypted = encrypt_token(tokens.refresh_token)
     except TokenEncryptionNotConfigured as exc:
         logger.error("Cannot store Google Drive refresh token: %s", exc)
-        return _result_page(ok=False, message="Armazenamento de credenciais não configurado no servidor.")
+        return _result_page(
+            ok=False,
+            message="Armazenamento de credenciais não configurado no servidor.",
+        )
 
     account_label = await _resolve_account_label(tokens.access_token)
 
@@ -104,23 +123,39 @@ async def oauth_callback(
         connected_at=datetime.now(timezone.utc),
     )
 
-    return _result_page(ok=True, message=f"Google Drive ({account_label}) conectado com sucesso.")
-
-
-@router.get("/status", response_model=GDriveStatusResponse, dependencies=[Depends(require_admin)])
-async def gdrive_status(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> GDriveStatusResponse:
-    account = await GoogleDriveAccountRepository(db).get_by_user(current_user.id, get_drive_provider().name)
-    if account is None:
-        return GDriveStatusResponse(connected=False)
-    return GDriveStatusResponse(
-        connected=True, account_label=account.account_label, connected_at=account.connected_at
+    return _result_page(
+        ok=True, message=f"Google Drive ({account_label}) conectado com sucesso."
     )
 
 
-@router.delete("/disconnect", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
-async def disconnect(db: DbSession, current_user: Annotated[User, Depends(require_admin)]) -> None:
+@router.get(
+    "/status",
+    response_model=GDriveStatusResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def gdrive_status(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> GDriveStatusResponse:
+    account = await GoogleDriveAccountRepository(db).get_by_user(
+        current_user.id, get_drive_provider().name
+    )
+    if account is None:
+        return GDriveStatusResponse(connected=False)
+    return GDriveStatusResponse(
+        connected=True,
+        account_label=account.account_label,
+        connected_at=account.connected_at,
+    )
+
+
+@router.delete(
+    "/disconnect",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_admin)],
+)
+async def disconnect(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> None:
     repository = GoogleDriveAccountRepository(db)
     account = await repository.get_by_user(current_user.id, get_drive_provider().name)
     if account is not None:
@@ -146,7 +181,11 @@ async def _resolve_account_label(access_token: str) -> str:
             )
             response.raise_for_status()
             user_info = response.json().get("user", {})
-            return user_info.get("displayName") or user_info.get("emailAddress") or "conta conectada"
+            return (
+                user_info.get("displayName")
+                or user_info.get("emailAddress")
+                or "conta conectada"
+            )
     except Exception:  # noqa: BLE001 - cosmetic only, never blocks the connection
         return "conta conectada"
 

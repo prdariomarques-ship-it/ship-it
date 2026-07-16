@@ -1,6 +1,7 @@
 """Factory for contacts providers (Factory + Strategy patterns) — same shape
 as `providers/mail/factory.py` and `providers/calendar/factory.py`.
 """
+
 from functools import lru_cache
 
 from providers.contacts.base import ContactsProvider

@@ -1,4 +1,5 @@
 """Pydantic schemas for the CRUD resources."""
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field

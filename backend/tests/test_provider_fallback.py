@@ -1,5 +1,6 @@
 """Automatic provider switch: AgentExecutor retries once against
 LLM_FALLBACK_PROVIDER when the primary provider raises mid-run."""
+
 import pytest
 
 from agents.executor import AgentExecutor
@@ -61,7 +62,9 @@ async def user(db_session):
 
 
 @pytest.mark.asyncio
-async def test_switches_to_fallback_provider_when_primary_raises(db_session, user, monkeypatch):
+async def test_switches_to_fallback_provider_when_primary_raises(
+    db_session, user, monkeypatch
+):
     from utils.config import get_settings
 
     working = WorkingLLM()
@@ -71,7 +74,8 @@ async def test_switches_to_fallback_provider_when_primary_raises(db_session, use
     try:
         executor = AgentExecutor(FailingLLM(), [])
         result = await executor.run(
-            [ChatMessage(role="user", content="oi")], ToolContext(db=db_session, user=user)
+            [ChatMessage(role="user", content="oi")],
+            ToolContext(db=db_session, user=user),
         )
     finally:
         get_fallback_llm_provider.cache_clear()
@@ -81,7 +85,9 @@ async def test_switches_to_fallback_provider_when_primary_raises(db_session, use
 
 
 @pytest.mark.asyncio
-async def test_propagates_the_original_error_without_a_fallback_configured(db_session, user, monkeypatch):
+async def test_propagates_the_original_error_without_a_fallback_configured(
+    db_session, user, monkeypatch
+):
     from utils.config import get_settings
 
     monkeypatch.setattr(get_settings(), "llm_fallback_provider", "")
@@ -90,14 +96,17 @@ async def test_propagates_the_original_error_without_a_fallback_configured(db_se
         executor = AgentExecutor(FailingLLM(), [])
         with pytest.raises(RuntimeError, match="provider is down"):
             await executor.run(
-                [ChatMessage(role="user", content="oi")], ToolContext(db=db_session, user=user)
+                [ChatMessage(role="user", content="oi")],
+                ToolContext(db=db_session, user=user),
             )
     finally:
         get_fallback_llm_provider.cache_clear()
 
 
 @pytest.mark.asyncio
-async def test_fallback_identical_to_primary_does_not_retry(db_session, user, monkeypatch):
+async def test_fallback_identical_to_primary_does_not_retry(
+    db_session, user, monkeypatch
+):
     """Guard against an infinite-seeming retry loop: if the configured
     fallback resolves to the same provider name as the primary, don't retry
     — just propagate, since a second call would fail identically."""
@@ -110,7 +119,8 @@ async def test_fallback_identical_to_primary_does_not_retry(db_session, user, mo
         executor = AgentExecutor(FailingLLM(), [])
         with pytest.raises(RuntimeError, match="provider is down"):
             await executor.run(
-                [ChatMessage(role="user", content="oi")], ToolContext(db=db_session, user=user)
+                [ChatMessage(role="user", content="oi")],
+                ToolContext(db=db_session, user=user),
             )
     finally:
         get_fallback_llm_provider.cache_clear()

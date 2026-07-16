@@ -2,6 +2,7 @@
 as `providers/mail/factory.py`. Swap providers by changing CALENDAR_PROVIDER;
 the rest of the application only depends on the CalendarProvider interface.
 """
+
 from functools import lru_cache
 
 from providers.calendar.base import CalendarProvider

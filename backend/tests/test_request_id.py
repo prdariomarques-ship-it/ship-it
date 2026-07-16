@@ -1,4 +1,5 @@
 """Request/Correlation ID middleware and its propagation into logs."""
+
 import json
 import logging
 
@@ -18,7 +19,9 @@ async def test_response_carries_a_generated_request_id_when_client_sends_none(cl
 
 @pytest.mark.asyncio
 async def test_response_echoes_back_the_client_supplied_request_id(client):
-    response = await client.get("/health", headers={REQUEST_ID_HEADER: "client-chosen-id-42"})
+    response = await client.get(
+        "/health", headers={REQUEST_ID_HEADER: "client-chosen-id-42"}
+    )
     assert response.headers[REQUEST_ID_HEADER] == "client-chosen-id-42"
 
 
@@ -43,7 +46,9 @@ def test_get_request_id_reflects_the_contextvar():
 
 class TestLoggingIntegration:
     def test_json_formatter_omits_request_id_when_absent(self):
-        record = logging.LogRecord("test", logging.INFO, __file__, 1, "hello", None, None)
+        record = logging.LogRecord(
+            "test", logging.INFO, __file__, 1, "hello", None, None
+        )
         RequestIDFilter().filter(record)
         entry = json.loads(JsonFormatter().format(record))
         assert "request_id" not in entry
@@ -51,7 +56,9 @@ class TestLoggingIntegration:
     def test_json_formatter_includes_request_id_when_set(self):
         token = _request_id.set("json-log-test-id")
         try:
-            record = logging.LogRecord("test", logging.INFO, __file__, 1, "hello", None, None)
+            record = logging.LogRecord(
+                "test", logging.INFO, __file__, 1, "hello", None, None
+            )
             RequestIDFilter().filter(record)
             entry = json.loads(JsonFormatter().format(record))
             assert entry["request_id"] == "json-log-test-id"
@@ -62,7 +69,9 @@ class TestLoggingIntegration:
         assert "%(request_id)s" in TEXT_FORMAT
 
     def test_text_formatter_renders_dash_when_no_request_id(self):
-        record = logging.LogRecord("test", logging.INFO, __file__, 1, "hello", None, None)
+        record = logging.LogRecord(
+            "test", logging.INFO, __file__, 1, "hello", None, None
+        )
         RequestIDFilter().filter(record)
         rendered = logging.Formatter(TEXT_FORMAT).format(record)
         assert "[-:-]" in rendered

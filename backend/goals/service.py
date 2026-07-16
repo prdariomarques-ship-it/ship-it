@@ -9,6 +9,7 @@ entry (`GET /api/goals/{id}/history`), so other components (or a future
 autonomous execution engine) can react without polling. See docs/GOALS.md
 for the full scope boundary.
 """
+
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +46,9 @@ class GoalService:
         recurrence_interval_days: int | None = None,
         requires_approval: bool = False,
     ) -> Goal:
-        initial_status = GoalStatus.AWAITING_APPROVAL if requires_approval else GoalStatus.PENDING
+        initial_status = (
+            GoalStatus.AWAITING_APPROVAL if requires_approval else GoalStatus.PENDING
+        )
         goal = await self.goals.create(
             user_id=user_id,
             title=title,
@@ -64,7 +67,9 @@ class GoalService:
         and only this method (never the generic status-update path) can move
         it out of that status."""
         if goal.status != GoalStatus.AWAITING_APPROVAL:
-            raise ApprovalRequiredError(f"Goal {goal.id} is not awaiting approval (status={goal.status.value})")
+            raise ApprovalRequiredError(
+                f"Goal {goal.id} is not awaiting approval (status={goal.status.value})"
+            )
         updated = await self.goals.update(
             goal,
             status=GoalStatus.PENDING,
@@ -106,7 +111,9 @@ class GoalService:
         """PENDING goals (never AWAITING_APPROVAL) with every dependency
         already COMPLETED, ordered by priority_score (highest/most urgent
         first)."""
-        pending = await self.goals.list(user_id=user_id, status=GoalStatus.PENDING, limit=200)
+        pending = await self.goals.list(
+            user_id=user_id, status=GoalStatus.PENDING, limit=200
+        )
         ready = [goal for goal in pending if not await self.goals.is_blocked(goal.id)]
         ready.sort(key=priority_score, reverse=True)
         return ready[:limit]
@@ -118,7 +125,10 @@ class GoalService:
         A goal AWAITING_APPROVAL can only be CANCELLED (rejected) through this
         path -- moving it forward requires `approve_goal`, which is the whole
         point of the approval gate."""
-        if goal.status == GoalStatus.AWAITING_APPROVAL and status != GoalStatus.CANCELLED:
+        if (
+            goal.status == GoalStatus.AWAITING_APPROVAL
+            and status != GoalStatus.CANCELLED
+        ):
             raise ApprovalRequiredError(
                 f"Goal {goal.id} requires approval before its status can change to {status.value}"
             )
@@ -151,10 +161,14 @@ class GoalService:
                 source="goal",
             )
         except Exception:  # noqa: BLE001 - memory write is best-effort, never blocks completion
-            logger.warning("Failed to record memory for completed goal %s", goal.id, exc_info=True)
+            logger.warning(
+                "Failed to record memory for completed goal %s", goal.id, exc_info=True
+            )
 
     async def _spawn_next_occurrence(self, goal: Goal) -> Goal:
-        assert goal.recurrence_interval_days is not None, "caller must only invoke this for recurring goals"
+        assert goal.recurrence_interval_days is not None, (
+            "caller must only invoke this for recurring goals"
+        )
         base = goal.deadline or datetime.now(timezone.utc)
         next_deadline = base + timedelta(days=goal.recurrence_interval_days)
         next_goal = await self.goals.create(
@@ -166,5 +180,7 @@ class GoalService:
             recurrence_interval_days=goal.recurrence_interval_days,
             recurrence_parent_id=goal.recurrence_parent_id or goal.id,
         )
-        await goal_event_publisher.publish(self.session, next_goal, "created", detail="recurrence")
+        await goal_event_publisher.publish(
+            self.session, next_goal, "created", detail="recurrence"
+        )
         return next_goal

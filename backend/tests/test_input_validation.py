@@ -1,4 +1,5 @@
 """Tests for input validation services — SSRF, path traversal, email, phone."""
+
 import pytest
 import tempfile
 
@@ -143,7 +144,9 @@ class TestEmailValidation:
 
     def test_validate_email_rejects_invalid_characters(self):
         """Rejects emails with invalid characters."""
-        assert validate_email("user+test@example.com") is True  # + is valid in local part
+        assert (
+            validate_email("user+test@example.com") is True
+        )  # + is valid in local part
         assert validate_email("user#@example.com") is False
 
 

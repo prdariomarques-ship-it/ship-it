@@ -1,4 +1,5 @@
 """Log redaction filter — mask sensitive fields to prevent data leakage."""
+
 import copy
 import logging
 from typing import Any

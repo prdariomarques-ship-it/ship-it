@@ -4,6 +4,7 @@ HTTP (inbound/outbound), database, external APIs, jobs, event bus, agent orchest
 All mechanisms work with the W3C TraceContext standard (traceparent header format)
 and maintain parent-child span relationships across async boundaries.
 """
+
 from typing import Optional
 
 from observability.request_context import get_trace_id
@@ -41,8 +42,8 @@ def format_traceparent(trace_context: dict[str, str]) -> str:
     """
     return (
         f"{trace_context.get('version', '00')}-"
-        f"{trace_context.get('trace_id', '0'*32)}-"
-        f"{trace_context.get('span_id', '0'*16)}-"
+        f"{trace_context.get('trace_id', '0' * 32)}-"
+        f"{trace_context.get('span_id', '0' * 16)}-"
         f"{trace_context.get('trace_flags', '01')}"
     )
 
@@ -65,7 +66,9 @@ def serialize_trace_context() -> Optional[dict[str, str]]:
     return get_current_trace_context()
 
 
-def restore_trace_context(trace_data: Optional[dict[str, str]]) -> Optional[dict[str, str]]:
+def restore_trace_context(
+    trace_data: Optional[dict[str, str]],
+) -> Optional[dict[str, str]]:
     """Restore trace context from serialized data.
 
     Used by Job Worker and Event Bus handlers to resume tracing.

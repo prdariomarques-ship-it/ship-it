@@ -1,4 +1,5 @@
 """Password hashing with PBKDF2-SHA256 (stdlib only, no external dependency)."""
+
 import hashlib
 import hmac
 import os
@@ -17,7 +18,9 @@ def verify_password(password: str, hashed: str) -> bool:
         algorithm, iterations, salt_hex, digest_hex = hashed.split("$")
         if algorithm != "pbkdf2_sha256":
             return False
-        candidate = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations))
+        candidate = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations)
+        )
         return hmac.compare_digest(candidate.hex(), digest_hex)
     except (ValueError, TypeError):
         return False

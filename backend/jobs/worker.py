@@ -10,6 +10,7 @@ Concurrency-safe by design:
 - Jobs stuck in RUNNING (worker crashed mid-flight) are recovered on each tick:
   requeued while attempts remain, failed otherwise.
 """
+
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
@@ -39,7 +40,10 @@ class JobWorker:
         if self._task is None or self._task.done():
             self._stopping.clear()
             self._task = asyncio.create_task(self._run(), name="job-worker")
-            logger.info("Job worker started (poll every %ss)", self._settings.jobs_poll_interval_seconds)
+            logger.info(
+                "Job worker started (poll every %ss)",
+                self._settings.jobs_poll_interval_seconds,
+            )
 
     async def stop(self) -> None:
         self._stopping.set()
@@ -57,7 +61,8 @@ class JobWorker:
             if processed == 0:
                 try:
                     await asyncio.wait_for(
-                        self._stopping.wait(), timeout=self._settings.jobs_poll_interval_seconds
+                        self._stopping.wait(),
+                        timeout=self._settings.jobs_poll_interval_seconds,
                     )
                 except asyncio.TimeoutError:
                     pass
@@ -87,7 +92,9 @@ class JobWorker:
                         await self._execute(job_session, job_repository, job)
 
             if job_ids:
-                await asyncio.gather(*(execute_with_semaphore(job_id) for job_id in job_ids))
+                await asyncio.gather(
+                    *(execute_with_semaphore(job_id) for job_id in job_ids)
+                )
 
             return len(job_ids)
 
@@ -106,9 +113,16 @@ class JobWorker:
     async def _recover_stale(
         self, session: AsyncSession, repository: JobRepository, now: datetime
     ) -> None:
-        started_before = now - timedelta(seconds=self._settings.jobs_stale_after_seconds)
+        started_before = now - timedelta(
+            seconds=self._settings.jobs_stale_after_seconds
+        )
         for job in await repository.stale_running_jobs(started_before):
-            logger.warning("Recovering stale job %s (%s), attempt %s", job.id, job.name, job.attempts)
+            logger.warning(
+                "Recovering stale job %s (%s), attempt %s",
+                job.id,
+                job.name,
+                job.attempts,
+            )
             if job.attempts >= job.max_attempts:
                 await repository.update(
                     job,
@@ -116,12 +130,18 @@ class JobWorker:
                     finished_at=now,
                     last_error="worker crashed or timed out while running the job",
                 )
-                await job_event_publisher.publish(session, job, "failed", detail="stale job")
+                await job_event_publisher.publish(
+                    session, job, "failed", detail="stale job"
+                )
             else:
                 await repository.update(job, status=JobStatus.QUEUED, scheduled_at=now)
-                await job_event_publisher.publish(session, job, "retry_scheduled", detail="stale job")
+                await job_event_publisher.publish(
+                    session, job, "retry_scheduled", detail="stale job"
+                )
 
-    async def _execute(self, session: AsyncSession, repository: JobRepository, job: Job) -> None:
+    async def _execute(
+        self, session: AsyncSession, repository: JobRepository, job: Job
+    ) -> None:
         await job_event_publisher.publish(session, job, "started")
         job_id, job_name = job.id, job.name
         started = time.perf_counter()
@@ -139,14 +159,18 @@ class JobWorker:
             return
 
         record_job_duration(job_name, time.perf_counter() - started)
-        await repository.update(job, status=JobStatus.SUCCEEDED, finished_at=datetime.now(timezone.utc))
+        await repository.update(
+            job, status=JobStatus.SUCCEEDED, finished_at=datetime.now(timezone.utc)
+        )
         await job_event_publisher.publish(session, job, "succeeded")
 
     async def _handle_failure(
         self, session: AsyncSession, repository: JobRepository, job: Job, exc: Exception
     ) -> None:
         error = f"{type(exc).__name__}: {exc}"
-        logger.warning("Job %s (%s) attempt %s failed: %s", job.id, job.name, job.attempts, error)
+        logger.warning(
+            "Job %s (%s) attempt %s failed: %s", job.id, job.name, job.attempts, error
+        )
 
         if job.attempts >= job.max_attempts:
             await repository.update(

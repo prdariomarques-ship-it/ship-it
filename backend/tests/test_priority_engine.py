@@ -1,5 +1,6 @@
 """Priority Engine: LLM decision as the primary path, keyword heuristic as
 the degrade path, plus the non-LLM `quick_priority_hint` used at webhook time."""
+
 import pytest
 
 from orchestrator.intent import Intent, IntentHypothesis, IntentResult
@@ -25,7 +26,9 @@ class ScriptedLLM(LLMProvider):
 
 
 def _intent(top: Intent) -> IntentResult:
-    return IntentResult(top=top, hypotheses=[IntentHypothesis(intent=top, confidence=0.9)])
+    return IntentResult(
+        top=top, hypotheses=[IntentHypothesis(intent=top, confidence=0.9)]
+    )
 
 
 @pytest.mark.asyncio
@@ -33,11 +36,17 @@ async def test_llm_decision_sets_level_and_reason():
     llm = ScriptedLLM(
         LLMResult(
             tool_calls=[
-                ToolCallRequest(id="c1", name="classify_priority", arguments={"level": "urgent", "reason": "socorro"})
+                ToolCallRequest(
+                    id="c1",
+                    name="classify_priority",
+                    arguments={"level": "urgent", "reason": "socorro"},
+                )
             ]
         )
     )
-    result = await PriorityEngine(llm=llm).classify("preciso de ajuda urgente", _intent(Intent.REQUEST))
+    result = await PriorityEngine(llm=llm).classify(
+        "preciso de ajuda urgente", _intent(Intent.REQUEST)
+    )
     assert result.level == Priority.URGENT
     assert result.reason == "socorro"
 
@@ -45,21 +54,27 @@ async def test_llm_decision_sets_level_and_reason():
 @pytest.mark.asyncio
 async def test_degrades_to_heuristic_without_tool_call():
     llm = ScriptedLLM(LLMResult(content="stub"))
-    result = await PriorityEngine(llm=llm).classify("oi tudo bem?", _intent(Intent.GREETING))
+    result = await PriorityEngine(llm=llm).classify(
+        "oi tudo bem?", _intent(Intent.GREETING)
+    )
     assert result.level == Priority.LOW
 
 
 @pytest.mark.asyncio
 async def test_heuristic_detects_urgent_keyword():
     llm = ScriptedLLM(LLMResult(content="stub"))
-    result = await PriorityEngine(llm=llm).classify("é urgente, preciso agora", _intent(Intent.REQUEST))
+    result = await PriorityEngine(llm=llm).classify(
+        "é urgente, preciso agora", _intent(Intent.REQUEST)
+    )
     assert result.level == Priority.URGENT
 
 
 @pytest.mark.asyncio
 async def test_heuristic_treats_admin_command_as_high():
     llm = ScriptedLLM(LLMResult(content="stub"))
-    result = await PriorityEngine(llm=llm).classify("desativar o robô", _intent(Intent.ADMIN_COMMAND))
+    result = await PriorityEngine(llm=llm).classify(
+        "desativar o robô", _intent(Intent.ADMIN_COMMAND)
+    )
     assert result.level == Priority.HIGH
 
 
@@ -67,7 +82,13 @@ async def test_heuristic_treats_admin_command_as_high():
 async def test_invalid_level_from_model_falls_back():
     llm = ScriptedLLM(
         LLMResult(
-            tool_calls=[ToolCallRequest(id="c1", name="classify_priority", arguments={"level": "catastrophic"})]
+            tool_calls=[
+                ToolCallRequest(
+                    id="c1",
+                    name="classify_priority",
+                    arguments={"level": "catastrophic"},
+                )
+            ]
         )
     )
     result = await PriorityEngine(llm=llm).classify("oi", _intent(Intent.GREETING))
@@ -90,7 +111,9 @@ class RaisingLLM(LLMProvider):
 
 @pytest.mark.asyncio
 async def test_degrades_to_heuristic_when_the_provider_raises():
-    result = await PriorityEngine(llm=RaisingLLM()).classify("é urgente, socorro", _intent(Intent.REQUEST))
+    result = await PriorityEngine(llm=RaisingLLM()).classify(
+        "é urgente, socorro", _intent(Intent.REQUEST)
+    )
     assert result.level == Priority.URGENT
 
 

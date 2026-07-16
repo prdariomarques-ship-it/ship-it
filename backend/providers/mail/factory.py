@@ -3,6 +3,7 @@
 providers by changing MAIL_PROVIDER; the rest of the application only
 depends on the MailProvider interface.
 """
+
 from functools import lru_cache
 
 from providers.mail.base import MailProvider

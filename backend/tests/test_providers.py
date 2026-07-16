@@ -1,4 +1,5 @@
 """Provider layer: factories and webhook normalization across vendors."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,13 +28,21 @@ from providers.whatsapp.openwa.provider import OpenWAProvider
 
 def test_whatsapp_factory_returns_configured_provider():
     get_whatsapp_provider.cache_clear()
-    assert isinstance(get_whatsapp_provider(), OpenWAProvider)  # default from conftest env
+    assert isinstance(
+        get_whatsapp_provider(), OpenWAProvider
+    )  # default from conftest env
     get_whatsapp_provider.cache_clear()
 
 
 def test_openwa_webhook_normalization():
     inbound = OpenWAProvider().parse_webhook(
-        {"from": "5511988887777@c.us", "body": "Olá", "notifyName": "João", "id": "m1", "type": "text"}
+        {
+            "from": "5511988887777@c.us",
+            "body": "Olá",
+            "notifyName": "João",
+            "id": "m1",
+            "type": "text",
+        }
     )
     assert inbound is not None
     assert inbound.phone == "5511988887777"
@@ -46,7 +55,11 @@ def test_evolution_webhook_normalization():
         {
             "event": "messages.upsert",
             "data": {
-                "key": {"remoteJid": "5511911112222@s.whatsapp.net", "fromMe": False, "id": "e1"},
+                "key": {
+                    "remoteJid": "5511911112222@s.whatsapp.net",
+                    "fromMe": False,
+                    "id": "e1",
+                },
                 "pushName": "Ana",
                 "message": {"conversation": "Oi, tudo bem?"},
             },
@@ -60,7 +73,12 @@ def test_evolution_webhook_normalization():
 
 def test_evolution_webhook_ignores_own_messages():
     inbound = EvolutionProvider().parse_webhook(
-        {"data": {"key": {"remoteJid": "551199@s.whatsapp.net", "fromMe": True}, "message": {}}}
+        {
+            "data": {
+                "key": {"remoteJid": "551199@s.whatsapp.net", "fromMe": True},
+                "message": {},
+            }
+        }
     )
     assert inbound is None
 
@@ -72,7 +90,9 @@ def test_official_webhook_normalization():
                 "changes": [
                     {
                         "value": {
-                            "contacts": [{"profile": {"name": "Maria"}, "wa_id": "5511900001111"}],
+                            "contacts": [
+                                {"profile": {"name": "Maria"}, "wa_id": "5511900001111"}
+                            ],
                             "messages": [
                                 {
                                     "from": "5511900001111",
@@ -95,7 +115,10 @@ def test_official_webhook_normalization():
 
 
 def test_official_webhook_ignores_status_updates():
-    assert OfficialProvider().parse_webhook({"entry": [{"changes": [{"value": {}}]}]}) is None
+    assert (
+        OfficialProvider().parse_webhook({"entry": [{"changes": [{"value": {}}]}]})
+        is None
+    )
 
 
 # --- OpenWA: session state and delivery ack normalization -------------------
@@ -111,14 +134,19 @@ def test_official_webhook_ignores_status_updates():
     ],
 )
 def test_openwa_connection_event_maps_known_states(state, expected_status):
-    event = OpenWAProvider().parse_connection_event({"event": "onStateChanged", "data": state})
+    event = OpenWAProvider().parse_connection_event(
+        {"event": "onStateChanged", "data": state}
+    )
     assert event is not None
     assert event.status.value == expected_status
     assert event.detail == state
 
 
 def test_openwa_connection_event_ignores_non_state_events():
-    assert OpenWAProvider().parse_connection_event({"event": "onMessage", "data": {}}) is None
+    assert (
+        OpenWAProvider().parse_connection_event({"event": "onMessage", "data": {}})
+        is None
+    )
 
 
 def test_openwa_connection_event_handles_nested_state_shape():
@@ -141,19 +169,31 @@ def test_openwa_connection_event_handles_nested_state_shape():
     ],
 )
 def test_openwa_delivery_ack_maps_ack_levels(ack, expected_status):
-    result = OpenWAProvider().parse_delivery_ack({"event": "onAck", "data": {"id": "wamid-1", "ack": ack}})
+    result = OpenWAProvider().parse_delivery_ack(
+        {"event": "onAck", "data": {"id": "wamid-1", "ack": ack}}
+    )
     assert result is not None
     assert result.external_id == "wamid-1"
     assert result.status.value == expected_status
 
 
 def test_openwa_delivery_ack_ignores_other_events():
-    assert OpenWAProvider().parse_delivery_ack({"event": "onMessage", "data": {}}) is None
+    assert (
+        OpenWAProvider().parse_delivery_ack({"event": "onMessage", "data": {}}) is None
+    )
 
 
 def test_openwa_delivery_ack_requires_both_id_and_ack():
-    assert OpenWAProvider().parse_delivery_ack({"event": "onAck", "data": {"id": "wamid-1"}}) is None
-    assert OpenWAProvider().parse_delivery_ack({"event": "onAck", "data": {"ack": 1}}) is None
+    assert (
+        OpenWAProvider().parse_delivery_ack(
+            {"event": "onAck", "data": {"id": "wamid-1"}}
+        )
+        is None
+    )
+    assert (
+        OpenWAProvider().parse_delivery_ack({"event": "onAck", "data": {"ack": 1}})
+        is None
+    )
 
 
 def test_baileys_webhook_normalization():
@@ -162,7 +202,11 @@ def test_baileys_webhook_normalization():
             "data": {
                 "messages": [
                     {
-                        "key": {"remoteJid": "5511922223333@s.whatsapp.net", "fromMe": False, "id": "b1"},
+                        "key": {
+                            "remoteJid": "5511922223333@s.whatsapp.net",
+                            "fromMe": False,
+                            "id": "b1",
+                        },
                         "pushName": "Pedro",
                         "message": {"extendedTextMessage": {"text": "Bom dia"}},
                     }
@@ -177,11 +221,17 @@ def test_baileys_webhook_normalization():
 
 @pytest.mark.asyncio
 async def test_llm_providers_degrade_gracefully_without_keys():
-    result = await OpenAIProvider(api_key="").chat([ChatMessage(role="user", content="oi")])
+    result = await OpenAIProvider(api_key="").chat(
+        [ChatMessage(role="user", content="oi")]
+    )
     assert result.content == STUB_REPLY
-    result = await AnthropicProvider(api_key="").chat([ChatMessage(role="user", content="oi")])
+    result = await AnthropicProvider(api_key="").chat(
+        [ChatMessage(role="user", content="oi")]
+    )
     assert result.content == STUB_REPLY
-    result = await GLMProvider(api_key="").chat([ChatMessage(role="user", content="oi")])
+    result = await GLMProvider(api_key="").chat(
+        [ChatMessage(role="user", content="oi")]
+    )
     assert result.content == STUB_REPLY
 
 
@@ -199,7 +249,11 @@ async def test_openai_chat_reports_token_usage():
     fake_response.choices = [MagicMock(message=fake_message)]
     fake_response.usage = MagicMock(prompt_tokens=42, completion_tokens=8)
 
-    with patch.object(provider.client.chat.completions, "create", new=AsyncMock(return_value=fake_response)):
+    with patch.object(
+        provider.client.chat.completions,
+        "create",
+        new=AsyncMock(return_value=fake_response),
+    ):
         result = await provider.chat([ChatMessage(role="user", content="oi")])
     assert result.usage.prompt_tokens == 42
     assert result.usage.completion_tokens == 8
@@ -212,7 +266,11 @@ async def test_openai_chat_without_usage_reports_zero():
     fake_response = MagicMock(usage=None)
     fake_response.choices = [MagicMock(message=fake_message)]
 
-    with patch.object(provider.client.chat.completions, "create", new=AsyncMock(return_value=fake_response)):
+    with patch.object(
+        provider.client.chat.completions,
+        "create",
+        new=AsyncMock(return_value=fake_response),
+    ):
         result = await provider.chat([ChatMessage(role="user", content="oi")])
     assert result.usage.prompt_tokens == 0
     assert result.usage.completion_tokens == 0
@@ -226,7 +284,9 @@ async def test_anthropic_chat_reports_token_usage():
     fake_response.content = [fake_block]
     fake_response.usage = MagicMock(input_tokens=15, output_tokens=6)
 
-    with patch.object(provider.client.messages, "create", new=AsyncMock(return_value=fake_response)):
+    with patch.object(
+        provider.client.messages, "create", new=AsyncMock(return_value=fake_response)
+    ):
         result = await provider.chat([ChatMessage(role="user", content="oi")])
     assert result.usage.prompt_tokens == 15
     assert result.usage.completion_tokens == 6
@@ -278,7 +338,11 @@ async def test_ollama_chat_reuses_openai_wire_format():
     fake_response = MagicMock()
     fake_response.choices = [MagicMock(message=fake_message)]
 
-    with patch.object(provider.client.chat.completions, "create", new=AsyncMock(return_value=fake_response)):
+    with patch.object(
+        provider.client.chat.completions,
+        "create",
+        new=AsyncMock(return_value=fake_response),
+    ):
         result = await provider.chat([ChatMessage(role="user", content="oi")])
     assert result.content == "olá!"
 
@@ -330,7 +394,14 @@ async def test_gemini_chat_returns_function_call():
         "candidates": [
             {
                 "content": {
-                    "parts": [{"functionCall": {"name": "create_task", "args": {"title": "Comprar pão"}}}]
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "create_task",
+                                "args": {"title": "Comprar pão"},
+                            }
+                        }
+                    ]
                 }
             }
         ]
@@ -355,7 +426,11 @@ async def test_gemini_tool_result_round_trips_by_synthesized_id():
         ChatMessage(
             role="assistant",
             content="",
-            tool_calls=[ToolCallRequest(id="gemini_call_0", name="create_task", arguments={"title": "x"})],
+            tool_calls=[
+                ToolCallRequest(
+                    id="gemini_call_0", name="create_task", arguments={"title": "x"}
+                )
+            ],
         ),
         ChatMessage(role="tool", content='{"ok": true}', tool_call_id="gemini_call_0"),
     ]
@@ -388,7 +463,11 @@ async def test_gemini_chat_reports_token_usage():
     provider = GeminiProvider(api_key="test-key")
     body = {
         "candidates": [{"content": {"parts": [{"text": "oi"}]}}],
-        "usageMetadata": {"promptTokenCount": 12, "candidatesTokenCount": 4, "totalTokenCount": 16},
+        "usageMetadata": {
+            "promptTokenCount": 12,
+            "candidatesTokenCount": 4,
+            "totalTokenCount": 16,
+        },
     }
     with _patch_httpx_post(_mock_httpx_response(body)):
         result = await provider.chat([ChatMessage(role="user", content="oi")])
@@ -399,7 +478,9 @@ async def test_gemini_chat_reports_token_usage():
 
 # --- Token usage / cost estimate ---------------------------------------------
 def test_token_usage_addition_sums_both_fields():
-    total = TokenUsage(prompt_tokens=10, completion_tokens=5) + TokenUsage(prompt_tokens=3, completion_tokens=2)
+    total = TokenUsage(prompt_tokens=10, completion_tokens=5) + TokenUsage(
+        prompt_tokens=3, completion_tokens=2
+    )
     assert total == TokenUsage(prompt_tokens=13, completion_tokens=7)
     assert total.total_tokens == 20
 
@@ -459,12 +540,17 @@ async def test_whatsapp_request_retries_transient_failures_then_succeeds(monkeyp
             return _json_response({"status": "ok"})
 
     before = WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "ok")._value.get()
-    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=_FlakyClient()):
+    with patch(
+        "providers.whatsapp.base.httpx.AsyncClient", return_value=_FlakyClient()
+    ):
         result = await provider._request("GET", "http://example.test/ping")
 
     assert result == {"status": "ok"}
     assert _FlakyClient.attempts == 3
-    assert WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "ok")._value.get() == before + 1
+    assert (
+        WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "ok")._value.get()
+        == before + 1
+    )
 
 
 @pytest.mark.asyncio
@@ -494,12 +580,17 @@ async def test_whatsapp_request_raises_after_exhausting_all_retries(monkeypatch)
             raise httpx_module.ConnectError("gateway is down")
 
     before = WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "error")._value.get()
-    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=_AlwaysFailingClient()):
+    with patch(
+        "providers.whatsapp.base.httpx.AsyncClient", return_value=_AlwaysFailingClient()
+    ):
         with pytest.raises(WhatsAppProviderError):
             await provider._request("GET", "http://example.test/ping")
 
     assert _AlwaysFailingClient.attempts == 2
-    assert WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "error")._value.get() == before + 1
+    assert (
+        WHATSAPP_PROVIDER_REQUESTS.labels(provider.name, "error")._value.get()
+        == before + 1
+    )
 
 
 @pytest.mark.asyncio
@@ -528,7 +619,9 @@ async def test_whatsapp_request_max_attempts_override_skips_retry(monkeypatch):
             _FailingClient.attempts += 1
             raise httpx_module.ConnectError("down")
 
-    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=_FailingClient()):
+    with patch(
+        "providers.whatsapp.base.httpx.AsyncClient", return_value=_FailingClient()
+    ):
         with pytest.raises(Exception):
             await provider._request("GET", "http://example.test/ping", max_attempts=1)
 

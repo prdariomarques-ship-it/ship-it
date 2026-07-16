@@ -12,6 +12,7 @@ No business logic belongs here: no database access, no job enqueueing, no
 Event Bus, no memory. The webhook route decides what to *do* with a
 translated event; the provider only decides *what the event means*.
 """
+
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
@@ -90,16 +91,22 @@ class WhatsAppProvider(ABC):
     async def send_text(self, to: str, content: str) -> dict: ...
 
     @abstractmethod
-    async def send_image(self, to: str, url: str, filename: str = "image", caption: str = "") -> dict: ...
+    async def send_image(
+        self, to: str, url: str, filename: str = "image", caption: str = ""
+    ) -> dict: ...
 
     @abstractmethod
-    async def send_file(self, to: str, url: str, filename: str = "file", caption: str = "") -> dict: ...
+    async def send_file(
+        self, to: str, url: str, filename: str = "file", caption: str = ""
+    ) -> dict: ...
 
     @abstractmethod
     async def send_audio(self, to: str, url: str) -> dict: ...
 
     @abstractmethod
-    async def send_location(self, to: str, latitude: float, longitude: float, caption: str = "") -> dict: ...
+    async def send_location(
+        self, to: str, latitude: float, longitude: float, caption: str = ""
+    ) -> dict: ...
 
     @abstractmethod
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
@@ -154,32 +161,57 @@ class WhatsAppProvider(ABC):
         from observability.metrics import record_whatsapp_request
 
         settings = get_settings()
-        max_attempts = max_attempts if max_attempts is not None else settings.whatsapp_request_max_attempts
+        max_attempts = (
+            max_attempts
+            if max_attempts is not None
+            else settings.whatsapp_request_max_attempts
+        )
         last_exc: httpx.HTTPError | None = None
 
         for attempt in range(1, max_attempts + 1):
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:
-                    response = await client.request(method, url, json=json_body, headers=headers)
+                    response = await client.request(
+                        method, url, json=json_body, headers=headers
+                    )
                     response.raise_for_status()
                 record_whatsapp_request(self.name, "ok")
-                if response.headers.get("content-type", "").startswith("application/json"):
+                if response.headers.get("content-type", "").startswith(
+                    "application/json"
+                ):
                     return response.json()
                 return {"status": "ok"}
             except httpx.HTTPError as exc:
                 last_exc = exc
                 if attempt >= max_attempts:
                     break
-                backoff = settings.whatsapp_request_backoff_seconds * (2 ** (attempt - 1))
+                backoff = settings.whatsapp_request_backoff_seconds * (
+                    2 ** (attempt - 1)
+                )
                 logger.warning(
                     "%s provider call failed (%s %s), attempt %s/%s, retrying in %ss: %s",
-                    self.name, method, url, attempt, max_attempts, backoff, exc,
+                    self.name,
+                    method,
+                    url,
+                    attempt,
+                    max_attempts,
+                    backoff,
+                    exc,
                 )
                 await asyncio.sleep(backoff)
 
         record_whatsapp_request(self.name, "error")
-        logger.error("%s provider call failed (%s %s) after %s attempts: %s", self.name, method, url, max_attempts, last_exc)
-        raise WhatsAppProviderError(f"{self.name} request failed: {last_exc}") from last_exc
+        logger.error(
+            "%s provider call failed (%s %s) after %s attempts: %s",
+            self.name,
+            method,
+            url,
+            max_attempts,
+            last_exc,
+        )
+        raise WhatsAppProviderError(
+            f"{self.name} request failed: {last_exc}"
+        ) from last_exc
 
 
 def normalize_phone(raw: str) -> str:

@@ -1,5 +1,6 @@
 """Cognitive Planner: decides step decomposition + agent routing, never calls
 a tool itself — a Plan is data, something else executes it."""
+
 import pytest
 
 from agents.registry import list_agents
@@ -27,7 +28,9 @@ class ScriptedLLM(LLMProvider):
 
 
 def _intent(top: Intent) -> IntentResult:
-    return IntentResult(top=top, hypotheses=[IntentHypothesis(intent=top, confidence=0.9)])
+    return IntentResult(
+        top=top, hypotheses=[IntentHypothesis(intent=top, confidence=0.9)]
+    )
 
 
 _PRIORITY = PriorityResult(level=Priority.NORMAL, reason="")
@@ -48,7 +51,9 @@ async def test_fallback_plan_is_single_step_with_the_original_message():
 @pytest.mark.asyncio
 async def test_fallback_plan_uses_intent_hint_when_available():
     llm = ScriptedLLM(LLMResult(content="stub"))
-    plan = await CognitivePlanner(llm=llm).create_plan("marca uma tarefa", _intent(Intent.TASK), _PRIORITY)
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "marca uma tarefa", _intent(Intent.TASK), _PRIORITY
+    )
     assert plan.steps[0].agent == "personal"
 
 
@@ -65,7 +70,11 @@ async def test_llm_decision_produces_a_multi_step_plan():
                     name="create_plan",
                     arguments={
                         "steps": [
-                            {"objective": "Marcar reunião amanhã às 14h", "agent": "personal", "depends_on": []},
+                            {
+                                "objective": "Marcar reunião amanhã às 14h",
+                                "agent": "personal",
+                                "depends_on": [],
+                            },
                             {
                                 "objective": "Enviar mensagem para o grupo da igreja",
                                 "agent": "church",
@@ -97,22 +106,35 @@ async def test_unknown_agent_name_from_model_is_replaced_by_intent_hint():
                 ToolCallRequest(
                     id="c1",
                     name="create_plan",
-                    arguments={"steps": [{"objective": "comprar item", "agent": "nao-existe"}]},
+                    arguments={
+                        "steps": [{"objective": "comprar item", "agent": "nao-existe"}]
+                    },
                 )
             ]
         )
     )
-    plan = await CognitivePlanner(llm=llm).create_plan("comprar produto", _intent(Intent.STORE), _PRIORITY)
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "comprar produto", _intent(Intent.STORE), _PRIORITY
+    )
     assert plan.steps[0].agent == "store"
 
 
 @pytest.mark.asyncio
 async def test_plan_is_capped_at_max_steps():
-    steps = [{"objective": f"passo {i}", "agent": "assistant"} for i in range(_MAX_PLAN_STEPS + 3)]
+    steps = [
+        {"objective": f"passo {i}", "agent": "assistant"}
+        for i in range(_MAX_PLAN_STEPS + 3)
+    ]
     llm = ScriptedLLM(
-        LLMResult(tool_calls=[ToolCallRequest(id="c1", name="create_plan", arguments={"steps": steps})])
+        LLMResult(
+            tool_calls=[
+                ToolCallRequest(id="c1", name="create_plan", arguments={"steps": steps})
+            ]
+        )
     )
-    plan = await CognitivePlanner(llm=llm).create_plan("várias coisas", _intent(Intent.REQUEST), _PRIORITY)
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "várias coisas", _intent(Intent.REQUEST), _PRIORITY
+    )
     assert len(plan.steps) == _MAX_PLAN_STEPS
 
 
@@ -132,7 +154,9 @@ class RaisingLLM(LLMProvider):
 
 @pytest.mark.asyncio
 async def test_degrades_to_fallback_plan_when_the_provider_raises():
-    plan = await CognitivePlanner(llm=RaisingLLM()).create_plan("oi", _intent(Intent.GREETING), _PRIORITY)
+    plan = await CognitivePlanner(llm=RaisingLLM()).create_plan(
+        "oi", _intent(Intent.GREETING), _PRIORITY
+    )
     assert len(plan.steps) == 1
     assert plan.steps[0].agent == "assistant"
 
@@ -146,12 +170,16 @@ async def test_needs_confirmation_flag_is_propagated():
                     id="c1",
                     name="create_plan",
                     arguments={
-                        "steps": [{"objective": "cancelar todos os pedidos", "agent": "store"}],
+                        "steps": [
+                            {"objective": "cancelar todos os pedidos", "agent": "store"}
+                        ],
                         "needs_confirmation": True,
                     },
                 )
             ]
         )
     )
-    plan = await CognitivePlanner(llm=llm).create_plan("cancela tudo", _intent(Intent.STORE), _PRIORITY)
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "cancela tudo", _intent(Intent.STORE), _PRIORITY
+    )
     assert plan.needs_confirmation is True

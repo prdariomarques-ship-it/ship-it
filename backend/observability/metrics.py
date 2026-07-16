@@ -1,8 +1,15 @@
 """Prometheus metrics: HTTP, agent runs, job execution and WhatsApp providers."""
+
 import time
 
 from fastapi import APIRouter, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 HTTP_REQUESTS = Counter(
     "darioos_http_requests_total",

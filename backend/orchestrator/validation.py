@@ -9,6 +9,7 @@ Cognitive Pipeline gets one bounded retry (never unbounded — see
 `CognitivePipeline._MAX_VALIDATION_ATTEMPTS`) before giving up and returning
 the best available answer rather than going silent.
 """
+
 from pydantic import BaseModel
 
 from agents.executor import ExecutedStep, is_tool_error
@@ -26,7 +27,9 @@ class ResponseValidator:
         if not reply or not reply.strip():
             issues.append("resposta vazia")
         elif reply.strip().startswith("{") and '"error"' in reply:
-            issues.append("resposta é um erro bruto de ferramenta, não uma resposta ao usuário")
+            issues.append(
+                "resposta é um erro bruto de ferramenta, não uma resposta ao usuário"
+            )
 
         for step in steps:
             if step.status == "error" or is_tool_error(step.result):

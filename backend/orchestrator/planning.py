@@ -19,6 +19,7 @@ this exactly reproduces the pre-Fase-4.2 behaviour of the WhatsApp auto-reply
 handler, so existing single-step flows are unaffected when the model is
 unavailable.
 """
+
 from enum import Enum
 
 from pydantic import BaseModel
@@ -116,7 +117,9 @@ def _build_plan_tool(agent_names: list[str]) -> ToolSpec:
     )
 
 
-def _plan_system_prompt(agent_names: list[str], intent: IntentResult, priority: PriorityResult) -> str:
+def _plan_system_prompt(
+    agent_names: list[str], intent: IntentResult, priority: PriorityResult
+) -> str:
     return (
         "Você é o Planejador Cognitivo do Dario OS. Agentes disponíveis: "
         + ", ".join(agent_names)
@@ -134,7 +137,9 @@ class CognitivePlanner:
     def _llm_provider(self) -> LLMProvider:
         return self._llm or get_llm_provider()
 
-    async def create_plan(self, message: str, intent: IntentResult, priority: PriorityResult) -> Plan:
+    async def create_plan(
+        self, message: str, intent: IntentResult, priority: PriorityResult
+    ) -> Plan:
         agent_names = [agent.name for agent in list_agents()]
         if not agent_names:
             return Plan(steps=[])
@@ -142,7 +147,10 @@ class CognitivePlanner:
         try:
             result = await self._llm_provider().chat(
                 [
-                    ChatMessage(role="system", content=_plan_system_prompt(agent_names, intent, priority)),
+                    ChatMessage(
+                        role="system",
+                        content=_plan_system_prompt(agent_names, intent, priority),
+                    ),
                     ChatMessage(role="user", content=message),
                 ],
                 tools=[_build_plan_tool(agent_names)],
@@ -159,8 +167,12 @@ class CognitivePlanner:
             if agent not in agent_names:
                 agent = _fallback_agent_for_intent(intent.top, agent_names)
             objective = str(raw.get("objective") or "").strip() or message
-            depends_on = [int(d) for d in raw.get("depends_on", []) if isinstance(d, int)]
-            steps.append(PlanStep(objective=objective, agent=agent, depends_on=depends_on))
+            depends_on = [
+                int(d) for d in raw.get("depends_on", []) if isinstance(d, int)
+            ]
+            steps.append(
+                PlanStep(objective=objective, agent=agent, depends_on=depends_on)
+            )
 
         if not steps:
             return self._fallback_plan(message, intent, agent_names)
@@ -171,6 +183,8 @@ class CognitivePlanner:
             reasoning=str(call.arguments.get("reasoning", "")),
         )
 
-    def _fallback_plan(self, message: str, intent: IntentResult, agent_names: list[str]) -> Plan:
+    def _fallback_plan(
+        self, message: str, intent: IntentResult, agent_names: list[str]
+    ) -> Plan:
         agent = _fallback_agent_for_intent(intent.top, agent_names)
         return Plan(steps=[PlanStep(objective=message, agent=agent)])

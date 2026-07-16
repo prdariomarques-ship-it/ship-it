@@ -7,6 +7,7 @@ conhecidas"). Never include a token/secret/password field — see
 `admin/service.py` module docstring for the exclusion list this was
 checked against.
 """
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict

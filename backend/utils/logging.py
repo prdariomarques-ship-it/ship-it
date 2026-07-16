@@ -1,4 +1,5 @@
 """Central logging configuration with optional structured (JSON) output."""
+
 import json
 import logging
 import sys
@@ -51,7 +52,9 @@ def configure_logging(level: int = logging.INFO, json_output: bool = False) -> N
     from services.log_redaction import LogRedactionFilter
 
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter() if json_output else logging.Formatter(TEXT_FORMAT))
+    handler.setFormatter(
+        JsonFormatter() if json_output else logging.Formatter(TEXT_FORMAT)
+    )
     handler.addFilter(RequestIDFilter())
     handler.addFilter(LogRedactionFilter())
     root = logging.getLogger()

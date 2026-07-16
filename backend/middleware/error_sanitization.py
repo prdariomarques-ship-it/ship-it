@@ -1,4 +1,5 @@
 """Error sanitization middleware — return generic 5xx, log full exceptions."""
+
 import traceback
 
 from starlette.middleware.base import BaseHTTPMiddleware

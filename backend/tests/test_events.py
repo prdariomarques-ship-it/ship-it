@@ -1,4 +1,5 @@
 """Event Bus: in-process pub/sub, wildcard subscriptions, handler isolation."""
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -110,7 +111,9 @@ async def test_publish_survives_redis_being_unavailable(bus):
 
     bus.subscribe("thing.happened", handler)
 
-    with patch("events.bus.aioredis.from_url", side_effect=ConnectionError("redis down")):
+    with patch(
+        "events.bus.aioredis.from_url", side_effect=ConnectionError("redis down")
+    ):
         event = await bus.publish("thing.happened", {})
 
     assert received == ["thing.happened"]

@@ -1,4 +1,5 @@
 """Role-based access control dependencies."""
+
 from fastapi import Depends, HTTPException, status
 
 from auth.dependencies import get_current_user

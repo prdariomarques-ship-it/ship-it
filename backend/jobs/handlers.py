@@ -1,4 +1,5 @@
 """Built-in job handlers."""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.session import async_session_factory
@@ -16,9 +17,7 @@ from workflows.service import workflow_service
 
 logger = get_logger(__name__)
 
-APOLOGY_MESSAGE = (
-    "Desculpe, tive um problema para responder agora. O Dario vai revisar sua mensagem em breve."
-)
+APOLOGY_MESSAGE = "Desculpe, tive um problema para responder agora. O Dario vai revisar sua mensagem em breve."
 
 
 @job_handler("contact.summarize")
@@ -55,7 +54,9 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
 @job_handler("workflow.trigger")
 async def trigger_workflow(db: AsyncSession, payload: dict) -> None:
     """Fire an n8n workflow; queue retries cover transient n8n outages."""
-    await workflow_service.trigger(str(payload["workflow"]), dict(payload.get("data", {})))
+    await workflow_service.trigger(
+        str(payload["workflow"]), dict(payload.get("data", {}))
+    )
 
 
 @job_handler("whatsapp.process_inbound")
@@ -78,7 +79,9 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
     if contact is None or message is None or owner is None or not contact.phone:
         logger.warning(
             "Skipping auto-reply: contact=%s message=%s owner=%s",
-            contact_id, message_id, owner is not None,
+            contact_id,
+            message_id,
+            owner is not None,
         )
         return
 

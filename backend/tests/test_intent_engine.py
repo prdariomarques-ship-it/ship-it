@@ -1,6 +1,7 @@
 """Intent Engine: LLM-driven decision-making as the primary path, a keyword
 heuristic only as the degrade path (mirrors how LLMProvider itself degrades
 to STUB_REPLY without an API key)."""
+
 import pytest
 
 from orchestrator.intent import Intent, IntentEngine
@@ -99,7 +100,11 @@ async def test_degrades_to_heuristic_when_model_gives_no_tool_call():
 async def test_degrades_to_heuristic_when_arguments_are_garbage():
     llm = ScriptedLLM(
         LLMResult(
-            tool_calls=[ToolCallRequest(id="c1", name="classify_intent", arguments={"hypotheses": []})]
+            tool_calls=[
+                ToolCallRequest(
+                    id="c1", name="classify_intent", arguments={"hypotheses": []}
+                )
+            ]
         )
     )
     result = await IntentEngine(llm=llm).classify("olá")
@@ -137,7 +142,11 @@ async def test_unknown_intent_labels_from_model_are_discarded():
                 ToolCallRequest(
                     id="c1",
                     name="classify_intent",
-                    arguments={"hypotheses": [{"intent": "not_a_real_intent", "confidence": 0.9}]},
+                    arguments={
+                        "hypotheses": [
+                            {"intent": "not_a_real_intent", "confidence": 0.9}
+                        ]
+                    },
                 )
             ]
         )

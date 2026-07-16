@@ -2,14 +2,27 @@
 style used for Gmail/Gemini: patch `httpx.AsyncClient` at the module it's
 imported into.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from providers.calendar.base import CalendarProviderError, EventSearchQuery, NewEvent, EventUpdate
-from providers.calendar.factory import UnknownCalendarProviderError, get_calendar_provider
-from providers.calendar.google.provider import GoogleCalendarProvider, _parse_event, _to_rfc3339
+from providers.calendar.base import (
+    CalendarProviderError,
+    EventSearchQuery,
+    NewEvent,
+    EventUpdate,
+)
+from providers.calendar.factory import (
+    UnknownCalendarProviderError,
+    get_calendar_provider,
+)
+from providers.calendar.google.provider import (
+    GoogleCalendarProvider,
+    _parse_event,
+    _to_rfc3339,
+)
 from utils.config import get_settings
 
 
@@ -25,12 +38,18 @@ def _mock_response(json_body: dict, status_code: int = 200) -> MagicMock:
 def _patch_client(request_result=None, post_result=None):
     client = MagicMock()
     if request_result is not None:
-        client.request = AsyncMock(side_effect=request_result if isinstance(request_result, list) else [request_result] * 20)
+        client.request = AsyncMock(
+            side_effect=request_result
+            if isinstance(request_result, list)
+            else [request_result] * 20
+        )
     if post_result is not None:
         client.post = AsyncMock(return_value=post_result)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    return patch("providers.calendar.google.provider.httpx.AsyncClient", return_value=client), client
+    return patch(
+        "providers.calendar.google.provider.httpx.AsyncClient", return_value=client
+    ), client
 
 
 @pytest.fixture
@@ -38,7 +57,9 @@ def provider(monkeypatch):
     monkeypatch.setattr(get_settings(), "google_client_id", "client-id")
     monkeypatch.setattr(get_settings(), "google_client_secret", "client-secret")
     monkeypatch.setattr(
-        get_settings(), "google_calendar_redirect_uri", "https://app.example.com/api/gcalendar/oauth/callback"
+        get_settings(),
+        "google_calendar_redirect_uri",
+        "https://app.example.com/api/gcalendar/oauth/callback",
     )
     return GoogleCalendarProvider()
 
@@ -53,7 +74,12 @@ def test_authorization_url_includes_offline_access_full_scope_and_state(provider
 
 @pytest.mark.asyncio
 async def test_exchange_code_returns_tokens(provider):
-    body = {"access_token": "at1", "refresh_token": "rt1", "expires_in": 3600, "scope": "calendar"}
+    body = {
+        "access_token": "at1",
+        "refresh_token": "rt1",
+        "expires_in": 3600,
+        "scope": "calendar",
+    }
     patcher, client = _patch_client(post_result=_mock_response(body))
     with patcher:
         tokens = await provider.exchange_code("auth-code")
@@ -79,7 +105,9 @@ async def test_token_request_http_failure_raises_provider_error(provider):
     client.post = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.calendar.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.calendar.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(CalendarProviderError):
             await provider.exchange_code("auth-code")
 
@@ -88,7 +116,12 @@ async def test_token_request_http_failure_raises_provider_error(provider):
 async def test_list_calendars_parses_primary_flag(provider):
     body = {
         "items": [
-            {"id": "primary", "summary": "Dario", "primary": True, "timeZone": "America/Sao_Paulo"},
+            {
+                "id": "primary",
+                "summary": "Dario",
+                "primary": True,
+                "timeZone": "America/Sao_Paulo",
+            },
             {"id": "cal2", "summary": "Trabalho", "timeZone": "America/Sao_Paulo"},
         ]
     }
@@ -117,7 +150,9 @@ async def test_search_events_parses_start_end_and_attendees(provider):
     }
     patcher, client = _patch_client(request_result=[_mock_response(body)])
     with patcher:
-        events = await provider.search_events("access-token", EventSearchQuery(calendar_id="primary", limit=10))
+        events = await provider.search_events(
+            "access-token", EventSearchQuery(calendar_id="primary", limit=10)
+        )
     assert len(events) == 1
     assert events[0].summary == "Reunião"
     assert events[0].attendees == ["a@example.com", "b@example.com"]
@@ -126,7 +161,16 @@ async def test_search_events_parses_start_end_and_attendees(provider):
 
 @pytest.mark.asyncio
 async def test_search_events_marks_all_day_events(provider):
-    body = {"items": [{"id": "e2", "summary": "Feriado", "start": {"date": "2026-01-01"}, "end": {"date": "2026-01-02"}}]}
+    body = {
+        "items": [
+            {
+                "id": "e2",
+                "summary": "Feriado",
+                "start": {"date": "2026-01-01"},
+                "end": {"date": "2026-01-02"},
+            }
+        ]
+    }
     patcher, _ = _patch_client(request_result=[_mock_response(body)])
     with patcher:
         events = await provider.search_events("access-token", EventSearchQuery())
@@ -141,7 +185,9 @@ async def test_search_events_api_failure_raises_provider_error(provider):
     client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.calendar.google.provider.httpx.AsyncClient", return_value=client):
+    with patch(
+        "providers.calendar.google.provider.httpx.AsyncClient", return_value=client
+    ):
         with pytest.raises(CalendarProviderError):
             await provider.search_events("access-token", EventSearchQuery())
 
@@ -183,7 +229,9 @@ async def test_update_event_only_sends_provided_fields(provider):
 
 @pytest.mark.asyncio
 async def test_delete_event_calls_delete_and_returns_none(provider):
-    patcher, client = _patch_client(request_result=[_mock_response({}, status_code=204)])
+    patcher, client = _patch_client(
+        request_result=[_mock_response({}, status_code=204)]
+    )
     with patcher:
         result = await provider.delete_event("access-token", "primary", "e1")
     assert result is None
@@ -193,7 +241,13 @@ async def test_delete_event_calls_delete_and_returns_none(provider):
 @pytest.mark.asyncio
 async def test_check_availability_reports_busy_and_conflicts(provider):
     freebusy_body = {
-        "calendars": {"primary": {"busy": [{"start": "2026-01-15T10:00:00Z", "end": "2026-01-15T11:00:00Z"}]}}
+        "calendars": {
+            "primary": {
+                "busy": [
+                    {"start": "2026-01-15T10:00:00Z", "end": "2026-01-15T11:00:00Z"}
+                ]
+            }
+        }
     }
     events_body = {
         "items": [
@@ -205,7 +259,9 @@ async def test_check_availability_reports_busy_and_conflicts(provider):
             }
         ]
     }
-    patcher, client = _patch_client(request_result=[_mock_response(freebusy_body), _mock_response(events_body)])
+    patcher, client = _patch_client(
+        request_result=[_mock_response(freebusy_body), _mock_response(events_body)]
+    )
     with patcher:
         result = await provider.check_availability(
             "access-token",

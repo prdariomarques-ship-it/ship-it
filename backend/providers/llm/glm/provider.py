@@ -4,6 +4,7 @@ The Zhipu platform exposes an OpenAI-compatible API, so this provider reuses
 the OpenAI implementation pointed at the GLM endpoint — same neutral contract,
 different strategy configuration.
 """
+
 from providers.llm.base import EmbeddingsNotSupportedError
 from providers.llm.openai.provider import OpenAIProvider
 from utils.config import get_settings

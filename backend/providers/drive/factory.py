@@ -2,6 +2,7 @@
 as `providers/mail/factory.py`, `providers/calendar/factory.py` and
 `providers/contacts/factory.py`.
 """
+
 from functools import lru_cache
 
 from providers.drive.base import DriveProvider

@@ -1,11 +1,14 @@
 """Application settings loaded from environment variables (.env supported)."""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # Application
     app_name: str = "Dario OS"
@@ -41,7 +44,9 @@ class Settings(BaseSettings):
 
     # LLM providers ("openai", "anthropic" or "glm")
     llm_provider: str = "openai"
-    embedding_provider: str = "openai"  # Anthropic has no embeddings API; keep these separate
+    embedding_provider: str = (
+        "openai"  # Anthropic has no embeddings API; keep these separate
+    )
     # Automatic provider switch (AgentExecutor): when the primary LLM_PROVIDER
     # raises mid-run, retry once with this provider instead. Empty (default)
     # means no fallback — a provider exception propagates, same as before.
@@ -93,7 +98,9 @@ class Settings(BaseSettings):
     official_api_base_url: str = "https://graph.facebook.com/v21.0"
     official_access_token: str = ""
     official_phone_number_id: str = ""
-    official_app_secret: str = ""  # signs webhooks (X-Hub-Signature-256); optional but recommended
+    official_app_secret: str = (
+        ""  # signs webhooks (X-Hub-Signature-256); optional but recommended
+    )
 
     # n8n
     n8n_base_url: str = "http://localhost:5678"
@@ -140,18 +147,24 @@ class Settings(BaseSettings):
     # Google Cloud Console) and email_token_encryption_key for token storage.
     # Its own domain, own connection, own opt-in — same shape as Gmail.
     calendar_provider: str = "google"
-    google_calendar_redirect_uri: str = ""  # e.g. https://<domain>/api/gcalendar/oauth/callback
+    google_calendar_redirect_uri: str = (
+        ""  # e.g. https://<domain>/api/gcalendar/oauth/callback
+    )
     google_calendar_api_base_url: str = "https://www.googleapis.com/calendar/v3"
 
     # Google Contacts (People API, Sprint 2) — same reuse pattern as Calendar above.
     contacts_provider: str = "google"
-    google_contacts_redirect_uri: str = ""  # e.g. https://<domain>/api/gcontacts/oauth/callback
+    google_contacts_redirect_uri: str = (
+        ""  # e.g. https://<domain>/api/gcontacts/oauth/callback
+    )
     google_people_api_base_url: str = "https://people.googleapis.com/v1"
 
     # Google Drive (Sprint 3) — base de conhecimento; mesmo padrão de reuso de
     # google_client_id/google_client_secret/email_token_encryption_key.
     drive_provider: str = "google"
-    google_drive_redirect_uri: str = ""  # e.g. https://<domain>/api/gdrive/oauth/callback
+    google_drive_redirect_uri: str = (
+        ""  # e.g. https://<domain>/api/gdrive/oauth/callback
+    )
     google_drive_api_base_url: str = "https://www.googleapis.com/drive/v3"
     # Trava de segurança de "download seguro": arquivo maior que isto é
     # recusado antes de baixar, nunca lido parcialmente na memória.
@@ -162,15 +175,21 @@ class Settings(BaseSettings):
     # spans print to stdout (console exporter) instead of failing to export.
     otel_enabled: bool = False
     otel_exporter_otlp_endpoint: str = ""
-    otel_sampling: str = ""  # "always", "never", "fixed:0.1", "parent-fixed:0.1", "error:0.05", etc.
-    otel_prometheus_metrics: bool = False  # Enable Prometheus metrics reader for tracing
+    otel_sampling: str = (
+        ""  # "always", "never", "fixed:0.1", "parent-fixed:0.1", "error:0.05", etc.
+    )
+    otel_prometheus_metrics: bool = (
+        False  # Enable Prometheus metrics reader for tracing
+    )
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        return [
+            origin.strip() for origin in self.cors_origins.split(",") if origin.strip()
+        ]
 
 
 @lru_cache

@@ -4,6 +4,7 @@ Builds list/create/get/update/delete endpoints for a model, keeping every
 resource router consistent (auth required, pagination, 404 handling) without
 repeating the same handlers ten times.
 """
+
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -42,7 +43,9 @@ def create_crud_router(
     async def _get_or_404(repository: Repository, item_id: int, user_id: int) -> Base:
         item = await repository.get(item_id)
         if item is None or (user_scoped and item.user_id != user_id):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{tag} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"{tag} not found"
+            )
         return item
 
     @router.get("", response_model=list[read_schema])  # type: ignore[valid-type]
@@ -52,14 +55,20 @@ def create_crud_router(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> list[Base]:
-        return await Repository(db).list(limit=limit, offset=offset, **_scope(current_user.id))
+        return await Repository(db).list(
+            limit=limit, offset=offset, **_scope(current_user.id)
+        )
 
     @router.get("/count")
     async def count_items(db: DbSession, current_user: CurrentUser) -> dict[str, int]:
         return {"count": await Repository(db).count(**_scope(current_user.id))}
 
     @router.post("", response_model=read_schema, status_code=status.HTTP_201_CREATED)
-    async def create_item(payload: create_schema, db: DbSession, current_user: CurrentUser) -> Base:  # type: ignore[valid-type]
+    async def create_item(
+        payload: create_schema,  # type: ignore[valid-type]
+        db: DbSession,
+        current_user: CurrentUser,
+    ) -> Base:
         data = payload.model_dump()  # type: ignore[attr-defined]
         if user_scoped:
             data["user_id"] = current_user.id
@@ -71,14 +80,19 @@ def create_crud_router(
 
     @router.patch("/{item_id}", response_model=read_schema)
     async def update_item(
-        item_id: int, payload: update_schema, db: DbSession, current_user: CurrentUser  # type: ignore[valid-type]
+        item_id: int,
+        payload: update_schema,  # type: ignore[valid-type]
+        db: DbSession,
+        current_user: CurrentUser,
     ) -> Base:
         repository = Repository(db)
         item = await _get_or_404(repository, item_id, current_user.id)
         return await repository.update(item, **payload.model_dump(exclude_unset=True))  # type: ignore[attr-defined]
 
     @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
-    async def delete_item(item_id: int, db: DbSession, current_user: CurrentUser) -> None:
+    async def delete_item(
+        item_id: int, db: DbSession, current_user: CurrentUser
+    ) -> None:
         repository = Repository(db)
         item = await _get_or_404(repository, item_id, current_user.id)
         await repository.delete(item)

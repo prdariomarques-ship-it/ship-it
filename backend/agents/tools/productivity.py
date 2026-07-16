@@ -1,4 +1,5 @@
 """Tools over tasks, calendar and notes — the personal-productivity API surface."""
+
 from datetime import datetime
 
 from agents.tools.base import Tool, ToolContext, ok
@@ -98,7 +99,9 @@ async def _list_events(context: ToolContext) -> str:
 
 
 async def _create_note(context: ToolContext, title: str, content: str = "") -> str:
-    note = await _NoteRepo(context.db).create(user_id=context.user.id, title=title, content=content)
+    note = await _NoteRepo(context.db).create(
+        user_id=context.user.id, title=title, content=content
+    )
     return ok(note_id=note.id, title=note.title)
 
 
@@ -125,7 +128,10 @@ list_tasks_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "status": {"type": "string", "enum": ["pending", "in_progress", "done", "cancelled"]}
+            "status": {
+                "type": "string",
+                "enum": ["pending", "in_progress", "done", "cancelled"],
+            }
         },
         "required": [],
     },
@@ -150,7 +156,10 @@ create_event_tool = Tool(
         "type": "object",
         "properties": {
             "title": {"type": "string"},
-            "starts_at": {"type": "string", "description": "Início em formato ISO 8601"},
+            "starts_at": {
+                "type": "string",
+                "description": "Início em formato ISO 8601",
+            },
             "ends_at": {"type": "string", "description": "Fim em formato ISO 8601"},
             "location": {"type": "string"},
         },

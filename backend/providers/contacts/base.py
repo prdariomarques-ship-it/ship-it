@@ -12,6 +12,7 @@ not named the same as `models.contact.Contact`, which is Dario OS's own
 WhatsApp-conversation contact book and has nothing to do with this
 integration. See `docs/CONTACTS.md`.
 """
+
 from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
@@ -77,7 +78,9 @@ class ContactsProvider(ABC):
         """Exchange a stored refresh token for a fresh access token."""
 
     @abstractmethod
-    async def search_contacts(self, access_token: str, query: ContactSearchQuery) -> list[Contact]:
+    async def search_contacts(
+        self, access_token: str, query: ContactSearchQuery
+    ) -> list[Contact]:
         """List/search contacts (covers "listar", "buscar", "localizar
         telefone/e-mail" — a name/phone/email query filters client-side over
         the full address book, which is small enough for a personal
@@ -94,7 +97,9 @@ class ContactsProvider(ABC):
         """Create a new contact."""
 
     @abstractmethod
-    async def update_contact(self, access_token: str, resource_name: str, update: ContactUpdate) -> Contact:
+    async def update_contact(
+        self, access_token: str, resource_name: str, update: ContactUpdate
+    ) -> Contact:
         """Patch an existing contact (only the provided fields change)."""
 
     @abstractmethod

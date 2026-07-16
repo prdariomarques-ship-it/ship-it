@@ -2,13 +2,18 @@
 used for the Gemini LLM provider (`tests/test_providers.py`): patch
 `httpx.AsyncClient` at the module it's imported into.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from providers.mail.base import EmailSearchQuery, MailProviderError
 from providers.mail.factory import UnknownMailProviderError, get_mail_provider
-from providers.mail.gmail.provider import GmailProvider, _build_search_query, _extract_body
+from providers.mail.gmail.provider import (
+    GmailProvider,
+    _build_search_query,
+    _extract_body,
+)
 from utils.config import get_settings
 
 
@@ -24,19 +29,29 @@ def _patch_client(get_result=None, post_result=None):
     responses (one per successive `client.get` call, in order)."""
     client = MagicMock()
     if get_result is not None:
-        client.get = AsyncMock(side_effect=get_result if isinstance(get_result, list) else [get_result] * 20)
+        client.get = AsyncMock(
+            side_effect=get_result
+            if isinstance(get_result, list)
+            else [get_result] * 20
+        )
     if post_result is not None:
         client.post = AsyncMock(return_value=post_result)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    return patch("providers.mail.gmail.provider.httpx.AsyncClient", return_value=client), client
+    return patch(
+        "providers.mail.gmail.provider.httpx.AsyncClient", return_value=client
+    ), client
 
 
 @pytest.fixture
 def provider(monkeypatch):
     monkeypatch.setattr(get_settings(), "google_client_id", "client-id")
     monkeypatch.setattr(get_settings(), "google_client_secret", "client-secret")
-    monkeypatch.setattr(get_settings(), "google_redirect_uri", "https://app.example.com/api/mail/oauth/callback")
+    monkeypatch.setattr(
+        get_settings(),
+        "google_redirect_uri",
+        "https://app.example.com/api/mail/oauth/callback",
+    )
     return GmailProvider()
 
 
@@ -53,7 +68,12 @@ def test_authorization_url_includes_offline_access_and_state(provider):
 # --- OAuth token exchange ------------------------------------------------------
 @pytest.mark.asyncio
 async def test_exchange_code_returns_tokens(provider):
-    body = {"access_token": "at1", "refresh_token": "rt1", "expires_in": 3600, "scope": "gmail.readonly"}
+    body = {
+        "access_token": "at1",
+        "refresh_token": "rt1",
+        "expires_in": 3600,
+        "scope": "gmail.readonly",
+    }
     patcher, client = _patch_client(post_result=_mock_response(body))
     with patcher:
         tokens = await provider.exchange_code("auth-code")
@@ -103,9 +123,17 @@ async def test_search_lists_then_fetches_metadata_for_each_message(provider):
             ]
         },
     }
-    patcher, client = _patch_client(get_result=[_mock_response(list_body), _mock_response(detail_body), _mock_response(detail_body)])
+    patcher, client = _patch_client(
+        get_result=[
+            _mock_response(list_body),
+            _mock_response(detail_body),
+            _mock_response(detail_body),
+        ]
+    )
     with patcher:
-        messages = await provider.search("access-token", EmailSearchQuery(sender="a@example.com", limit=10))
+        messages = await provider.search(
+            "access-token", EmailSearchQuery(sender="a@example.com", limit=10)
+        )
     assert len(messages) == 2
     assert messages[0].sender == "a@example.com"
     assert messages[0].subject == "Assunto"
@@ -190,7 +218,10 @@ def test_extract_body_falls_back_to_html_when_no_plain_text_part():
     import base64
 
     html = base64.urlsafe_b64encode(b"<p>html only</p>").decode()
-    payload = {"mimeType": "multipart/alternative", "parts": [{"mimeType": "text/html", "body": {"data": html}}]}
+    payload = {
+        "mimeType": "multipart/alternative",
+        "parts": [{"mimeType": "text/html", "body": {"data": html}}],
+    }
     assert _extract_body(payload) == "<p>html only</p>"
 
 

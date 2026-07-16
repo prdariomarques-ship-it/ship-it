@@ -3,6 +3,7 @@
 Encapsulates persistence so services and routers never build SQLAlchemy
 queries directly; specialized repositories extend this with domain queries.
 """
+
 from typing import Any, Generic, TypeVar
 
 from sqlalchemy import func, select
@@ -34,7 +35,9 @@ class SQLAlchemyRepository(Generic[ModelT]):
         for field, value in filters.items():
             statement = statement.where(getattr(self.model, field) == value)
         order = self.model.id.desc() if order_desc else self.model.id.asc()  # type: ignore[attr-defined]
-        result = await self.session.execute(statement.order_by(order).limit(limit).offset(offset))
+        result = await self.session.execute(
+            statement.order_by(order).limit(limit).offset(offset)
+        )
         return list(result.scalars().all())
 
     async def count(self, **filters: Any) -> int:

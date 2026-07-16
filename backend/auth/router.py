@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import CurrentUser
-from auth.schemas import LoginRequest, RefreshRequest, TokenResponse, UserCreate, UserRead
+from auth.schemas import (
+    LoginRequest,
+    RefreshRequest,
+    TokenResponse,
+    UserCreate,
+    UserRead,
+)
 from auth.service import AuthError, AuthService
 from database.session import get_db
 from models.user import User
@@ -27,7 +33,9 @@ def _http_error(exc: AuthError) -> HTTPException:
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(payload: UserCreate, service: Service) -> User:
     try:
-        return await service.register(payload.email, payload.full_name, payload.password)
+        return await service.register(
+            payload.email, payload.full_name, payload.password
+        )
     except AuthError as exc:
         raise _http_error(exc) from exc
 
@@ -35,7 +43,9 @@ async def register(payload: UserCreate, service: Service) -> User:
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, service: Service) -> TokenResponse:
     try:
-        access_token, refresh_token = await service.login(payload.email, payload.password)
+        access_token, refresh_token = await service.login(
+            payload.email, payload.password
+        )
     except AuthError as exc:
         raise _http_error(exc) from exc
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)

@@ -1,5 +1,6 @@
 """Goal management endpoints: CRUD, status transitions, dependencies,
 approval workflow, progress tracking and execution history."""
+
 from datetime import datetime
 from typing import Annotated
 
@@ -72,10 +73,14 @@ class GoalHistoryEntry(BaseModel):
     created_at: datetime
 
 
-async def _get_owned_goal_or_404(repository: GoalRepository, goal_id: int, user_id: int) -> Goal:
+async def _get_owned_goal_or_404(
+    repository: GoalRepository, goal_id: int, user_id: int
+) -> Goal:
     goal = await repository.get(goal_id)
     if goal is None or goal.user_id != user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Goal not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Goal not found"
+        )
     return goal
 
 
@@ -89,7 +94,12 @@ async def list_goals(
 ) -> list[Goal]:
     repository = GoalRepository(db)
     filters = {"status": goal_status} if goal_status is not None else {}
-    return await repository.list(user_id=current_user.id, limit=limit, offset=offset, **filters)  # type: ignore[arg-type]
+    return await repository.list(
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+        **filters,  # type: ignore[arg-type]
+    )
 
 
 @router.get("/ready", response_model=list[GoalRead])
@@ -103,7 +113,9 @@ async def list_ready_goals(
 
 
 @router.post("", response_model=GoalRead, status_code=status.HTTP_201_CREATED)
-async def create_goal(payload: GoalCreate, db: DbSession, current_user: CurrentUser) -> Goal:
+async def create_goal(
+    payload: GoalCreate, db: DbSession, current_user: CurrentUser
+) -> Goal:
     return await GoalService(db).create_goal(
         user_id=current_user.id,
         title=payload.title,
@@ -141,7 +153,9 @@ async def get_goal_history(
     return list((await db.execute(statement)).scalars().all())
 
 
-@router.post("/{goal_id}/approve", response_model=GoalRead, dependencies=[Depends(require_admin)])
+@router.post(
+    "/{goal_id}/approve", response_model=GoalRead, dependencies=[Depends(require_admin)]
+)
 async def approve_goal(goal_id: int, db: DbSession, current_user: CurrentUser) -> Goal:
     """Human approval gate. Admin-only by design -- the goal's own owner is
     not automatically trusted to self-approve a goal that was explicitly
@@ -149,11 +163,15 @@ async def approve_goal(goal_id: int, db: DbSession, current_user: CurrentUser) -
     repository = GoalRepository(db)
     goal = await repository.get(goal_id)
     if goal is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Goal not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Goal not found"
+        )
     try:
         return await GoalService(db).approve_goal(goal, approved_by_id=current_user.id)
     except ApprovalRequiredError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
 
 
 @router.patch("/{goal_id}/status", response_model=GoalRead)
@@ -165,7 +183,9 @@ async def update_goal_status(
     try:
         return await GoalService(db).update_status(goal, payload.status)
     except ApprovalRequiredError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
 
 
 @router.patch("/{goal_id}/progress", response_model=GoalRead)
@@ -179,7 +199,10 @@ async def update_goal_progress(
 
 @router.post("/{goal_id}/dependencies", status_code=status.HTTP_201_CREATED)
 async def add_dependency(
-    goal_id: int, payload: GoalDependencyCreate, db: DbSession, current_user: CurrentUser
+    goal_id: int,
+    payload: GoalDependencyCreate,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict:
     repository = GoalRepository(db)
     await _get_owned_goal_or_404(repository, goal_id, current_user.id)
@@ -187,11 +210,15 @@ async def add_dependency(
     try:
         await GoalService(db).add_dependency(goal_id, payload.depends_on_id)
     except CyclicDependencyError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     return {"goal_id": goal_id, "depends_on_id": payload.depends_on_id}
 
 
-@router.delete("/{goal_id}/dependencies/{depends_on_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{goal_id}/dependencies/{depends_on_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def remove_dependency(
     goal_id: int, depends_on_id: int, db: DbSession, current_user: CurrentUser
 ) -> None:
@@ -199,4 +226,6 @@ async def remove_dependency(
     await _get_owned_goal_or_404(repository, goal_id, current_user.id)
     removed = await repository.remove_dependency(goal_id, depends_on_id)
     if not removed:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dependency not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Dependency not found"
+        )

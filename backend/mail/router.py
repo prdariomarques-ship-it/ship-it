@@ -6,6 +6,7 @@ Google itself calls (a plain browser redirect, no Bearer token possible) —
 it authenticates the caller a different way: a short-lived, signed `state`
 token minted by `/connect` and validated here (see `auth/jwt.py`).
 """
+
 from datetime import datetime, timezone
 from html import escape
 from typing import Annotated
@@ -37,15 +38,25 @@ def _require_mail_configured() -> None:
     from utils.config import get_settings
 
     settings = get_settings()
-    if not (settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri):
+    if not (
+        settings.google_client_id
+        and settings.google_client_secret
+        and settings.google_redirect_uri
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Gmail integration is not configured (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REDIRECT_URI)",
         )
 
 
-@router.get("/connect", response_model=MailConnectResponse, dependencies=[Depends(require_admin)])
-async def connect(current_user: Annotated[User, Depends(require_admin)]) -> MailConnectResponse:
+@router.get(
+    "/connect",
+    response_model=MailConnectResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def connect(
+    current_user: Annotated[User, Depends(require_admin)],
+) -> MailConnectResponse:
     """Returns the Google consent URL for the frontend to redirect the
     admin's browser to — kept as a JSON response (not a 302) so an
     Authorization-header-carrying fetch from the dashboard can call it."""
@@ -69,7 +80,10 @@ async def oauth_callback(
 
     user_id = decode_oauth_state_token(state)
     if user_id is None:
-        return _result_page(ok=False, message="Sessão de autorização inválida ou expirada. Tente conectar de novo.")
+        return _result_page(
+            ok=False,
+            message="Sessão de autorização inválida ou expirada. Tente conectar de novo.",
+        )
 
     user = await UserRepository(db).get(user_id)
     if user is None:
@@ -80,7 +94,9 @@ async def oauth_callback(
         tokens = await provider.exchange_code(code)
     except MailProviderError as exc:
         logger.error("Gmail OAuth code exchange failed: %s", exc)
-        return _result_page(ok=False, message="Não foi possível concluir a autorização com o Google.")
+        return _result_page(
+            ok=False, message="Não foi possível concluir a autorização com o Google."
+        )
 
     if not tokens.refresh_token:
         return _result_page(
@@ -93,7 +109,10 @@ async def oauth_callback(
         encrypted = encrypt_token(tokens.refresh_token)
     except TokenEncryptionNotConfigured as exc:
         logger.error("Cannot store Gmail refresh token: %s", exc)
-        return _result_page(ok=False, message="Armazenamento de credenciais não configurado no servidor.")
+        return _result_page(
+            ok=False,
+            message="Armazenamento de credenciais não configurado no servidor.",
+        )
 
     email_address = await _resolve_email_address(provider, tokens.access_token)
 
@@ -106,23 +125,37 @@ async def oauth_callback(
         connected_at=datetime.now(timezone.utc),
     )
 
-    return _result_page(ok=True, message=f"Conta {email_address} conectada com sucesso.")
-
-
-@router.get("/status", response_model=MailStatusResponse, dependencies=[Depends(require_admin)])
-async def mail_status(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> MailStatusResponse:
-    account = await EmailAccountRepository(db).get_by_user(current_user.id, get_mail_provider().name)
-    if account is None:
-        return MailStatusResponse(connected=False)
-    return MailStatusResponse(
-        connected=True, email_address=account.email_address, connected_at=account.connected_at
+    return _result_page(
+        ok=True, message=f"Conta {email_address} conectada com sucesso."
     )
 
 
-@router.delete("/disconnect", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
-async def disconnect(db: DbSession, current_user: Annotated[User, Depends(require_admin)]) -> None:
+@router.get(
+    "/status", response_model=MailStatusResponse, dependencies=[Depends(require_admin)]
+)
+async def mail_status(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> MailStatusResponse:
+    account = await EmailAccountRepository(db).get_by_user(
+        current_user.id, get_mail_provider().name
+    )
+    if account is None:
+        return MailStatusResponse(connected=False)
+    return MailStatusResponse(
+        connected=True,
+        email_address=account.email_address,
+        connected_at=account.connected_at,
+    )
+
+
+@router.delete(
+    "/disconnect",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_admin)],
+)
+async def disconnect(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> None:
     repository = EmailAccountRepository(db)
     account = await repository.get_by_user(current_user.id, get_mail_provider().name)
     if account is not None:

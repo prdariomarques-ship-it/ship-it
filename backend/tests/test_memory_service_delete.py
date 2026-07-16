@@ -4,6 +4,7 @@ stale chunks on re-indexing instead of accumulating duplicates forever.
 Mocks the Qdrant client the same way `tests/test_providers.py` mocks httpx
 for other providers — no real Qdrant server is reachable in this suite.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,7 +30,9 @@ def _mock_qdrant(monkeypatch):
     yield client
 
 
-async def _make_embedding(session_factory, vector_id: str, source: str = "knowledge") -> int:
+async def _make_embedding(
+    session_factory, vector_id: str, source: str = "knowledge"
+) -> int:
     async with session_factory() as session:
         record = Embedding(source=source, content="conteúdo", vector_id=vector_id)
         session.add(record)
@@ -39,7 +42,9 @@ async def _make_embedding(session_factory, vector_id: str, source: str = "knowle
 
 
 @pytest.mark.asyncio
-async def test_forget_deletes_qdrant_points_and_postgres_rows(session_factory, _mock_qdrant, db_engine):
+async def test_forget_deletes_qdrant_points_and_postgres_rows(
+    session_factory, _mock_qdrant, db_engine
+):
     id_a = await _make_embedding(session_factory, "vec-a")
     id_b = await _make_embedding(session_factory, "vec-b")
 
@@ -57,7 +62,9 @@ async def test_forget_deletes_qdrant_points_and_postgres_rows(session_factory, _
 
 
 @pytest.mark.asyncio
-async def test_forget_leaves_other_embeddings_untouched(session_factory, _mock_qdrant, db_engine):
+async def test_forget_leaves_other_embeddings_untouched(
+    session_factory, _mock_qdrant, db_engine
+):
     to_delete = await _make_embedding(session_factory, "vec-delete")
     to_keep = await _make_embedding(session_factory, "vec-keep")
 

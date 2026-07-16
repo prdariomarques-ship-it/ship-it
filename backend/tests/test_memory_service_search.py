@@ -5,6 +5,7 @@ raised `AttributeError` on every semantic-search request in production.
 Mocks the Qdrant client the same way `test_memory_service_delete.py` does
 — no real Qdrant server is reachable in this suite.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -22,7 +23,11 @@ def _mock_qdrant(monkeypatch):
         id="vec-a",
         version=0,
         score=0.9,
-        payload={"content": "Prefere atendimento pela manhã", "source": "whatsapp", "contact_id": 1},
+        payload={
+            "content": "Prefere atendimento pela manhã",
+            "source": "whatsapp",
+            "contact_id": 1,
+        },
         vector=None,
     )
     client.query_points = AsyncMock(return_value=QueryResponse(points=[point]))
@@ -31,7 +36,9 @@ def _mock_qdrant(monkeypatch):
 
     embedding_provider = MagicMock()
     embedding_provider.embed = AsyncMock(return_value=[0.1] * 1536)
-    monkeypatch.setattr(memory_service_module, "get_embedding_provider", lambda: embedding_provider)
+    monkeypatch.setattr(
+        memory_service_module, "get_embedding_provider", lambda: embedding_provider
+    )
 
     yield client
 
@@ -43,7 +50,12 @@ async def test_search_calls_query_points_not_the_removed_search_method(_mock_qdr
     _mock_qdrant.query_points.assert_awaited_once()
     assert not hasattr(_mock_qdrant, "search") or not _mock_qdrant.search.called
     assert results == [
-        {"content": "Prefere atendimento pela manhã", "source": "whatsapp", "contact_id": 1, "score": 0.9}
+        {
+            "content": "Prefere atendimento pela manhã",
+            "source": "whatsapp",
+            "contact_id": 1,
+            "score": 0.9,
+        }
     ]
 
 

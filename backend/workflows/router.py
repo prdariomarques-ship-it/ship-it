@@ -23,5 +23,7 @@ async def trigger_workflow(
     try:
         result = await workflow_service.trigger(workflow_name, payload.payload)
     except WorkflowError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
     return WorkflowTriggerResponse(workflow=workflow_name, result=result)

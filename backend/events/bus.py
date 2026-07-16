@@ -16,6 +16,7 @@ notifying interested parties about something that already happened
 (fire-and-forget, no retry, no persistence guarantee). Anything that must
 survive a crash or be retried belongs in a job, not an event handler.
 """
+
 import json
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -41,7 +42,11 @@ class Event:
 
     def to_json(self) -> str:
         return json.dumps(
-            {"name": self.name, "payload": self.payload, "occurred_at": self.occurred_at.isoformat()},
+            {
+                "name": self.name,
+                "payload": self.payload,
+                "occurred_at": self.occurred_at.isoformat(),
+            },
             default=str,
         )
 
@@ -68,7 +73,9 @@ class EventBus:
         self._handlers.clear()
         self._wildcard_handlers.clear()
 
-    async def publish(self, event_name: str, payload: dict[str, Any] | None = None) -> Event:
+    async def publish(
+        self, event_name: str, payload: dict[str, Any] | None = None
+    ) -> Event:
         event = Event(name=event_name, payload=payload or {})
 
         for handler in self._matching_handlers(event_name):
@@ -91,7 +98,9 @@ class EventBus:
             return
         try:
             if self._redis is None:
-                self._redis = aioredis.from_url(self._settings.redis_url, decode_responses=True)
+                self._redis = aioredis.from_url(
+                    self._settings.redis_url, decode_responses=True
+                )
             await self._redis.publish(self._settings.events_channel, event.to_json())
         except Exception:  # noqa: BLE001 - the bus must survive Redis being down
             logger.warning("Redis unavailable; events stay in-process only")

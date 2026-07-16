@@ -11,6 +11,7 @@ and failure handling all come from that existing queue, not from new code
 here. The legacy n8n hand-off (`workflow.trigger`) keeps running alongside it
 for anyone using n8n for additional automation.
 """
+
 import hmac
 import json
 from typing import Annotated
@@ -24,7 +25,12 @@ from database.session import get_db
 from events.bus import event_bus
 from jobs.service import JobService
 from memory.contact_memory import contact_memory_service
-from models.message import Message, MessageDeliveryStatus, MessageDirection, MessageMediaType
+from models.message import (
+    Message,
+    MessageDeliveryStatus,
+    MessageDirection,
+    MessageMediaType,
+)
 from observability.metrics import record_whatsapp_session_status
 from orchestrator.priority import Priority, quick_priority_hint
 from providers.whatsapp.base import ConnectionStatus, DeliveryStatus, WhatsAppProvider
@@ -75,24 +81,35 @@ async def _handle_connection_event(
     if event is None:
         return None
 
-    record_whatsapp_session_status(provider.name, connected=event.status == ConnectionStatus.CONNECTED)
+    record_whatsapp_session_status(
+        provider.name, connected=event.status == ConnectionStatus.CONNECTED
+    )
     level = "warning" if event.status != ConnectionStatus.CONNECTED else "info"
     await record_log(
         db,
         source=f"whatsapp:{provider.name}",
         message=f"Session {event.status.value} ({event.detail})",
         level=level,
-        payload={"provider": provider.name, "status": event.status.value, "detail": event.detail},
+        payload={
+            "provider": provider.name,
+            "status": event.status.value,
+            "detail": event.detail,
+        },
     )
     await event_bus.publish(
         "whatsapp.session_changed",
-        {"provider": provider.name, "status": event.status.value, "detail": event.detail},
+        {
+            "provider": provider.name,
+            "status": event.status.value,
+            "detail": event.detail,
+        },
     )
     if event.status == ConnectionStatus.AUTH_EXPIRED:
         logger.error(
             "WhatsApp session for provider %s needs re-authentication (%s) — "
             "a human needs to re-pair the device (e.g. re-scan the QR code).",
-            provider.name, event.detail,
+            provider.name,
+            event.detail,
         )
     return WebhookAck(status="session_event")
 
@@ -107,16 +124,24 @@ async def _handle_delivery_ack(
 
     message = await MessageRepository(db).get_by_external_id(ack.external_id)
     if message is not None:
-        await MessageRepository(db).update(message, delivery_status=_DELIVERY_STATUS_MAP[ack.status])
+        await MessageRepository(db).update(
+            message, delivery_status=_DELIVERY_STATUS_MAP[ack.status]
+        )
 
     await event_bus.publish(
         "whatsapp.message_delivery_ack",
-        {"provider": provider.name, "external_id": ack.external_id, "status": ack.status.value},
+        {
+            "provider": provider.name,
+            "external_id": ack.external_id,
+            "status": ack.status.value,
+        },
     )
     return WebhookAck(status="delivery_ack")
 
 
-def _verify_webhook_security(provider: WhatsAppProvider, raw_body: bytes, headers) -> None:
+def _verify_webhook_security(
+    provider: WhatsAppProvider, raw_body: bytes, headers
+) -> None:
     """Two independent checks, both provider-agnostic in shape:
     a shared-secret token (works for any gateway) and, when the provider
     implements one, a real per-payload cryptographic signature."""
@@ -124,9 +149,13 @@ def _verify_webhook_security(provider: WhatsAppProvider, raw_body: bytes, header
     if settings.webhook_secret:
         token = headers.get("x-webhook-token", "")
         if not hmac.compare_digest(token, settings.webhook_secret):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token"
+            )
     if not provider.verify_signature(raw_body, headers):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature"
+        )
 
 
 @router.post(
@@ -174,7 +203,9 @@ async def whatsapp_webhook(
             return WebhookAck(status="duplicate", message_id=existing.id)
 
     contacts = ContactRepository(db)
-    contact = await contacts.get_or_create_by_phone(inbound.phone, inbound.sender_name or None)
+    contact = await contacts.get_or_create_by_phone(
+        inbound.phone, inbound.sender_name or None
+    )
 
     media_type = inbound.media_type if inbound.media_type in _MEDIA_TYPES else "text"
     message = Message(
@@ -202,7 +233,11 @@ async def whatsapp_webhook(
         db,
         source="webhook:whatsapp",
         message=f"Inbound message from {inbound.phone} via {provider.name}",
-        payload={"contact_id": contact.id, "message_id": message.id, "provider": provider.name},
+        payload={
+            "contact_id": contact.id,
+            "message_id": message.id,
+            "provider": provider.name,
+        },
     )
 
     summary_due = await contact_memory_service.record_interaction(
@@ -255,7 +290,9 @@ async def whatsapp_webhook(
                 delay_seconds=delay_seconds,
             )
         else:
-            logger.warning("Auto-reply throttled for contact %s (loop/flood guard)", contact.id)
+            logger.warning(
+                "Auto-reply throttled for contact %s (loop/flood guard)", contact.id
+            )
 
     # Decoupling point: the webhook doesn't know (or care) who reacts to a new
     # inbound message — the auto-reply job above, n8n via workflow.trigger,

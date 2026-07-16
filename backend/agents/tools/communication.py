@@ -1,4 +1,5 @@
 """Tools over contacts, memory and WhatsApp sending."""
+
 import json
 
 from agents.tools.base import Tool, ToolContext, ok
@@ -22,8 +23,12 @@ async def _find_contact(context: ToolContext, query: str) -> str:
     # PROD-005: a conversation scoped to one contact can only ever look up
     # that same contact — never another contact's PII, regardless of what
     # the model asks for.
-    if context.contact_id is not None and (contact is None or contact.id != context.contact_id):
-        return _not_authorized("not authorized to look up a contact other than the current conversation")
+    if context.contact_id is not None and (
+        contact is None or contact.id != context.contact_id
+    ):
+        return _not_authorized(
+            "not authorized to look up a contact other than the current conversation"
+        )
 
     if contact is None:
         return ok(found=False)
@@ -42,12 +47,18 @@ async def _find_contact(context: ToolContext, query: str) -> str:
     )
 
 
-async def _search_memory(context: ToolContext, query: str, contact_id: int | None = None) -> str:
-    results = await memory_manager.long_term_search(query=query, limit=5, contact_id=contact_id)
+async def _search_memory(
+    context: ToolContext, query: str, contact_id: int | None = None
+) -> str:
+    results = await memory_manager.long_term_search(
+        query=query, limit=5, contact_id=contact_id
+    )
     return ok(memories=results)
 
 
-async def _store_memory(context: ToolContext, content: str, contact_id: int | None = None) -> str:
+async def _store_memory(
+    context: ToolContext, content: str, contact_id: int | None = None
+) -> str:
     memory_id = await memory_manager.remember(
         context.db, content=content, source="agent", contact_id=contact_id
     )
@@ -58,7 +69,9 @@ async def _update_contact_preference(
     context: ToolContext, contact_id: int, key: str, value: str
 ) -> str:
     try:
-        preferences = await memory_manager.set_preference(context.db, contact_id, key, value)
+        preferences = await memory_manager.set_preference(
+            context.db, contact_id, key, value
+        )
     except ValueError:
         return ok(found=False)
     return ok(found=True, preferences=preferences)
@@ -76,8 +89,14 @@ async def _send_whatsapp(context: ToolContext, to: str, message: str) -> str:
     repository = ContactRepository(context.db)
     if context.contact_id is not None:
         contact = await repository.get(context.contact_id)
-        if contact is None or not contact.phone or normalize_phone(contact.phone) != target:
-            return _not_authorized("not authorized to message a recipient other than the current conversation")
+        if (
+            contact is None
+            or not contact.phone
+            or normalize_phone(contact.phone) != target
+        ):
+            return _not_authorized(
+                "not authorized to message a recipient other than the current conversation"
+            )
     else:
         contact = await repository.get_by_phone(target)
         if contact is None:
@@ -142,7 +161,10 @@ update_contact_preference_tool = Tool(
         "type": "object",
         "properties": {
             "contact_id": {"type": "integer"},
-            "key": {"type": "string", "description": "Nome da preferência, ex: 'horario_entrega'"},
+            "key": {
+                "type": "string",
+                "description": "Nome da preferência, ex: 'horario_entrega'",
+            },
             "value": {"type": "string"},
         },
         "required": ["contact_id", "key", "value"],
@@ -156,7 +178,10 @@ send_whatsapp_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "to": {"type": "string", "description": "Telefone internacional, ex: 5511999999999"},
+            "to": {
+                "type": "string",
+                "description": "Telefone internacional, ex: 5511999999999",
+            },
             "message": {"type": "string"},
         },
         "required": ["to", "message"],

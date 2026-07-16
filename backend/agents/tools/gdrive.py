@@ -17,6 +17,7 @@ is bookkeeping only (which file, when, which `Embedding.id`s) — it never
 holds document content; the content itself lives only in the same Qdrant
 collection every other memory already uses.
 """
+
 from datetime import datetime, timezone
 
 from agents.tools.base import Tool, ToolContext, ok
@@ -44,7 +45,9 @@ async def _get_access_token(context: ToolContext) -> str:
         raise DriveNotConnectedError("No authenticated user in context")
 
     provider = get_drive_provider()
-    account = await GoogleDriveAccountRepository(context.db).get_by_user(context.user.id, provider.name)
+    account = await GoogleDriveAccountRepository(context.db).get_by_user(
+        context.user.id, provider.name
+    )
     if account is None:
         raise DriveNotConnectedError(
             "Nenhum Google Drive conectado. Peça ao administrador para conectar em /api/gdrive/connect."
@@ -76,7 +79,9 @@ def _file_to_dict(file: DriveFile) -> dict:
     }
 
 
-_MAX_CONTENT_CHARS = 8000  # keep a long document from blowing out the conversation context
+_MAX_CONTENT_CHARS = (
+    8000  # keep a long document from blowing out the conversation context
+)
 _CHUNK_SIZE = 1500
 _MAX_CHUNKS_PER_FILE = 30  # ~45k chars cap per file indexed into the Knowledge Store
 
@@ -89,7 +94,9 @@ def _chunk_text(text: str) -> list[str]:
     return chunks[:_MAX_CHUNKS_PER_FILE]
 
 
-def _up_to_date(stored_modified_time: datetime, current_modified_time: datetime) -> bool:
+def _up_to_date(
+    stored_modified_time: datetime, current_modified_time: datetime
+) -> bool:
     """SQLite (local dev/tests) doesn't round-trip tzinfo through a
     `DateTime(timezone=True)` column the way Postgres does — a value read
     back can come back naive even though it was written as UTC-aware,
@@ -104,14 +111,20 @@ def _up_to_date(stored_modified_time: datetime, current_modified_time: datetime)
 
 def _citation(file_name: str, modified_time, part: int, total: int) -> str:
     when = modified_time.isoformat() if modified_time else "data desconhecida"
-    return f"[Google Drive: {file_name} | atualizado em {when} | parte {part}/{total}]\n\n"
+    return (
+        f"[Google Drive: {file_name} | atualizado em {when} | parte {part}/{total}]\n\n"
+    )
 
 
-async def _list_files(context: ToolContext, folder_id: str | None = None, limit: int = 20) -> str:
+async def _list_files(
+    context: ToolContext, folder_id: str | None = None, limit: int = 20
+) -> str:
     access_token = await _get_access_token(context)
     provider = get_drive_provider()
     try:
-        files = await provider.list_files(access_token, folder_id=folder_id, limit=min(limit, 50))
+        files = await provider.list_files(
+            access_token, folder_id=folder_id, limit=min(limit, 50)
+        )
     except DriveProviderError as exc:
         raise RuntimeError(f"Falha ao listar arquivos: {exc}") from exc
     return ok(files=[_file_to_dict(f) for f in files])
@@ -127,7 +140,13 @@ async def _search_files(
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_drive_provider()
-    search = DriveSearchQuery(name=name, mime_type=mime_type, folder_id=folder_id, query=query, limit=min(limit, 50))
+    search = DriveSearchQuery(
+        name=name,
+        mime_type=mime_type,
+        folder_id=folder_id,
+        query=query,
+        limit=min(limit, 50),
+    )
     try:
         files = await provider.search_files(access_token, search)
     except DriveProviderError as exc:
@@ -152,7 +171,9 @@ async def _read_file(context: ToolContext, file_id: str) -> str:
     )
 
 
-async def _index_one(context: ToolContext, provider, access_token: str, file_id: str) -> dict:
+async def _index_one(
+    context: ToolContext, provider, access_token: str, file_id: str
+) -> dict:
     """Shared by `index_google_drive_file` and `index_google_drive_folder`
     — reads, chunks, embeds into the Knowledge Store, and records
     bookkeeping. Skips a file that hasn't changed since it was last
@@ -160,8 +181,17 @@ async def _index_one(context: ToolContext, provider, access_token: str, file_id:
     metadata = await provider.get_metadata(access_token, file_id)
     repository = GoogleDriveIndexedFileRepository(context.db)
     existing = await repository.get_by_user_and_file(context.user.id, file_id)
-    if existing is not None and metadata.modified_time and _up_to_date(existing.modified_time, metadata.modified_time):
-        return {"file_id": file_id, "file_name": metadata.name, "indexed": False, "reason": "sem alterações desde a última indexação"}
+    if (
+        existing is not None
+        and metadata.modified_time
+        and _up_to_date(existing.modified_time, metadata.modified_time)
+    ):
+        return {
+            "file_id": file_id,
+            "file_name": metadata.name,
+            "indexed": False,
+            "reason": "sem alterações desde a última indexação",
+        }
 
     # Captured before the slow part (download + chunk + embed) so we can
     # detect, right before writing, whether a concurrent call for this same
@@ -171,15 +201,24 @@ async def _index_one(context: ToolContext, provider, access_token: str, file_id:
     text = await provider.read_file_text(access_token, file_id)
     chunks = _chunk_text(text)
     if not chunks:
-        return {"file_id": file_id, "file_name": metadata.name, "indexed": False, "reason": "arquivo vazio"}
+        return {
+            "file_id": file_id,
+            "file_name": metadata.name,
+            "indexed": False,
+            "reason": "arquivo vazio",
+        }
 
     if existing is not None and existing.embedding_ids:
         await memory_manager.forget(context.db, existing.embedding_ids)
 
     embedding_ids = []
     for index, chunk in enumerate(chunks, start=1):
-        content = _citation(metadata.name, metadata.modified_time, index, len(chunks)) + chunk
-        embedding_id = await memory_manager.remember(context.db, content=content, source=KNOWLEDGE_SOURCE)
+        content = (
+            _citation(metadata.name, metadata.modified_time, index, len(chunks)) + chunk
+        )
+        embedding_id = await memory_manager.remember(
+            context.db, content=content, source=KNOWLEDGE_SOURCE
+        )
         embedding_ids.append(embedding_id)
 
     # Race guard: if another concurrent call for this same file already
@@ -207,7 +246,12 @@ async def _index_one(context: ToolContext, provider, access_token: str, file_id:
         embedding_ids=embedding_ids,
         indexed_at=datetime.now(timezone.utc),
     )
-    return {"file_id": file_id, "file_name": metadata.name, "indexed": True, "chunks": len(chunks)}
+    return {
+        "file_id": file_id,
+        "file_name": metadata.name,
+        "indexed": True,
+        "chunks": len(chunks),
+    }
 
 
 async def _index_file(context: ToolContext, file_id: str) -> str:
@@ -220,7 +264,9 @@ async def _index_file(context: ToolContext, file_id: str) -> str:
     return ok(**result)
 
 
-_MAX_FILES_PER_FOLDER_INDEX = 20  # bounded per call — same convention as every list/search limit elsewhere
+_MAX_FILES_PER_FOLDER_INDEX = (
+    20  # bounded per call — same convention as every list/search limit elsewhere
+)
 
 
 async def _index_folder(context: ToolContext, folder_id: str, limit: int = 20) -> str:
@@ -228,7 +274,10 @@ async def _index_folder(context: ToolContext, folder_id: str, limit: int = 20) -
     provider = get_drive_provider()
     try:
         files = await provider.search_files(
-            access_token, DriveSearchQuery(folder_id=folder_id, limit=min(limit, _MAX_FILES_PER_FOLDER_INDEX))
+            access_token,
+            DriveSearchQuery(
+                folder_id=folder_id, limit=min(limit, _MAX_FILES_PER_FOLDER_INDEX)
+            ),
         )
     except DriveProviderError as exc:
         raise RuntimeError(f"Falha ao listar a pasta: {exc}") from exc
@@ -240,7 +289,9 @@ async def _index_folder(context: ToolContext, folder_id: str, limit: int = 20) -
         try:
             result = await _index_one(context, provider, access_token, file.id)
         except DriveProviderError as exc:
-            failed.append({"file_id": file.id, "file_name": file.name, "error": str(exc)})
+            failed.append(
+                {"file_id": file.id, "file_name": file.name, "error": str(exc)}
+            )
             continue
         (indexed if result["indexed"] else skipped).append(result)
 
@@ -257,7 +308,9 @@ async def _update_index(context: ToolContext, limit: int = 20) -> str:
     access_token = await _get_access_token(context)
     provider = get_drive_provider()
     repository = GoogleDriveIndexedFileRepository(context.db)
-    tracked = await repository.list_by_user(context.user.id, limit=min(limit, _MAX_FILES_PER_INDEX_UPDATE))
+    tracked = await repository.list_by_user(
+        context.user.id, limit=min(limit, _MAX_FILES_PER_INDEX_UPDATE)
+    )
 
     updated: list[dict] = []
     unchanged: list[dict] = []
@@ -266,7 +319,13 @@ async def _update_index(context: ToolContext, limit: int = 20) -> str:
         try:
             result = await _index_one(context, provider, access_token, entry.file_id)
         except DriveProviderError as exc:
-            failed.append({"file_id": entry.file_id, "file_name": entry.file_name, "error": str(exc)})
+            failed.append(
+                {
+                    "file_id": entry.file_id,
+                    "file_name": entry.file_name,
+                    "error": str(exc),
+                }
+            )
             continue
         (updated if result["indexed"] else unchanged).append(result)
 
@@ -295,7 +354,10 @@ async def _summarize_document(context: ToolContext, file_id: str) -> str:
     result = await get_llm_provider().chat(
         [
             ChatMessage(role="system", content=_SUMMARY_PROMPT),
-            ChatMessage(role="user", content=f"Arquivo: {metadata.name}\n\n{text[:_MAX_CONTENT_CHARS]}"),
+            ChatMessage(
+                role="user",
+                content=f"Arquivo: {metadata.name}\n\n{text[:_MAX_CONTENT_CHARS]}",
+            ),
         ]
     )
     return ok(summary=result.content.strip(), file_name=metadata.name)
@@ -308,8 +370,14 @@ list_google_drive_files_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "folder_id": {"type": "string", "description": "Id da pasta a listar (padrão: raiz/todos)"},
-            "limit": {"type": "integer", "description": "Máximo de resultados (padrão 20)"},
+            "folder_id": {
+                "type": "string",
+                "description": "Id da pasta a listar (padrão: raiz/todos)",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Máximo de resultados (padrão 20)",
+            },
         },
         "required": [],
     },
@@ -329,8 +397,14 @@ search_google_drive_files_tool = Tool(
             "name": {"type": "string", "description": "Parte do nome do arquivo"},
             "mime_type": {"type": "string", "description": "Ex: application/pdf"},
             "folder_id": {"type": "string", "description": "Restringir a uma pasta"},
-            "query": {"type": "string", "description": "Palavras-chave no conteúdo do arquivo"},
-            "limit": {"type": "integer", "description": "Máximo de resultados (padrão 20)"},
+            "query": {
+                "type": "string",
+                "description": "Palavras-chave no conteúdo do arquivo",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Máximo de resultados (padrão 20)",
+            },
         },
         "required": [],
     },
@@ -373,7 +447,10 @@ index_google_drive_folder_tool = Tool(
         "type": "object",
         "properties": {
             "folder_id": {"type": "string"},
-            "limit": {"type": "integer", "description": f"Máximo de arquivos (padrão 20, até {_MAX_FILES_PER_FOLDER_INDEX})"},
+            "limit": {
+                "type": "integer",
+                "description": f"Máximo de arquivos (padrão 20, até {_MAX_FILES_PER_FOLDER_INDEX})",
+            },
         },
         "required": ["folder_id"],
     },
@@ -401,7 +478,10 @@ update_google_drive_index_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "limit": {"type": "integer", "description": f"Máximo de arquivos a checar (padrão 20, até {_MAX_FILES_PER_INDEX_UPDATE})"}
+            "limit": {
+                "type": "integer",
+                "description": f"Máximo de arquivos a checar (padrão 20, até {_MAX_FILES_PER_INDEX_UPDATE})",
+            }
         },
         "required": [],
     },

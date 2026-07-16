@@ -2,6 +2,7 @@
 the logs table (audit trail / execution history survives even with nobody
 subscribed) -- same idiom as `jobs/events.py::JobEventPublisher`.
 """
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from events.bus import event_bus
@@ -10,7 +11,9 @@ from services.audit import record_log
 
 
 class GoalEventPublisher:
-    async def publish(self, db: AsyncSession, goal: Goal, event: str, detail: str = "") -> None:
+    async def publish(
+        self, db: AsyncSession, goal: Goal, event: str, detail: str = ""
+    ) -> None:
         payload = {
             "goal_id": goal.id,
             "user_id": goal.user_id,

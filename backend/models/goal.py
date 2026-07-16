@@ -2,10 +2,20 @@
 tracks over time — distinct from `Task` (a simple reminder/to-do surfaced to
 the user). A Goal can depend on other goals, carry a deadline, and recur.
 """
+
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.base import Base, TimestampMixin
@@ -34,18 +44,30 @@ class Goal(Base, TimestampMixin):
     __tablename__ = "goals"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[GoalStatus] = mapped_column(Enum(GoalStatus), default=GoalStatus.PENDING, index=True)
-    priority: Mapped[GoalPriority] = mapped_column(Enum(GoalPriority), default=GoalPriority.MEDIUM)
-    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[GoalStatus] = mapped_column(
+        Enum(GoalStatus), default=GoalStatus.PENDING, index=True
+    )
+    priority: Mapped[GoalPriority] = mapped_column(
+        Enum(GoalPriority), default=GoalPriority.MEDIUM
+    )
+    deadline: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
     progress_percent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Human approval workflow.
-    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    requires_approval: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    approved_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     # Recurrence: a fixed interval in days rather than a cron/RRULE string —
     # deliberately simple (daily/weekly/monthly are just 1/7/30) and fully
@@ -65,8 +87,14 @@ class GoalDependency(Base):
     """Directed edge: `goal_id` cannot proceed until `depends_on_id` is COMPLETED."""
 
     __tablename__ = "goal_dependencies"
-    __table_args__ = (UniqueConstraint("goal_id", "depends_on_id", name="uq_goal_dependency"),)
+    __table_args__ = (
+        UniqueConstraint("goal_id", "depends_on_id", name="uq_goal_dependency"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"), index=True)
-    depends_on_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"), index=True)
+    goal_id: Mapped[int] = mapped_column(
+        ForeignKey("goals.id", ondelete="CASCADE"), index=True
+    )
+    depends_on_id: Mapped[int] = mapped_column(
+        ForeignKey("goals.id", ondelete="CASCADE"), index=True
+    )

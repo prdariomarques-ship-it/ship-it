@@ -13,7 +13,9 @@ class ContactRepository(SQLAlchemyRepository[Contact]):
     async def get_by_phone(self, phone: str) -> Contact | None:
         return await self.find_one(phone=phone)
 
-    async def get_or_create_by_phone(self, phone: str, name: str | None = None) -> Contact:
+    async def get_or_create_by_phone(
+        self, phone: str, name: str | None = None
+    ) -> Contact:
         contact = await self.get_by_phone(phone)
         if contact is None:
             contact = Contact(name=name or phone, phone=phone)

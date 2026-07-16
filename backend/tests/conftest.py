@@ -1,4 +1,5 @@
 """Test fixtures: in-memory SQLite database and an authenticated HTTP client."""
+
 import os
 import uuid
 
@@ -89,7 +90,11 @@ async def client(db_engine):
 async def auth_headers(client) -> dict[str, str]:
     await client.post(
         "/api/auth/register",
-        json={"email": "dario@example.com", "full_name": "Dario", "password": "supersecret1"},
+        json={
+            "email": "dario@example.com",
+            "full_name": "Dario",
+            "password": "supersecret1",
+        },
     )
     response = await client.post(
         "/api/auth/login",

@@ -8,10 +8,14 @@ from repositories.base import SQLAlchemyRepository
 class GoogleDriveIndexedFileRepository(SQLAlchemyRepository[GoogleDriveIndexedFile]):
     model = GoogleDriveIndexedFile
 
-    async def get_by_user_and_file(self, user_id: int, file_id: str) -> GoogleDriveIndexedFile | None:
+    async def get_by_user_and_file(
+        self, user_id: int, file_id: str
+    ) -> GoogleDriveIndexedFile | None:
         return await self.find_one(user_id=user_id, file_id=file_id)
 
-    async def list_by_user(self, user_id: int, limit: int = 50) -> list[GoogleDriveIndexedFile]:
+    async def list_by_user(
+        self, user_id: int, limit: int = 50
+    ) -> list[GoogleDriveIndexedFile]:
         """Oldest-indexed first — `update_google_drive_index` refreshes the
         staleset entries first when bounded by `limit`."""
         statement = (
@@ -22,7 +26,9 @@ class GoogleDriveIndexedFileRepository(SQLAlchemyRepository[GoogleDriveIndexedFi
         )
         return list((await self.session.execute(statement)).scalars().all())
 
-    async def upsert_for_user_and_file(self, user_id: int, file_id: str, **fields: object) -> GoogleDriveIndexedFile:
+    async def upsert_for_user_and_file(
+        self, user_id: int, file_id: str, **fields: object
+    ) -> GoogleDriveIndexedFile:
         """Same race-safe create-or-update idiom as
         `GoogleDriveAccountRepository.upsert_for_user` — two concurrent
         indexing calls for the same file must not crash on the unique

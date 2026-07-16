@@ -8,6 +8,7 @@ automatically, with zero changes to the application. Two kinds of proof:
    webhook route works through the interface alone — this is the concrete
    demonstration of rule #6: swapping providers is configuration, not code.
 """
+
 from typing import ClassVar
 
 import pytest
@@ -25,7 +26,12 @@ from providers.whatsapp.evolution.provider import EvolutionProvider
 from providers.whatsapp.official.provider import OfficialProvider
 from providers.whatsapp.openwa.provider import OpenWAProvider
 
-ALL_PROVIDER_CLASSES = [OpenWAProvider, BaileysProvider, EvolutionProvider, OfficialProvider]
+ALL_PROVIDER_CLASSES = [
+    OpenWAProvider,
+    BaileysProvider,
+    EvolutionProvider,
+    OfficialProvider,
+]
 
 
 @pytest.mark.parametrize("provider_cls", ALL_PROVIDER_CLASSES, ids=lambda c: c.name)
@@ -40,13 +46,22 @@ class TestEveryProviderSatisfiesTheContract:
 
     def test_parse_webhook_never_raises_on_garbage_input(self, provider_cls):
         provider = provider_cls()
-        for garbage in ({}, {"garbage": "data"}, {"event": "something_unexpected"}, {"data": None}):
+        for garbage in (
+            {},
+            {"garbage": "data"},
+            {"event": "something_unexpected"},
+            {"data": None},
+        ):
             result = provider.parse_webhook(garbage)
             assert result is None or isinstance(result, InboundMessage)
 
     def test_parse_connection_event_never_raises_on_garbage_input(self, provider_cls):
         provider = provider_cls()
-        for garbage in ({}, {"event": "onStateChanged"}, {"event": "onStateChanged", "data": None}):
+        for garbage in (
+            {},
+            {"event": "onStateChanged"},
+            {"event": "onStateChanged", "data": None},
+        ):
             result = provider.parse_connection_event(garbage)
             assert result is None or isinstance(result, ConnectionEvent)
 
@@ -56,7 +71,9 @@ class TestEveryProviderSatisfiesTheContract:
             result = provider.parse_delivery_ack(garbage)
             assert result is None or isinstance(result, DeliveryAck)
 
-    def test_verify_signature_default_or_configured_behavior_is_a_bool(self, provider_cls):
+    def test_verify_signature_default_or_configured_behavior_is_a_bool(
+        self, provider_cls
+    ):
         provider = provider_cls()
         assert isinstance(provider.verify_signature(b"", {}), bool)
 
@@ -68,7 +85,13 @@ class TestEveryProviderSatisfiesTheContract:
         assert isinstance(await provider.health_check(), bool)
 
     def test_declares_all_required_send_methods(self, provider_cls):
-        for method_name in ("send_text", "send_image", "send_file", "send_audio", "send_location"):
+        for method_name in (
+            "send_text",
+            "send_image",
+            "send_file",
+            "send_audio",
+            "send_location",
+        ):
             assert callable(getattr(provider_cls, method_name, None)), method_name
 
     def test_registered_in_the_factory_by_its_own_name(self, provider_cls):
@@ -125,7 +148,9 @@ class _FakeProvider(WhatsAppProvider):
     def parse_connection_event(self, payload: dict) -> ConnectionEvent | None:
         if payload.get("kind") != "session_status":
             return None
-        return ConnectionEvent(status=ConnectionStatus(payload["status"]), detail="fake")
+        return ConnectionEvent(
+            status=ConnectionStatus(payload["status"]), detail="fake"
+        )
 
 
 @pytest.fixture
@@ -148,7 +173,13 @@ async def test_webhook_route_works_with_a_brand_new_provider_zero_app_changes(
 ):
     response = await client.post(
         "/api/webhooks/whatsapp",
-        json={"kind": "chat_message", "from_number": "5511900000123", "text": "oi", "sender": "Fake", "id": "fake-1"},
+        json={
+            "kind": "chat_message",
+            "from_number": "5511900000123",
+            "text": "oi",
+            "sender": "Fake",
+            "id": "fake-1",
+        },
     )
     assert response.status_code == 200
     assert response.json()["status"] == "received"
@@ -169,7 +200,9 @@ async def test_webhook_route_recognizes_connection_events_from_a_new_provider(
 
 
 @pytest.mark.asyncio
-async def test_outbound_send_works_through_a_brand_new_provider(client, auth_headers, fake_provider_configured):
+async def test_outbound_send_works_through_a_brand_new_provider(
+    client, auth_headers, fake_provider_configured
+):
     response = await client.post(
         "/api/whatsapp/send-text",
         json={"to": "5511900000999", "content": "olá via fake provider"},

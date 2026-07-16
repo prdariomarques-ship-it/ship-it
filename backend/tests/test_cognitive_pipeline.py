@@ -4,6 +4,7 @@ knowledge are consulted, a plan is made, the right agent(s) run with the
 right tools, results are validated, memory is updated, and every step is
 recorded in structured logs (the `logs` table via services.audit.record_log).
 """
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -28,7 +29,9 @@ async def session_factory(db_engine):
 @pytest.fixture
 async def user(session_factory) -> User:
     async with session_factory() as session:
-        user = User(email="pipeline@example.com", full_name="Pipeline", hashed_password="x")
+        user = User(
+            email="pipeline@example.com", full_name="Pipeline", hashed_password="x"
+        )
         session.add(user)
         await session.commit()
         await session.refresh(user)
@@ -71,7 +74,11 @@ def _multi_step_plan_llm() -> ScriptedLLM:
                     name="create_plan",
                     arguments={
                         "steps": [
-                            {"objective": "Marcar reunião amanhã às 14h", "agent": "personal", "depends_on": []},
+                            {
+                                "objective": "Marcar reunião amanhã às 14h",
+                                "agent": "personal",
+                                "depends_on": [],
+                            },
                             {
                                 "objective": "Enviar mensagem para o grupo da igreja",
                                 "agent": "church",
@@ -119,13 +126,17 @@ async def test_composite_message_executes_every_planned_step(session_factory, us
 
 # --- 3. Multiple tools within one step --------------------------------------
 @pytest.mark.asyncio
-async def test_multiple_tools_executed_and_recorded_as_steps(session_factory, user, monkeypatch):
+async def test_multiple_tools_executed_and_recorded_as_steps(
+    session_factory, user, monkeypatch
+):
     from agents import base as agents_base
 
     scripted = ScriptedLLM(
         LLMResult(
             tool_calls=[
-                ToolCallRequest(id="c1", name="create_task", arguments={"title": "Comprar pão"}),
+                ToolCallRequest(
+                    id="c1", name="create_task", arguments={"title": "Comprar pão"}
+                ),
                 ToolCallRequest(id="c2", name="list_tasks", arguments={}),
             ]
         )
@@ -142,9 +153,13 @@ async def test_multiple_tools_executed_and_recorded_as_steps(session_factory, us
     scripted.chat = chat
     monkeypatch.setattr(agents_base, "get_llm_provider", lambda: scripted)
 
-    pipeline = CognitivePipeline(planner=CognitivePlanner(llm=ScriptedLLM(LLMResult(content="stub"))))
+    pipeline = CognitivePipeline(
+        planner=CognitivePlanner(llm=ScriptedLLM(LLMResult(content="stub")))
+    )
     async with session_factory() as session:
-        result = await pipeline.process(session, user, "crie uma tarefa e liste minhas tarefas", contact_id=None)
+        result = await pipeline.process(
+            session, user, "crie uma tarefa e liste minhas tarefas", contact_id=None
+        )
 
     tool_names = {step.tool for step in result.steps}
     assert tool_names == {"create_task", "list_tasks"}
@@ -153,11 +168,15 @@ async def test_multiple_tools_executed_and_recorded_as_steps(session_factory, us
 
 # --- 4/5. Validation retry on tool error, then giving up honestly ----------
 @pytest.mark.asyncio
-async def test_validation_retries_once_then_succeeds(session_factory, user, monkeypatch):
+async def test_validation_retries_once_then_succeeds(
+    session_factory, user, monkeypatch
+):
     from orchestrator import pipeline as pipeline_module
 
     attempts = {"n": 0}
-    failing_step = ExecutedStep(tool="create_task", arguments={}, result='{"error": "db down"}', status="error")
+    failing_step = ExecutedStep(
+        tool="create_task", arguments={}, result='{"error": "db down"}', status="error"
+    )
 
     async def fake_run(**kwargs):
         attempts["n"] += 1
@@ -177,10 +196,14 @@ async def test_validation_retries_once_then_succeeds(session_factory, user, monk
 
 
 @pytest.mark.asyncio
-async def test_validation_gives_up_after_max_attempts_but_never_goes_silent(session_factory, user, monkeypatch):
+async def test_validation_gives_up_after_max_attempts_but_never_goes_silent(
+    session_factory, user, monkeypatch
+):
     from orchestrator import pipeline as pipeline_module
 
-    failing_step = ExecutedStep(tool="create_task", arguments={}, result='{"error": "db down"}', status="error")
+    failing_step = ExecutedStep(
+        tool="create_task", arguments={}, result='{"error": "db down"}', status="error"
+    )
 
     async def always_fails(**kwargs):
         return AgentResult(reply="Não consegui completar.", steps=[failing_step])
@@ -197,7 +220,9 @@ async def test_validation_gives_up_after_max_attempts_but_never_goes_silent(sess
 
 # --- 6. Automatic provider switch, exercised through the whole pipeline ----
 @pytest.mark.asyncio
-async def test_provider_failure_triggers_automatic_switch(session_factory, user, monkeypatch):
+async def test_provider_failure_triggers_automatic_switch(
+    session_factory, user, monkeypatch
+):
     from utils.config import get_settings
     from agents import base as agents_base
     from providers.llm.factory import get_fallback_llm_provider
@@ -234,7 +259,9 @@ async def test_provider_failure_triggers_automatic_switch(session_factory, user,
 @pytest.mark.asyncio
 async def test_urgent_message_is_classified_as_urgent_priority(session_factory, user):
     async with session_factory() as session:
-        result = await cognitive_pipeline.process(session, user, "É urgente, socorro, preciso de ajuda agora")
+        result = await cognitive_pipeline.process(
+            session, user, "É urgente, socorro, preciso de ajuda agora"
+        )
     assert result.priority.level == Priority.URGENT
 
 
@@ -253,7 +280,9 @@ async def test_learning_tags_contact_after_conversation(session_factory, user, c
 
 # --- 9. Memory usage: short-term + preferences feed the agent --------------
 @pytest.mark.asyncio
-async def test_memory_context_is_loaded_and_passed_to_execution(session_factory, user, contact, monkeypatch):
+async def test_memory_context_is_loaded_and_passed_to_execution(
+    session_factory, user, contact, monkeypatch
+):
     from orchestrator import pipeline as pipeline_module
 
     async with session_factory() as session:
@@ -282,7 +311,9 @@ async def test_memory_context_is_loaded_and_passed_to_execution(session_factory,
     monkeypatch.setattr(pipeline_module.ai_orchestrator, "run", fake_run)
 
     async with session_factory() as session:
-        await cognitive_pipeline.process(session, user, "e essa outra coisa?", contact_id=contact.id)
+        await cognitive_pipeline.process(
+            session, user, "e essa outra coisa?", contact_id=contact.id
+        )
 
     assert captured["history"]  # short-term conversation was loaded
     assert any(m.get("source") == "preferences" for m in captured["memories"])
@@ -290,7 +321,9 @@ async def test_memory_context_is_loaded_and_passed_to_execution(session_factory,
 
 # --- 10. Confirmation short-circuits execution ------------------------------
 @pytest.mark.asyncio
-async def test_needs_confirmation_stops_before_executing_any_step(session_factory, user):
+async def test_needs_confirmation_stops_before_executing_any_step(
+    session_factory, user
+):
     confirm_llm = ScriptedLLM(
         LLMResult(
             tool_calls=[
@@ -298,7 +331,12 @@ async def test_needs_confirmation_stops_before_executing_any_step(session_factor
                     id="c1",
                     name="create_plan",
                     arguments={
-                        "steps": [{"objective": "cancelar todos os pedidos da loja", "agent": "store"}],
+                        "steps": [
+                            {
+                                "objective": "cancelar todos os pedidos da loja",
+                                "agent": "store",
+                            }
+                        ],
                         "needs_confirmation": True,
                     },
                 )
@@ -343,7 +381,11 @@ async def test_whatsapp_flow_runs_through_the_cognitive_pipeline_and_logs_every_
 
     async with session_factory() as session:
         logs = (
-            (await session.execute(select(LogEntry).where(LogEntry.source == "cognitive_pipeline")))
+            (
+                await session.execute(
+                    select(LogEntry).where(LogEntry.source == "cognitive_pipeline")
+                )
+            )
             .scalars()
             .all()
         )

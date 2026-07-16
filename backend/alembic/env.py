@@ -1,4 +1,5 @@
 """Alembic environment — async-aware, driven by the application settings."""
+
 import asyncio
 from logging.config import fileConfig
 

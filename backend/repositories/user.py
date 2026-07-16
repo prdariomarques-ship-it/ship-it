@@ -19,5 +19,10 @@ class UserRepository(SQLAlchemyRepository[User]):
         rather than to the contact who sent the message. Ordered by id (not
         `find_one`) because nothing stops a second admin from existing later.
         """
-        statement = select(User).where(User.role == UserRole.ADMIN).order_by(User.id.asc()).limit(1)
+        statement = (
+            select(User)
+            .where(User.role == UserRole.ADMIN)
+            .order_by(User.id.asc())
+            .limit(1)
+        )
         return (await self.session.execute(statement)).scalar_one_or_none()

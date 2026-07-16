@@ -7,7 +7,9 @@ from repositories.base import SQLAlchemyRepository
 class MessageRepository(SQLAlchemyRepository[Message]):
     model = Message
 
-    async def recent_for_contact(self, contact_id: int, limit: int = 20) -> list[Message]:
+    async def recent_for_contact(
+        self, contact_id: int, limit: int = 20
+    ) -> list[Message]:
         # Order by the provider's own timestamp when it reported one (protects
         # against out-of-order webhook delivery); fall back to arrival order
         # (id) for messages with no provider timestamp.

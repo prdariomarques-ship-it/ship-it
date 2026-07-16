@@ -1,4 +1,5 @@
 """Authentication service layer: registration, login, refresh rotation, logout."""
+
 import asyncio
 import hashlib
 import secrets
@@ -63,7 +64,9 @@ class AuthService:
 
     async def refresh(self, refresh_token: str) -> tuple[str, str]:
         """Rotate the refresh token: validate, revoke the old one, issue a new pair."""
-        record = await self.refresh_tokens.get_by_hash(_hash_refresh_token(refresh_token))
+        record = await self.refresh_tokens.get_by_hash(
+            _hash_refresh_token(refresh_token)
+        )
         now = datetime.now(timezone.utc)
         if record is None or record.revoked_at is not None:
             raise AuthError("Invalid refresh token")
@@ -81,7 +84,9 @@ class AuthService:
         return await self._issue_pair(user)
 
     async def logout(self, refresh_token: str) -> None:
-        record = await self.refresh_tokens.get_by_hash(_hash_refresh_token(refresh_token))
+        record = await self.refresh_tokens.get_by_hash(
+            _hash_refresh_token(refresh_token)
+        )
         if record is not None and record.revoked_at is None:
             await self.refresh_tokens.revoke(record, datetime.now(timezone.utc))
 

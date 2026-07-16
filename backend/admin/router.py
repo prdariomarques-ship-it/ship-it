@@ -5,6 +5,7 @@ tables (`users`, `jobs`, `logs`, etc.), Prometheus registry, and existing
 services. Job management endpoints (P6) allow admins to cancel and retry jobs
 with atomic state transitions, audit logging, and event bus integration.
 """
+
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -31,7 +32,9 @@ from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)]
+)
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
@@ -53,10 +56,19 @@ async def admin_index(db: DbSession) -> schemas.AdminIndex:
     if cached is not None:
         return schemas.AdminIndex(**cached)
 
-    users_total = (await db.execute(select(func.count()).select_from(User))).scalar_one()
+    users_total = (
+        await db.execute(select(func.count()).select_from(User))
+    ).scalar_one()
     google_connected = 0
-    for model in (EmailAccount, GoogleCalendarAccount, GoogleContactsAccount, GoogleDriveAccount):
-        google_connected += (await db.execute(select(func.count()).select_from(model))).scalar_one()
+    for model in (
+        EmailAccount,
+        GoogleCalendarAccount,
+        GoogleContactsAccount,
+        GoogleDriveAccount,
+    ):
+        google_connected += (
+            await db.execute(select(func.count()).select_from(model))
+        ).scalar_one()
 
     whatsapp_status = await service.check_whatsapp()
 
@@ -105,11 +117,15 @@ async def admin_status(db: DbSession) -> list[schemas.ComponentStatus]:
     # configured to run the OAuth flow at all, not that a specific user's
     # token is currently valid (that's per-account, shown in /admin/google).
     settings = get_settings()
-    google_configured = bool(settings.google_client_id and settings.google_client_secret)
+    google_configured = bool(
+        settings.google_client_id and settings.google_client_secret
+    )
     google_check = schemas.ComponentStatus(
         name="google_oauth",
         online=google_configured,
-        detail="client credentials configured" if google_configured else "GOOGLE_CLIENT_ID/SECRET not set",
+        detail="client credentials configured"
+        if google_configured
+        else "GOOGLE_CLIENT_ID/SECRET not set",
         latency_ms=None,
         last_heartbeat=heartbeat,
     )
@@ -214,7 +230,9 @@ async def admin_logs(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[dict]:
-    statement = select(LogEntry).order_by(LogEntry.id.desc()).limit(limit).offset(offset)
+    statement = (
+        select(LogEntry).order_by(LogEntry.id.desc()).limit(limit).offset(offset)
+    )
     if source:
         statement = statement.where(LogEntry.source == source)
     if level:
@@ -235,19 +253,25 @@ async def admin_logs(
     ]
 
 
-async def _domain_status(db: DbSession, model, domain: str) -> schemas.GoogleDomainStatus:
+async def _domain_status(
+    db: DbSession, model, domain: str
+) -> schemas.GoogleDomainStatus:
     statement = select(model)
     rows = (await db.execute(statement)).scalars().all()
     accounts = [
         schemas.GoogleAccountInfo(
             user_id=row.user_id,
-            label=str(getattr(row, "account_label", None) or getattr(row, "email_address", "")),
+            label=str(
+                getattr(row, "account_label", None) or getattr(row, "email_address", "")
+            ),
             scopes=row.scopes,
             connected_at=row.connected_at,
         )
         for row in rows
     ]
-    return schemas.GoogleDomainStatus(domain=domain, connected_accounts=len(accounts), accounts=accounts)
+    return schemas.GoogleDomainStatus(
+        domain=domain, connected_accounts=len(accounts), accounts=accounts
+    )
 
 
 @router.get("/google", response_model=schemas.GoogleWorkspaceStatus)
@@ -261,7 +285,9 @@ async def admin_google(db: DbSession) -> schemas.GoogleWorkspaceStatus:
     drive.indexed_items = indexed_count
     drive.last_indexed_at = last_indexed
 
-    return schemas.GoogleWorkspaceStatus(mail=mail, calendar=calendar, contacts=contacts, drive=drive)
+    return schemas.GoogleWorkspaceStatus(
+        mail=mail, calendar=calendar, contacts=contacts, drive=drive
+    )
 
 
 @router.get("/memory", response_model=schemas.MemoryStats)
@@ -270,7 +296,10 @@ async def admin_memory(db: DbSession) -> schemas.MemoryStats:
 
     settings = get_settings()
     collection_stats = schemas.MemoryCollectionStats(
-        name=settings.qdrant_collection, points_count=None, vectors_count=None, status=None
+        name=settings.qdrant_collection,
+        points_count=None,
+        vectors_count=None,
+        status=None,
     )
     try:
         info = await memory_service.client.get_collection(settings.qdrant_collection)
@@ -293,7 +322,9 @@ async def admin_memory(db: DbSession) -> schemas.MemoryStats:
         embeddings_by_source=by_source,
         drive_indexed_files=drive_count,
         drive_last_indexed_at=drive_last_indexed,
-        cache_backend="redis" if cache_service._redis_available else "in-memory (fallback)",
+        cache_backend="redis"
+        if cache_service._redis_available
+        else "in-memory (fallback)",
     )
 
 
@@ -311,7 +342,9 @@ async def admin_executions(
     ties a log/job row to a specific tool call."""
     since = datetime.now(timezone.utc) - _PERIOD_TO_TIMEDELTA[period]
 
-    job_statement = select(Job).where(Job.created_at >= since).order_by(Job.id.desc()).limit(limit)
+    job_statement = (
+        select(Job).where(Job.created_at >= since).order_by(Job.id.desc()).limit(limit)
+    )
     if agent:
         job_statement = job_statement.where(Job.name.ilike(f"%{agent}%"))
     jobs = (await db.execute(job_statement)).scalars().all()
@@ -371,8 +404,12 @@ async def admin_users(
     rows = (await db.execute(statement)).scalars().all()
     return [
         schemas.UserAdminRead(
-            id=row.id, email=row.email, full_name=row.full_name, role=row.role.value,
-            is_active=row.is_active, created_at=row.created_at,
+            id=row.id,
+            email=row.email,
+            full_name=row.full_name,
+            role=row.role.value,
+            is_active=row.is_active,
+            created_at=row.created_at,
         )
         for row in rows
     ]
@@ -384,7 +421,10 @@ async def admin_metrics() -> dict:
     cumulative totals (Prometheus semantics), not per-minute rates — the
     frontend derives a rate by polling this endpoint and diffing successive
     snapshots (see docs/DASHBOARD.md)."""
-    return {"timestamp": datetime.now(timezone.utc).isoformat(), "metrics": service.prometheus_snapshot()}
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "metrics": service.prometheus_snapshot(),
+    }
 
 
 @router.get("/whatsapp", response_model=schemas.WhatsAppStatus)
@@ -396,17 +436,23 @@ async def admin_whatsapp(db: DbSession) -> schemas.WhatsAppStatus:
 
     queue_depth = (
         await db.execute(
-            select(func.count()).select_from(Job).where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
+            select(func.count())
+            .select_from(Job)
+            .where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
         )
     ).scalar_one()
     sent = (
         await db.execute(
-            select(func.count()).select_from(Message).where(Message.direction == MessageDirection.OUTBOUND)
+            select(func.count())
+            .select_from(Message)
+            .where(Message.direction == MessageDirection.OUTBOUND)
         )
     ).scalar_one()
     received = (
         await db.execute(
-            select(func.count()).select_from(Message).where(Message.direction == MessageDirection.INBOUND)
+            select(func.count())
+            .select_from(Message)
+            .where(Message.direction == MessageDirection.INBOUND)
         )
     ).scalar_one()
 
@@ -423,7 +469,11 @@ async def admin_whatsapp(db: DbSession) -> schemas.WhatsAppStatus:
 # --- P6: Job Management Operations (ADMIN-only, state-changing) ---
 
 
-@router.post("/jobs/{job_id}/cancel", summary="Cancel a queued or running job", tags=["admin", "jobs"])
+@router.post(
+    "/jobs/{job_id}/cancel",
+    summary="Cancel a queued or running job",
+    tags=["admin", "jobs"],
+)
 async def admin_cancel_job(
     job_id: int,
     db: DbSession,
@@ -458,7 +508,13 @@ async def admin_cancel_job(
     # Audit logging (includes trace_id via RequestIDFilter)
     logger.info(
         "Admin cancelled job",
-        extra={"context": {"job_id": job_id, "previous_status": job.status.value, "new_status": "cancelled"}},
+        extra={
+            "context": {
+                "job_id": job_id,
+                "previous_status": job.status.value,
+                "new_status": "cancelled",
+            }
+        },
     )
 
     # Persist to audit trail
@@ -467,7 +523,11 @@ async def admin_cancel_job(
         source="admin:job_cancel",
         message=f"Job {job_id} cancelled by admin",
         level="info",
-        payload={"job_id": job_id, "job_name": job.name, "previous_status": job.status.value},
+        payload={
+            "job_id": job_id,
+            "job_name": job.name,
+            "previous_status": job.status.value,
+        },
     )
 
     # Emit event (EventBus listener notifies UI dashboards, notification services)
@@ -481,10 +541,18 @@ async def admin_cancel_job(
         },
     )
 
-    return {"job_id": job_id, "status": JobStatus.CANCELLED.value, "finished_at": now.isoformat()}
+    return {
+        "job_id": job_id,
+        "status": JobStatus.CANCELLED.value,
+        "finished_at": now.isoformat(),
+    }
 
 
-@router.post("/jobs/{job_id}/retry", summary="Retry a failed or cancelled job", tags=["admin", "jobs"])
+@router.post(
+    "/jobs/{job_id}/retry",
+    summary="Retry a failed or cancelled job",
+    tags=["admin", "jobs"],
+)
 async def admin_retry_job(
     job_id: int,
     db: DbSession,
@@ -524,7 +592,13 @@ async def admin_retry_job(
     # Audit logging (includes trace_id via RequestIDFilter)
     logger.info(
         "Admin retried job",
-        extra={"context": {"job_id": job_id, "previous_status": job.status.value, "new_status": "queued"}},
+        extra={
+            "context": {
+                "job_id": job_id,
+                "previous_status": job.status.value,
+                "new_status": "queued",
+            }
+        },
     )
 
     # Persist to audit trail
@@ -533,7 +607,11 @@ async def admin_retry_job(
         source="admin:job_retry",
         message=f"Job {job_id} retried by admin (attempts reset to 0)",
         level="info",
-        payload={"job_id": job_id, "job_name": job.name, "previous_status": job.status.value},
+        payload={
+            "job_id": job_id,
+            "job_name": job.name,
+            "previous_status": job.status.value,
+        },
     )
 
     # Emit event (EventBus listener notifies UI dashboards, notification services)
@@ -548,4 +626,8 @@ async def admin_retry_job(
         },
     )
 
-    return {"job_id": job_id, "status": JobStatus.QUEUED.value, "scheduled_at": now.isoformat()}
+    return {
+        "job_id": job_id,
+        "status": JobStatus.QUEUED.value,
+        "scheduled_at": now.isoformat(),
+    }

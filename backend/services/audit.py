@@ -1,4 +1,5 @@
 """Persist structured audit/log entries to the logs table."""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.log import LogEntry

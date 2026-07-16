@@ -4,6 +4,7 @@ A Tool couples an LLM-visible spec (name, description, JSON Schema) with an
 async handler that runs against the application services. Handlers always
 return a JSON string — that's what goes back to the model.
 """
+
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -52,7 +53,9 @@ class Tool:
         register_tool(self)
 
     def spec(self) -> ToolSpec:
-        return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
+        return ToolSpec(
+            name=self.name, description=self.description, parameters=self.parameters
+        )
 
     async def run(self, context: ToolContext, arguments: dict) -> str:
         try:

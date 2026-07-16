@@ -1,4 +1,5 @@
 """Tests for error sanitization middleware."""
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -91,7 +92,9 @@ def test_correlation_id_in_error_log(caplog):
 
     client = TestClient(app)
     with caplog.at_level("ERROR"):
-        response = client.get("/error", headers={"X-Request-ID": "test-correlation-123"})
+        response = client.get(
+            "/error", headers={"X-Request-ID": "test-correlation-123"}
+        )
 
     assert response.status_code == 500
 

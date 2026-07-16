@@ -12,6 +12,7 @@ named the same as `models.calendar.CalendarEvent`, which is Dario OS's own
 internal event storage (the `create_event`/`list_events` tools) and has
 nothing to do with this integration. See `docs/CALENDAR.md`.
 """
+
 from abc import ABC, abstractmethod
 from datetime import datetime
 
@@ -115,12 +116,16 @@ class CalendarProvider(ABC):
         """List calendars the authorized account has access to."""
 
     @abstractmethod
-    async def search_events(self, access_token: str, query: EventSearchQuery) -> list[CalendarEvent]:
+    async def search_events(
+        self, access_token: str, query: EventSearchQuery
+    ) -> list[CalendarEvent]:
         """Search/list events in one calendar (covers "listar", "buscar",
         "próximos compromissos", "hoje/amanhã/semana" via since/until)."""
 
     @abstractmethod
-    async def create_event(self, access_token: str, calendar_id: str, event: NewEvent) -> CalendarEvent:
+    async def create_event(
+        self, access_token: str, calendar_id: str, event: NewEvent
+    ) -> CalendarEvent:
         """Create a new event."""
 
     @abstractmethod
@@ -130,11 +135,17 @@ class CalendarProvider(ABC):
         """Patch an existing event (only the provided fields change)."""
 
     @abstractmethod
-    async def delete_event(self, access_token: str, calendar_id: str, event_id: str) -> None:
+    async def delete_event(
+        self, access_token: str, calendar_id: str, event_id: str
+    ) -> None:
         """Delete an event."""
 
     @abstractmethod
     async def check_availability(
-        self, access_token: str, calendar_ids: list[str], since: datetime, until: datetime
+        self,
+        access_token: str,
+        calendar_ids: list[str],
+        since: datetime,
+        until: datetime,
     ) -> AvailabilityResult:
         """Free/busy for a time window, across one or more calendars."""

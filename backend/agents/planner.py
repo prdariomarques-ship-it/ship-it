@@ -3,6 +3,7 @@
 Turns the agent's identity, permanent-memory hits and the user request into
 the initial message list the executor iterates on.
 """
+
 from providers.llm.base import ChatMessage
 
 
@@ -16,7 +17,10 @@ class Planner:
     ) -> list[ChatMessage]:
         prompt = system_prompt
         if memories:
-            lines = [f"- ({memory.get('source', '?')}) {memory.get('content', '')}" for memory in memories]
+            lines = [
+                f"- ({memory.get('source', '?')}) {memory.get('content', '')}"
+                for memory in memories
+            ]
             prompt += "\n\nMemórias relevantes sobre o assunto:\n" + "\n".join(lines)
         prompt += (
             "\n\nQuando precisar consultar ou alterar dados, use as ferramentas disponíveis "

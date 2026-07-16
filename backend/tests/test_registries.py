@@ -1,7 +1,14 @@
 """Tool Registry and Agent Registry: self-registration and auto-discovery."""
+
 import pytest
 
-from agents.registry import DuplicateAgentError, UnknownAgentError, get_agent, list_agents, register_agent
+from agents.registry import (
+    DuplicateAgentError,
+    UnknownAgentError,
+    get_agent,
+    list_agents,
+    register_agent,
+)
 from agents.tools.base import Tool
 from agents.tools.registry import DuplicateToolError, get_tool, list_tools
 

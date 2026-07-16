@@ -1,4 +1,5 @@
 """Operational metrics for distributed tracing — exemplars, sampling, health."""
+
 from typing import Optional
 
 try:
@@ -6,6 +7,7 @@ try:
     from opentelemetry.exporter.prometheus import PrometheusMetricReader
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
     _OTEL_AVAILABLE = True
 except ImportError:
     _OTEL_AVAILABLE = False
@@ -19,7 +21,9 @@ _sampling_rate_gauge = None
 _exemplar_registration_counter = None
 
 
-def setup_operational_metrics(prometheus_enabled: bool = False) -> Optional[MeterProvider]:
+def setup_operational_metrics(
+    prometheus_enabled: bool = False,
+) -> Optional[MeterProvider]:
     """Initialize metrics for tracing operations.
 
     If prometheus_enabled=True, returns a MeterProvider with PrometheusMetricReader
@@ -34,7 +38,11 @@ def setup_operational_metrics(prometheus_enabled: bool = False) -> Optional[Mete
 
     meter = metrics.get_meter(__name__)
 
-    global _span_export_counter, _span_drop_counter, _sampling_rate_gauge, _exemplar_registration_counter
+    global \
+        _span_export_counter, \
+        _span_drop_counter, \
+        _sampling_rate_gauge, \
+        _exemplar_registration_counter
 
     _span_export_counter = meter.create_counter(
         "otel_span_exports_total",
@@ -89,7 +97,7 @@ def record_exemplar_registration(trace_id: str, span_id: str, metric_name: str) 
             {
                 "trace_id": trace_id[:8],  # First 8 chars for readability
                 "metric": metric_name,
-            }
+            },
         )
 
 
@@ -104,7 +112,9 @@ class ExemplarStorage:
         self.max_exemplars = max_exemplars
         self.exemplars: dict[str, list[dict]] = {}  # metric_name -> [exemplars]
 
-    def add_exemplar(self, metric_name: str, trace_id: str, span_id: str, value: float) -> None:
+    def add_exemplar(
+        self, metric_name: str, trace_id: str, span_id: str, value: float
+    ) -> None:
         """Add exemplar (trace ID + value) to metric."""
         if metric_name not in self.exemplars:
             self.exemplars[metric_name] = []

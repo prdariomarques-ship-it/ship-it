@@ -3,6 +3,7 @@
 Tests verify that trace context is actually preserved and restored
 across mechanism boundaries, maintaining parent-child span relationships.
 """
+
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -153,7 +154,9 @@ async def test_event_bus_includes_trace_in_payload(client):
 
     # Simulate event publishing
     payload = {"event_type": "contact_message"}
-    event_payload = EventBusTraceIntegration.publish_event_with_trace("contact.*", payload)
+    event_payload = EventBusTraceIntegration.publish_event_with_trace(
+        "contact.*", payload
+    )
 
     # Should have trace context in payload
     assert "__trace_context" in event_payload or "__trace_context" not in event_payload
@@ -162,6 +165,7 @@ async def test_event_bus_includes_trace_in_payload(client):
 @pytest.mark.asyncio
 async def test_event_bus_handler_restores_trace_context(client):
     """Event Bus: trace context restored in event handlers."""
+
     # Create a mock event
     class MockEvent:
         def __init__(self, name, payload):
@@ -173,7 +177,9 @@ async def test_event_bus_handler_restores_trace_context(client):
 
     # Simulate event with trace context
     payload = {"event_type": "contact_message"}
-    event_payload = EventBusTraceIntegration.publish_event_with_trace("contact.*", payload)
+    event_payload = EventBusTraceIntegration.publish_event_with_trace(
+        "contact.*", payload
+    )
     event = MockEvent("contact.message_received", event_payload)
 
     # Mock handler
@@ -204,6 +210,7 @@ def test_agent_has_access_to_trace_context(client):
 @pytest.mark.asyncio
 async def test_agent_tool_inherits_parent_trace():
     """Agent Orchestrator: tool execution inherits agent's trace context."""
+
     # Mock tool function
     async def mock_tool(contact_id: str):
         # Tool executes with agent's trace context available
@@ -230,7 +237,9 @@ def test_http_to_job_maintains_trace_continuity(client, app_with_tracing):
     @app_with_tracing.get("/enqueue-job")
     async def enqueue_job():
         nonlocal job_trace
-        job_payload = JobWorkerTraceIntegration.enqueue_job_with_trace("process_message", {})
+        job_payload = JobWorkerTraceIntegration.enqueue_job_with_trace(
+            "process_message", {}
+        )
         job_trace = job_payload.get("__trace_context")
         return {"enqueued": True}
 
@@ -292,8 +301,14 @@ def test_trace_context_isolated_between_requests(app_with_tracing):
 
 def test_job_trace_context_isolated_between_jobs():
     """Job trace contexts isolated when executing multiple jobs."""
-    trace1 = {"trace_id": "1111111111111111111111111111111a", "span_id": "aaaaaaaaaaaaaaaa"}
-    trace2 = {"trace_id": "2222222222222222222222222222222b", "span_id": "bbbbbbbbbbbbbbbb"}
+    trace1 = {
+        "trace_id": "1111111111111111111111111111111a",
+        "span_id": "aaaaaaaaaaaaaaaa",
+    }
+    trace2 = {
+        "trace_id": "2222222222222222222222222222222b",
+        "span_id": "bbbbbbbbbbbbbbbb",
+    }
 
     # Serialize two different trace contexts
     payload1 = {"__trace_context": trace1}

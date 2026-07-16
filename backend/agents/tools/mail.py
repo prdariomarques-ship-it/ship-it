@@ -11,6 +11,7 @@ the Email domain has exactly one technical gateway. A specialized agent
 through a Cognitive Planner multi-step plan that routes one step to
 `assistant`, never through direct tool access — see `docs/EMAIL.md`.
 """
+
 from datetime import datetime, timedelta, timezone
 
 from agents.tools.base import Tool, ToolContext, ok
@@ -37,7 +38,9 @@ async def _get_access_token(context: ToolContext) -> str:
         raise MailNotConnectedError("No authenticated user in context")
 
     provider = get_mail_provider()
-    account = await EmailAccountRepository(context.db).get_by_user(context.user.id, provider.name)
+    account = await EmailAccountRepository(context.db).get_by_user(
+        context.user.id, provider.name
+    )
     if account is None:
         raise MailNotConnectedError(
             "Nenhuma conta de e-mail conectada. Peça ao administrador para conectar em /api/mail/connect."
@@ -169,7 +172,9 @@ async def _summarize_email_thread(context: ToolContext, thread_id: str) -> str:
     result = await get_llm_provider().chat(
         [
             ChatMessage(role="system", content=_SUMMARY_PROMPT),
-            ChatMessage(role="user", content=f"Assunto: {thread.subject}\n\n{transcript}"),
+            ChatMessage(
+                role="user", content=f"Assunto: {thread.subject}\n\n{transcript}"
+            ),
         ]
     )
     return ok(summary=result.content.strip(), subject=thread.subject)
@@ -213,12 +218,16 @@ _DETECT_PROMPT = (
 )
 
 
-async def _detect_pending_actions(context: ToolContext, since_days: int = 7, limit: int = 20) -> str:
+async def _detect_pending_actions(
+    context: ToolContext, since_days: int = 7, limit: int = 20
+) -> str:
     access_token = await _get_access_token(context)
     provider = get_mail_provider()
     since = datetime.now(timezone.utc) - timedelta(days=max(since_days, 1))
     try:
-        messages = await provider.search(access_token, EmailSearchQuery(since=since, limit=min(limit, 50)))
+        messages = await provider.search(
+            access_token, EmailSearchQuery(since=since, limit=min(limit, 50))
+        )
     except MailProviderError as exc:
         raise RuntimeError(f"Falha ao buscar e-mails: {exc}") from exc
 
@@ -236,7 +245,9 @@ async def _detect_pending_actions(context: ToolContext, since_days: int = 7, lim
         ],
         tools=[_DETECT_ACTIONS_TOOL],
     )
-    call = next((c for c in result.tool_calls if c.name == "report_pending_actions"), None)
+    call = next(
+        (c for c in result.tool_calls if c.name == "report_pending_actions"), None
+    )
     if call is None:
         return ok(actions=[])
     return ok(actions=call.arguments.get("actions", []))
@@ -251,11 +262,20 @@ search_emails_tool = Tool(
         "properties": {
             "sender": {"type": "string", "description": "E-mail ou nome do remetente"},
             "subject": {"type": "string"},
-            "since": {"type": "string", "description": "Data ISO (YYYY-MM-DD), início do período"},
-            "until": {"type": "string", "description": "Data ISO (YYYY-MM-DD), fim do período"},
+            "since": {
+                "type": "string",
+                "description": "Data ISO (YYYY-MM-DD), início do período",
+            },
+            "until": {
+                "type": "string",
+                "description": "Data ISO (YYYY-MM-DD), fim do período",
+            },
             "keywords": {"type": "string", "description": "Palavras-chave livres"},
             "labels": {"type": "array", "items": {"type": "string"}},
-            "limit": {"type": "integer", "description": "Máximo de resultados (padrão 20)"},
+            "limit": {
+                "type": "integer",
+                "description": "Máximo de resultados (padrão 20)",
+            },
         },
         "required": [],
     },
@@ -293,8 +313,14 @@ detect_pending_email_actions_tool = Tool(
     parameters={
         "type": "object",
         "properties": {
-            "since_days": {"type": "integer", "description": "Quantos dias para trás analisar (padrão 7)"},
-            "limit": {"type": "integer", "description": "Máximo de e-mails a analisar (padrão 20)"},
+            "since_days": {
+                "type": "integer",
+                "description": "Quantos dias para trás analisar (padrão 7)",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Máximo de e-mails a analisar (padrão 20)",
+            },
         },
         "required": [],
     },

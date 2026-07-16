@@ -2,6 +2,7 @@
 surface. Mirrors `mail/router.py`/`gcalendar/router.py` exactly; see those
 for the full rationale of every design choice repeated here.
 """
+
 from datetime import datetime, timezone
 from html import escape
 from typing import Annotated
@@ -35,7 +36,11 @@ def _require_configured() -> None:
     from utils.config import get_settings
 
     settings = get_settings()
-    if not (settings.google_client_id and settings.google_client_secret and settings.google_contacts_redirect_uri):
+    if not (
+        settings.google_client_id
+        and settings.google_client_secret
+        and settings.google_contacts_redirect_uri
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Google Contacts integration is not configured "
@@ -43,8 +48,14 @@ def _require_configured() -> None:
         )
 
 
-@router.get("/connect", response_model=GContactsConnectResponse, dependencies=[Depends(require_admin)])
-async def connect(current_user: Annotated[User, Depends(require_admin)]) -> GContactsConnectResponse:
+@router.get(
+    "/connect",
+    response_model=GContactsConnectResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def connect(
+    current_user: Annotated[User, Depends(require_admin)],
+) -> GContactsConnectResponse:
     _require_configured()
     provider = get_contacts_provider()
     state = create_oauth_state_token(current_user.id, purpose=_STATE_PURPOSE)
@@ -65,7 +76,10 @@ async def oauth_callback(
 
     user_id = decode_oauth_state_token(state, purpose=_STATE_PURPOSE)
     if user_id is None:
-        return _result_page(ok=False, message="Sessão de autorização inválida ou expirada. Tente conectar de novo.")
+        return _result_page(
+            ok=False,
+            message="Sessão de autorização inválida ou expirada. Tente conectar de novo.",
+        )
 
     user = await UserRepository(db).get(user_id)
     if user is None:
@@ -76,7 +90,9 @@ async def oauth_callback(
         tokens = await provider.exchange_code(code)
     except ContactsProviderError as exc:
         logger.error("Google Contacts OAuth code exchange failed: %s", exc)
-        return _result_page(ok=False, message="Não foi possível concluir a autorização com o Google.")
+        return _result_page(
+            ok=False, message="Não foi possível concluir a autorização com o Google."
+        )
 
     if not tokens.refresh_token:
         return _result_page(
@@ -89,7 +105,10 @@ async def oauth_callback(
         encrypted = encrypt_token(tokens.refresh_token)
     except TokenEncryptionNotConfigured as exc:
         logger.error("Cannot store Google Contacts refresh token: %s", exc)
-        return _result_page(ok=False, message="Armazenamento de credenciais não configurado no servidor.")
+        return _result_page(
+            ok=False,
+            message="Armazenamento de credenciais não configurado no servidor.",
+        )
 
     account_label = await _resolve_account_label(provider, tokens.access_token)
 
@@ -102,25 +121,43 @@ async def oauth_callback(
         connected_at=datetime.now(timezone.utc),
     )
 
-    return _result_page(ok=True, message=f"Google Contacts ({account_label}) conectado com sucesso.")
-
-
-@router.get("/status", response_model=GContactsStatusResponse, dependencies=[Depends(require_admin)])
-async def gcontacts_status(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> GContactsStatusResponse:
-    account = await GoogleContactsAccountRepository(db).get_by_user(current_user.id, get_contacts_provider().name)
-    if account is None:
-        return GContactsStatusResponse(connected=False)
-    return GContactsStatusResponse(
-        connected=True, account_label=account.account_label, connected_at=account.connected_at
+    return _result_page(
+        ok=True, message=f"Google Contacts ({account_label}) conectado com sucesso."
     )
 
 
-@router.delete("/disconnect", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
-async def disconnect(db: DbSession, current_user: Annotated[User, Depends(require_admin)]) -> None:
+@router.get(
+    "/status",
+    response_model=GContactsStatusResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def gcontacts_status(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> GContactsStatusResponse:
+    account = await GoogleContactsAccountRepository(db).get_by_user(
+        current_user.id, get_contacts_provider().name
+    )
+    if account is None:
+        return GContactsStatusResponse(connected=False)
+    return GContactsStatusResponse(
+        connected=True,
+        account_label=account.account_label,
+        connected_at=account.connected_at,
+    )
+
+
+@router.delete(
+    "/disconnect",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_admin)],
+)
+async def disconnect(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> None:
     repository = GoogleContactsAccountRepository(db)
-    account = await repository.get_by_user(current_user.id, get_contacts_provider().name)
+    account = await repository.get_by_user(
+        current_user.id, get_contacts_provider().name
+    )
     if account is not None:
         await repository.delete(account)
 

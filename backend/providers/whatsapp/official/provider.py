@@ -2,6 +2,7 @@
 
 Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
 """
+
 import hashlib
 import hmac
 from collections.abc import Mapping
@@ -33,7 +34,10 @@ class OfficialProvider(WhatsAppProvider):
         signature = headers.get("x-hub-signature-256", "")
         if not signature.startswith("sha256="):
             return False
-        expected = "sha256=" + hmac.new(self._app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        expected = (
+            "sha256="
+            + hmac.new(self._app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        )
         return hmac.compare_digest(expected, signature)
 
     def _headers(self) -> dict:
@@ -44,7 +48,11 @@ class OfficialProvider(WhatsAppProvider):
         return await self._request(
             "POST",
             url,
-            json_body={"messaging_product": "whatsapp", "recipient_type": "individual", **body},
+            json_body={
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                **body,
+            },
             headers=self._headers(),
         )
 
@@ -53,12 +61,20 @@ class OfficialProvider(WhatsAppProvider):
             {"to": normalize_phone(to), "type": "text", "text": {"body": content}}
         )
 
-    async def send_image(self, to: str, url: str, filename: str = "image", caption: str = "") -> dict:
+    async def send_image(
+        self, to: str, url: str, filename: str = "image", caption: str = ""
+    ) -> dict:
         return await self._send(
-            {"to": normalize_phone(to), "type": "image", "image": {"link": url, "caption": caption}}
+            {
+                "to": normalize_phone(to),
+                "type": "image",
+                "image": {"link": url, "caption": caption},
+            }
         )
 
-    async def send_file(self, to: str, url: str, filename: str = "file", caption: str = "") -> dict:
+    async def send_file(
+        self, to: str, url: str, filename: str = "file", caption: str = ""
+    ) -> dict:
         return await self._send(
             {
                 "to": normalize_phone(to),
@@ -72,12 +88,18 @@ class OfficialProvider(WhatsAppProvider):
             {"to": normalize_phone(to), "type": "audio", "audio": {"link": url}}
         )
 
-    async def send_location(self, to: str, latitude: float, longitude: float, caption: str = "") -> dict:
+    async def send_location(
+        self, to: str, latitude: float, longitude: float, caption: str = ""
+    ) -> dict:
         return await self._send(
             {
                 "to": normalize_phone(to),
                 "type": "location",
-                "location": {"latitude": latitude, "longitude": longitude, "name": caption},
+                "location": {
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "name": caption,
+                },
             }
         )
 

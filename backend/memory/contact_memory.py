@@ -5,6 +5,7 @@ N messages a background job asks the LLM to refresh the contact's profile
 summary. Preferences and tags live on the Contact row and are injected into
 agent context alongside semantic search results.
 """
+
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,12 +74,17 @@ class ContactMemoryService:
             return None
 
         transcript = "\n".join(
-            f"[{message.direction.value}] {message.content}" for message in history if message.content
+            f"[{message.direction.value}] {message.content}"
+            for message in history
+            if message.content
         )
         result = await get_llm_provider().chat(
             [
                 ChatMessage(role="system", content=SUMMARY_PROMPT),
-                ChatMessage(role="user", content=f"Contato: {contact.name}\n\nHistórico:\n{transcript}"),
+                ChatMessage(
+                    role="user",
+                    content=f"Contato: {contact.name}\n\nHistórico:\n{transcript}",
+                ),
             ]
         )
         summary = result.content.strip()
@@ -88,7 +94,9 @@ class ContactMemoryService:
 
     async def build_context(self, query: str, contact_id: int | None) -> dict:
         """Everything an agent should know: profile + relevant memories."""
-        memories = await memory_service.search(query=query, limit=5, contact_id=contact_id)
+        memories = await memory_service.search(
+            query=query, limit=5, contact_id=contact_id
+        )
         return {"memories": memories}
 
 

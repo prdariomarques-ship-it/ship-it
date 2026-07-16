@@ -11,7 +11,9 @@ class GoalRepository(SQLAlchemyRepository[Goal]):
 
     async def dependency_ids(self, goal_id: int) -> list[int]:
         """Goals that `goal_id` itself depends on."""
-        statement = select(GoalDependency.depends_on_id).where(GoalDependency.goal_id == goal_id)
+        statement = select(GoalDependency.depends_on_id).where(
+            GoalDependency.goal_id == goal_id
+        )
         return list((await self.session.execute(statement)).scalars().all())
 
     async def is_blocked(self, goal_id: int) -> bool:
@@ -19,7 +21,9 @@ class GoalRepository(SQLAlchemyRepository[Goal]):
         dep_ids = await self.dependency_ids(goal_id)
         if not dep_ids:
             return False
-        statement = select(Goal.id).where(Goal.id.in_(dep_ids), Goal.status != GoalStatus.COMPLETED)
+        statement = select(Goal.id).where(
+            Goal.id.in_(dep_ids), Goal.status != GoalStatus.COMPLETED
+        )
         incomplete = (await self.session.execute(statement)).scalars().all()
         return len(incomplete) > 0
 
@@ -32,7 +36,8 @@ class GoalRepository(SQLAlchemyRepository[Goal]):
 
     async def remove_dependency(self, goal_id: int, depends_on_id: int) -> bool:
         statement = select(GoalDependency).where(
-            GoalDependency.goal_id == goal_id, GoalDependency.depends_on_id == depends_on_id
+            GoalDependency.goal_id == goal_id,
+            GoalDependency.depends_on_id == depends_on_id,
         )
         dependency = (await self.session.execute(statement)).scalar_one_or_none()
         if dependency is None:
@@ -50,7 +55,9 @@ class GoalRepository(SQLAlchemyRepository[Goal]):
         )
         return list((await self.session.execute(statement)).scalars().all())
 
-    async def stuck_in_progress(self, updated_before: datetime, limit: int = 50) -> list[Goal]:
+    async def stuck_in_progress(
+        self, updated_before: datetime, limit: int = 50
+    ) -> list[Goal]:
         """IN_PROGRESS goals that haven't had a progress update recently --
         the equivalent of JobRepository.stale_running_jobs for goals. Nothing
         yet consumes this automatically (goal execution isn't wired to an
@@ -60,7 +67,9 @@ class GoalRepository(SQLAlchemyRepository[Goal]):
         row's own `updated_at` needs to be trusted to find work that stalled."""
         statement = (
             select(Goal)
-            .where(Goal.status == GoalStatus.IN_PROGRESS, Goal.updated_at < updated_before)
+            .where(
+                Goal.status == GoalStatus.IN_PROGRESS, Goal.updated_at < updated_before
+            )
             .order_by(Goal.updated_at.asc())
             .limit(limit)
         )

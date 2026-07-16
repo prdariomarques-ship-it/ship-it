@@ -1,4 +1,5 @@
 """Evolution API provider — https://doc.evolution-api.com."""
+
 from providers.whatsapp.base import (
     InboundMessage,
     WhatsAppProvider,
@@ -22,13 +23,20 @@ class EvolutionProvider(WhatsAppProvider):
 
     async def _post(self, path: str, body: dict) -> dict:
         return await self._request(
-            "POST", f"{self._base_url}/{path}/{self._instance}", json_body=body, headers=self._headers()
+            "POST",
+            f"{self._base_url}/{path}/{self._instance}",
+            json_body=body,
+            headers=self._headers(),
         )
 
     async def send_text(self, to: str, content: str) -> dict:
-        return await self._post("message/sendText", {"number": normalize_phone(to), "text": content})
+        return await self._post(
+            "message/sendText", {"number": normalize_phone(to), "text": content}
+        )
 
-    async def _send_media(self, to: str, url: str, mediatype: str, filename: str, caption: str) -> dict:
+    async def _send_media(
+        self, to: str, url: str, mediatype: str, filename: str, caption: str
+    ) -> dict:
         return await self._post(
             "message/sendMedia",
             {
@@ -40,10 +48,14 @@ class EvolutionProvider(WhatsAppProvider):
             },
         )
 
-    async def send_image(self, to: str, url: str, filename: str = "image", caption: str = "") -> dict:
+    async def send_image(
+        self, to: str, url: str, filename: str = "image", caption: str = ""
+    ) -> dict:
         return await self._send_media(to, url, "image", filename, caption)
 
-    async def send_file(self, to: str, url: str, filename: str = "file", caption: str = "") -> dict:
+    async def send_file(
+        self, to: str, url: str, filename: str = "file", caption: str = ""
+    ) -> dict:
         return await self._send_media(to, url, "document", filename, caption)
 
     async def send_audio(self, to: str, url: str) -> dict:
@@ -51,7 +63,9 @@ class EvolutionProvider(WhatsAppProvider):
             "message/sendWhatsAppAudio", {"number": normalize_phone(to), "audio": url}
         )
 
-    async def send_location(self, to: str, latitude: float, longitude: float, caption: str = "") -> dict:
+    async def send_location(
+        self, to: str, latitude: float, longitude: float, caption: str = ""
+    ) -> dict:
         return await self._post(
             "message/sendLocation",
             {

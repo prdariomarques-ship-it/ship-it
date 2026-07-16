@@ -18,6 +18,7 @@ Includes sampling (configurable strategies), log-to-trace correlation (trace_id
 in logs), Prometheus exemplars for metric-to-trace linking, and operational
 metrics for tracing health monitoring.
 """
+
 from typing import Optional
 
 from fastapi import FastAPI
@@ -57,19 +58,29 @@ def setup_tracing(
 
     try:
         from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
         from opentelemetry.sdk.resources import SERVICE_NAME, Resource
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+        from opentelemetry.sdk.trace.export import (
+            BatchSpanProcessor,
+            ConsoleSpanExporter,
+        )
     except ImportError:
-        logger.warning("OTEL_ENABLED=true but opentelemetry packages are not installed; tracing disabled")
+        logger.warning(
+            "OTEL_ENABLED=true but opentelemetry packages are not installed; tracing disabled"
+        )
         return
 
     from observability.sampling import get_sampler_from_env
-    from observability.operational_metrics import setup_operational_metrics, set_sampling_rate
+    from observability.operational_metrics import (
+        setup_operational_metrics,
+        set_sampling_rate,
+    )
 
     resource = Resource.create({SERVICE_NAME: service_name})
 
@@ -79,7 +90,11 @@ def setup_tracing(
     set_sampling_rate(sampler_strategy.get_rate())
 
     provider = TracerProvider(resource=resource, sampler=sampler)  # type: ignore[arg-type]
-    exporter = OTLPSpanExporter(endpoint=otlp_endpoint) if otlp_endpoint else ConsoleSpanExporter()
+    exporter = (
+        OTLPSpanExporter(endpoint=otlp_endpoint)
+        if otlp_endpoint
+        else ConsoleSpanExporter()
+    )
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 

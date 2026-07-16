@@ -7,10 +7,14 @@ from repositories.base import SQLAlchemyRepository
 class GoogleDriveAccountRepository(SQLAlchemyRepository[GoogleDriveAccount]):
     model = GoogleDriveAccount
 
-    async def get_by_user(self, user_id: int, provider: str) -> GoogleDriveAccount | None:
+    async def get_by_user(
+        self, user_id: int, provider: str
+    ) -> GoogleDriveAccount | None:
         return await self.find_one(user_id=user_id, provider=provider)
 
-    async def upsert_for_user(self, user_id: int, provider: str, **fields: object) -> GoogleDriveAccount:
+    async def upsert_for_user(
+        self, user_id: int, provider: str, **fields: object
+    ) -> GoogleDriveAccount:
         """Same race-safe create-or-update idiom as
         `GoogleCalendarAccountRepository.upsert_for_user`/
         `GoogleContactsAccountRepository.upsert_for_user`."""

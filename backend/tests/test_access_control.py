@@ -1,4 +1,5 @@
 """Tests for access control — authentication and authorization."""
+
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 

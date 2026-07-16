@@ -4,6 +4,7 @@ An agent = identity (name/description) + system prompt + tools + memory +
 planner + executor. Subclasses declare identity and tool set; the run loop
 (memory injection, planning, function calling) lives here.
 """
+
 from abc import ABC, abstractmethod
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,14 +57,22 @@ class BaseAgent(ABC):
     ) -> AgentResult:
         if memories is None:
             try:
-                context_data = await memory_manager.build_agent_context(message, contact_id)
+                context_data = await memory_manager.build_agent_context(
+                    message, contact_id
+                )
                 memories = context_data["memories"]
             except Exception as exc:  # noqa: BLE001 - memory is an enhancement, not a requirement
-                logger.warning("Memory lookup skipped (vector store unavailable): %s", exc)
+                logger.warning(
+                    "Memory lookup skipped (vector store unavailable): %s", exc
+                )
                 memories = []
 
-        messages = self.planner.build_messages(self.system_prompt, message, memories, history=history)
+        messages = self.planner.build_messages(
+            self.system_prompt, message, memories, history=history
+        )
         executor = AgentExecutor(get_llm_provider(), self.tools)
-        result = await executor.run(messages, ToolContext(db=db, user=user, contact_id=contact_id))
+        result = await executor.run(
+            messages, ToolContext(db=db, user=user, contact_id=contact_id)
+        )
         result.memories_used = len(memories)
         return result

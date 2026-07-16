@@ -6,6 +6,7 @@ architecture; same category of addition as `cryptography` in Sprint 1.
 
 Docs: https://developers.google.com/drive/api/v3/reference/files
 """
+
 import csv
 import io
 from datetime import datetime
@@ -42,7 +43,9 @@ _LIST_FIELDS = f"files({_FILE_FIELDS})"
 _GOOGLE_NATIVE_PREFIX = "application/vnd.google-apps."
 
 _SUPPORTED_TEXT_MIME_TYPES = {"text/plain", "text/markdown", "text/csv"}
-_DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_DOCX_MIME_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
 _PDF_MIME_TYPE = "application/pdf"
 _TEXT_EXTENSIONS = {".txt": "text/plain", ".md": "text/markdown", ".csv": "text/csv"}
 
@@ -101,7 +104,9 @@ class GoogleDriveProvider(DriveProvider):
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.error("Google Drive OAuth token request failed: %s", exc)
-            raise DriveProviderError(f"Google Drive OAuth token request failed: {exc}") from exc
+            raise DriveProviderError(
+                f"Google Drive OAuth token request failed: {exc}"
+            ) from exc
         body = response.json()
         return OAuthTokens(
             access_token=body["access_token"],
@@ -113,11 +118,15 @@ class GoogleDriveProvider(DriveProvider):
     def _headers(self, access_token: str) -> dict:
         return {"Authorization": f"Bearer {access_token}"}
 
-    async def _get_json(self, access_token: str, path: str, params: dict | None = None) -> dict:
+    async def _get_json(
+        self, access_token: str, path: str, params: dict | None = None
+    ) -> dict:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.get(
-                    f"{self._api_base_url}{path}", headers=self._headers(access_token), params=params
+                    f"{self._api_base_url}{path}",
+                    headers=self._headers(access_token),
+                    params=params,
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
@@ -125,11 +134,15 @@ class GoogleDriveProvider(DriveProvider):
             raise DriveProviderError(f"Google Drive API request failed: {exc}") from exc
         return response.json()
 
-    async def _get_bytes(self, access_token: str, path: str, params: dict | None = None) -> bytes:
+    async def _get_bytes(
+        self, access_token: str, path: str, params: dict | None = None
+    ) -> bytes:
         try:
             async with httpx.AsyncClient(timeout=60) as client:
                 response = await client.get(
-                    f"{self._api_base_url}{path}", headers=self._headers(access_token), params=params
+                    f"{self._api_base_url}{path}",
+                    headers=self._headers(access_token),
+                    params=params,
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
@@ -137,10 +150,16 @@ class GoogleDriveProvider(DriveProvider):
             raise DriveProviderError(f"Google Drive download failed: {exc}") from exc
         return response.content
 
-    async def list_files(self, access_token: str, folder_id: str | None = None, limit: int = 20) -> list[DriveFile]:
-        return await self.search_files(access_token, DriveSearchQuery(folder_id=folder_id, limit=limit))
+    async def list_files(
+        self, access_token: str, folder_id: str | None = None, limit: int = 20
+    ) -> list[DriveFile]:
+        return await self.search_files(
+            access_token, DriveSearchQuery(folder_id=folder_id, limit=limit)
+        )
 
-    async def search_files(self, access_token: str, query: DriveSearchQuery) -> list[DriveFile]:
+    async def search_files(
+        self, access_token: str, query: DriveSearchQuery
+    ) -> list[DriveFile]:
         params = {
             "q": _build_query(query),
             "fields": _LIST_FIELDS,
@@ -150,7 +169,11 @@ class GoogleDriveProvider(DriveProvider):
         return [_parse_file(raw) for raw in result.get("files", [])]
 
     async def get_metadata(self, access_token: str, file_id: str) -> DriveFile:
-        raw = await self._get_json(access_token, f"/files/{quote(file_id, safe='')}", params={"fields": _FILE_FIELDS})
+        raw = await self._get_json(
+            access_token,
+            f"/files/{quote(file_id, safe='')}",
+            params={"fields": _FILE_FIELDS},
+        )
         return _parse_file(raw)
 
     async def read_file_text(self, access_token: str, file_id: str) -> str:
@@ -162,7 +185,10 @@ class GoogleDriveProvider(DriveProvider):
                 f"'{metadata.name}' é um arquivo nativo do Google ({mime_type}) — Google Docs/Sheets/"
                 "Slides não fazem parte do escopo desta integração."
             )
-        if mime_type not in _SUPPORTED_TEXT_MIME_TYPES and mime_type not in (_PDF_MIME_TYPE, _DOCX_MIME_TYPE):
+        if mime_type not in _SUPPORTED_TEXT_MIME_TYPES and mime_type not in (
+            _PDF_MIME_TYPE,
+            _DOCX_MIME_TYPE,
+        ):
             raise UnsupportedDriveFileTypeError(
                 f"'{metadata.name}' tem um tipo não suportado ({mime_type}) — apenas PDF, DOCX, TXT, "
                 "Markdown e CSV são lidos nesta sprint."
@@ -224,7 +250,10 @@ def _resolve_mime_type(metadata: DriveFile) -> str:
     """Drive sometimes reports a generic mimeType for plain-text-ish files;
     fall back to the file extension when the reported type isn't one we
     recognize, so a `.md` uploaded as `text/plain` still reads as Markdown."""
-    if metadata.mime_type in _SUPPORTED_TEXT_MIME_TYPES or metadata.mime_type in (_PDF_MIME_TYPE, _DOCX_MIME_TYPE):
+    if metadata.mime_type in _SUPPORTED_TEXT_MIME_TYPES or metadata.mime_type in (
+        _PDF_MIME_TYPE,
+        _DOCX_MIME_TYPE,
+    ):
         return metadata.mime_type
     for extension, mime_type in _TEXT_EXTENSIONS.items():
         if metadata.name.lower().endswith(extension):

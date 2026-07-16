@@ -4,6 +4,7 @@ Each iteration asks the LLM for the next step; requested tool calls are
 executed against the application services and their results fed back, until
 the model produces a final answer (or the iteration budget runs out).
 """
+
 import json
 import time
 
@@ -47,7 +48,9 @@ class AgentResult(BaseModel):
 
 
 class AgentExecutor:
-    def __init__(self, llm: LLMProvider, tools: list[Tool], max_iterations: int | None = None) -> None:
+    def __init__(
+        self, llm: LLMProvider, tools: list[Tool], max_iterations: int | None = None
+    ) -> None:
         self._llm = llm
         self._tools = {tool.name: tool for tool in tools}
         self._max_iterations = max_iterations or get_settings().agent_max_iterations
@@ -69,12 +72,16 @@ class AgentExecutor:
                 raise
             logger.warning(
                 "LLM provider %s failed (%s); switching to fallback provider %s",
-                self._llm.name, exc, fallback.name,
+                self._llm.name,
+                exc,
+                fallback.name,
             )
             self._llm = fallback
             return await self._llm.chat(messages, tools=tools)
 
-    async def run(self, messages: list[ChatMessage], context: ToolContext) -> AgentResult:
+    async def run(
+        self, messages: list[ChatMessage], context: ToolContext
+    ) -> AgentResult:
         started = time.perf_counter()
         specs = [tool.spec() for tool in self._tools.values()] or None
         steps: list[ExecutedStep] = []
@@ -93,7 +100,11 @@ class AgentExecutor:
                 )
 
             messages.append(
-                ChatMessage(role="assistant", content=result.content, tool_calls=result.tool_calls)
+                ChatMessage(
+                    role="assistant",
+                    content=result.content,
+                    tool_calls=result.tool_calls,
+                )
             )
             reason = result.content.strip() if result.content else ""
             for call in result.tool_calls:
@@ -105,7 +116,9 @@ class AgentExecutor:
                     output = await tool.run(context, call.arguments)
                 duration_ms = (time.perf_counter() - step_started) * 1000
                 # Debug level: arguments/results may contain user data (PII).
-                logger.debug("Agent tool %s(%s) -> %.200s", call.name, call.arguments, output)
+                logger.debug(
+                    "Agent tool %s(%s) -> %.200s", call.name, call.arguments, output
+                )
                 steps.append(
                     ExecutedStep(
                         tool=call.name,
@@ -116,11 +129,16 @@ class AgentExecutor:
                         reason=reason,
                     )
                 )
-                messages.append(ChatMessage(role="tool", content=output, tool_call_id=call.id))
+                messages.append(
+                    ChatMessage(role="tool", content=output, tool_call_id=call.id)
+                )
 
         # Iteration budget exhausted: ask for a final answer without tools.
         final = await self._chat_with_fallback(messages)
         usage = usage + final.usage
         return AgentResult(
-            reply=final.content, steps=steps, usage=usage, duration_ms=(time.perf_counter() - started) * 1000
+            reply=final.content,
+            steps=steps,
+            usage=usage,
+            duration_ms=(time.perf_counter() - started) * 1000,
         )

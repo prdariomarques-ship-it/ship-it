@@ -1,4 +1,5 @@
 """Function-calling loop: a scripted fake LLM drives real tools against the DB."""
+
 import json
 
 import pytest
@@ -86,7 +87,9 @@ async def test_executor_runs_tool_calls_and_returns_final_answer(db_session, use
 
     # The tool result was fed back to the model on the second call.
     second_call_messages = llm.received[1]
-    assert any(m.role == "tool" and m.tool_call_id == "call_1" for m in second_call_messages)
+    assert any(
+        m.role == "tool" and m.tool_call_id == "call_1" for m in second_call_messages
+    )
 
 
 @pytest.mark.asyncio

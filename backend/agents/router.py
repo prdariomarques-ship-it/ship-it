@@ -59,7 +59,9 @@ async def run_agent(
             contact_id=payload.contact_id,
         )
     except UnknownAgentError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     return AgentRunResponse(agent=agent_name, reply=result.reply, steps=result.steps)
 
 
@@ -73,6 +75,8 @@ class ToolInfo(BaseModel):
 async def get_tools(_: CurrentUser) -> list[ToolInfo]:
     """Discovery endpoint for every registered tool (Tool Registry), across all agents."""
     return [
-        ToolInfo(name=tool.name, description=tool.description, parameters=tool.parameters)
+        ToolInfo(
+            name=tool.name, description=tool.description, parameters=tool.parameters
+        )
         for tool in list_tools()
     ]
