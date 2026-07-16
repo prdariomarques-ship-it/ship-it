@@ -25,15 +25,21 @@ usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
 
 ## Segurança
 
-- **CSP e HSTS ausentes no `Caddyfile`.** Nenhuma `Content-Security-Policy`
-  nem `Strict-Transport-Security` configurada. Adicionar uma CSP sem poder
-  testá-la contra HTTPS real e os domínios de asset reais de produção foi
-  avaliado como arriscado demais para uma sprint de hardening sem esse
-  ambiente disponível. Ver `SECURITY_AUDIT.md`.
-- **CVEs em dependências do frontend** (`next@14.2.21`, `postcss`): a
-  correção exige um upgrade major (breaking) do Next.js, fora do escopo de
-  "alteração mínima e justificada" de qualquer sprint que não seja
-  dedicada a esse upgrade. Ver `SECURITY_AUDIT.md`.
+- **CSP ausente no `Caddyfile`.** `Strict-Transport-Security` já está
+  configurada (`docker/caddy/Caddyfile`), junto com
+  `X-Content-Type-Options`/`X-Frame-Options`/`Referrer-Policy`; falta apenas
+  `Content-Security-Policy`. Continua não adicionada: o ambiente disponível
+  até agora é sempre `DOMAIN=localhost` (HTTP local), nunca um domínio real
+  com HTTPS e os domínios de asset reais de produção — testar uma CSP às
+  cegas contra isso arrisca quebrar o frontend silenciosamente em produção.
+  Ver `SECURITY_AUDIT.md`.
+- **CVEs em dependências do frontend** (`next@14.2.35` — patch mais recente
+  na série 14.x, atualizado nesta sessão a partir de `14.2.21`; `postcss`
+  transitivo): 1 moderada + 4 altas remanescentes (`npm audit`), todas só
+  corrigíveis com upgrade major (breaking) para `next@16.2.10` — fora do
+  escopo de "alteração mínima e justificada" de qualquer sprint que não
+  seja dedicada a esse upgrade (exigiria suíte E2E cobrindo a mudança). Ver
+  `SECURITY_AUDIT.md`.
 
 ## Confiabilidade de integrações externas
 
@@ -70,6 +76,10 @@ usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
   caracteres antes de ir para o modelo. Ver `docs/EMAIL.md`.
 - **Dashboard Administrativo**: página Settings é somente leitura por
   decisão de escopo da Sprint 4. Ver `docs/DASHBOARD.md`.
+- **GoalManager**: sem UI dedicada no frontend (só API); recorrência não
+  copia dependências para a próxima ocorrência; nenhuma automação
+  transiciona um Goal para `IN_PROGRESS`/`COMPLETED` sozinha — sempre ação
+  explícita via API/tool. Ver `docs/GOALS.md`.
 
 ## Performance
 
@@ -84,8 +94,13 @@ usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
   nenhuma sessão de sandbox até agora — só validado por código/testes com
   provider falso. Ver `docs/EMAIL.md` ("O que ainda depende do fundador"),
   `SPRINT5_REPORT.md`.
-- **`docker compose up` completo nunca executado** em nenhum ambiente de
-  sandbox usado até agora — bloqueado pela política de rede de cada
-  sandbox (pull de imagem do Docker Hub). Estrutura do compose validada
-  (`docker compose config`), subida real nunca confirmada fora de
-  produção. Ver `OPERATIONS_RUNBOOK.md`.
+- **`docker compose up` completo já validado em produção** (atualiza este
+  item, antes desatualizado): os 12 containers rodam de fato em produção
+  (`~/projects/dario-os`), incluindo múltiplos ciclos de rebuild +
+  redeploy do `backend`/`openwa` ao longo de sessões de engenharia,
+  `/health/ready` confirmado `ok` para todas as dependências, e migrações
+  Alembic aplicadas ao vivo contra o Postgres real. O que **continua**
+  sem validação: um ambiente de sandbox isolado (CI ou local, fora da
+  máquina de produção) nunca rodou o stack completo — bloqueado pela
+  política de rede de cada sandbox (pull de imagem do Docker Hub). Ver
+  `OPERATIONS_RUNBOOK.md`.
