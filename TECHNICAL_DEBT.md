@@ -76,11 +76,12 @@ usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
   caracteres antes de ir para o modelo. Ver `docs/EMAIL.md`.
 - **Dashboard Administrativo**: página Settings é somente leitura por
   decisão de escopo da Sprint 4. Ver `docs/DASHBOARD.md`.
-- **GoalManager**: UI do dashboard (`/metas`) é somente leitura, sem
-  formulário de criação/aprovação ainda; recorrência não copia
-  dependências para a próxima ocorrência; nenhuma automação transiciona um
-  Goal para `IN_PROGRESS`/`COMPLETED` sozinha — sempre ação explícita via
-  API/tool. Ver `docs/GOALS.md`.
+- **GoalManager**: UI do dashboard (`/metas`) tem criação e aprovação, mas
+  não tem edição/cancelamento, gerenciamento de dependências, nem
+  atualização de progresso; recorrência não copia dependências para a
+  próxima ocorrência; nenhuma automação transiciona um Goal para
+  `IN_PROGRESS`/`COMPLETED` sozinha — sempre ação explícita via API/tool.
+  Ver `docs/GOALS.md`.
 - **Cognitive Pipeline**: o Planner não gera nem compara planos
   alternativos, nem detecta contradições entre etapas do mesmo plano;
   custo/tempo de um plano são medidos depois da execução, nunca estimados

@@ -104,6 +104,12 @@ Todas as rotas (exceto `/approve`) são acessíveis ao próprio dono da meta —
 
 ## Limitações desta milestone
 
-- UI no dashboard (`/metas`, `frontend/app/(dashboard)/metas/page.tsx`) é somente leitura — lista as metas do usuário (título, status, prioridade, prazo, progresso), mesmo padrão `ResourceTable` da página `/tarefas`. Criar/aprovar/atualizar meta continua só via API/tools nesta milestone; um formulário de criação e o fluxo de aprovação no dashboard ficam para a próxima.
+- UI no dashboard (`/metas`) lista as metas do usuário e permite criar
+  (`components/goals/GoalForm.tsx`: título, descrição, prioridade, prazo,
+  recorrência, `requires_approval`) e aprovar (botão "Aprovar", visível só
+  para quem tem `role=admin`, verificado via `GET /auth/me` no cliente —
+  a garantia real continua sendo o `require_admin` do backend). Ainda sem:
+  editar/cancelar meta, gerenciar dependências, ou atualizar progresso
+  pela UI — só pela API/tools.
 - Recorrência não copia dependências para a próxima ocorrência (combinação deliberadamente fora de escopo — ver comentário em `GoalService._spawn_next_occurrence`).
 - Nenhuma automação transiciona um Goal para `IN_PROGRESS`/`COMPLETED` sozinha — isso é ação explícita via API/tool, nunca um efeito colateral de outro fluxo (ex: o Cognitive Pipeline do WhatsApp não cria nem avança metas automaticamente nesta milestone).
