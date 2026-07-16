@@ -70,15 +70,23 @@ class OpenWAProvider(WhatsAppProvider):
         )
 
     async def health_check(self) -> bool:
-        """Ping OpenWA's own status endpoint (easy-api exposes GET /getConnectionState).
+        """Ping OpenWA's own status endpoint.
+
+        easy-api exposes every wa-automate Client method (including
+        getConnectionState) the same way: POST with a JSON `{"args": [...]}`
+        body, never GET — confirmed against the running gateway (GET returns
+        404; POST returns `{"success": true, "response": "CONNECTED"}"), and
+        against wa-automate's own CLI, which calls this exact endpoint the
+        same way (cli/index.js: `axios.post(".../getConnectionState")`).
 
         Single-shot (no retry): a readiness probe is polled frequently and
         must answer fast, even when the gateway is genuinely down.
         """
         try:
             result = await self._request(
-                "GET",
+                "POST",
                 f"{self._base_url}/getConnectionState",
+                json_body={"args": []},
                 headers=self._headers(),
                 timeout=5,
                 max_attempts=1,
