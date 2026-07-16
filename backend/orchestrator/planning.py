@@ -65,6 +65,14 @@ class Plan(BaseModel):
     steps: list[PlanStep]
     needs_confirmation: bool = False
     reasoning: str = ""
+    # How confident the planner is that this decomposition (step count, agent
+    # per step, dependencies) actually matches what the user needs -- distinct
+    # from Intent/Priority confidence, which score the *classification*, not
+    # the *plan* built from it. Low on the fallback path (0.3, see
+    # _fallback_plan) since a keyword-hint single-step plan is a degraded
+    # guess, never a reasoned decision; on the primary path it comes straight
+    # from the model's own self-reported confidence in the create_plan call.
+    confidence: float = 1.0
 
 
 def _fallback_agent_for_intent(intent: Intent, agent_names: list[str]) -> str:
@@ -111,6 +119,12 @@ def _build_plan_tool(agent_names: list[str]) -> ToolSpec:
                     "description": "true se o plano deve ser confirmado pelo usuário antes de ser executado.",
                 },
                 "reasoning": {"type": "string"},
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Quão confiante você está de que este plano (número de etapas, agente escolhido, dependências) atende bem ao pedido.",
+                },
             },
             "required": ["steps"],
         },
@@ -177,14 +191,25 @@ class CognitivePlanner:
         if not steps:
             return self._fallback_plan(message, intent, agent_names)
 
+        try:
+            confidence = float(call.arguments.get("confidence", 1.0))
+        except (TypeError, ValueError):
+            confidence = 1.0
+        confidence = max(0.0, min(1.0, confidence))
+
         return Plan(
             steps=steps,
             needs_confirmation=bool(call.arguments.get("needs_confirmation", False)),
             reasoning=str(call.arguments.get("reasoning", "")),
+            confidence=confidence,
         )
 
     def _fallback_plan(
         self, message: str, intent: IntentResult, agent_names: list[str]
     ) -> Plan:
         agent = _fallback_agent_for_intent(intent.top, agent_names)
-        return Plan(steps=[PlanStep(objective=message, agent=agent)])
+        return Plan(
+            steps=[PlanStep(objective=message, agent=agent)],
+            reasoning="plano de contingência: LLM indisponível, agente escolhido por tabela intenção→agente",
+            confidence=0.3,
+        )

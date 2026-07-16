@@ -4,18 +4,19 @@ before acting."
 Every stage from the brief is here, each one a small, independently testable
 step — but none of them is a new architectural layer. They compose
 components that already existed before this phase (Agent Registry, Tool
-Registry, Event Bus, AI Orchestrator, Memory Manager) plus four new,
-narrowly-scoped ones introduced alongside this file (`IntentEngine`,
+Registry, Event Bus, AI Orchestrator, Memory Manager) plus the narrowly-scoped
+ones introduced alongside this file (`ContextBuilder`, `IntentEngine`,
 `PriorityEngine`, `CognitivePlanner`, `ResponseValidator`, `LearningEngine`).
 Execution itself is never reimplemented here — every plan step runs through
 `orchestrator.service.ai_orchestrator.run`, the same single execution path
 every other caller (chat, `/api/agents/{name}/run`) already uses.
 
-    receive -> normalize -> intent -> priority -> load context (short-term +
-    preferences + summary) -> memory (long-term) -> knowledge -> plan ->
-    [per step: choose agent (Agent Registry) -> choose+execute tools (Tool
-    Registry, inside AgentExecutor) -> validate -> retry once if needed] ->
-    compose reply -> update memory (learning) -> record metrics -> return
+    receive -> normalize -> intent -> priority -> build context (short-term +
+    preferences + summary + goals + tasks + calendar; long-term + knowledge
+    when the message warrants it) -> plan -> [per step: choose agent (Agent
+    Registry) -> choose+execute tools (Tool Registry, inside AgentExecutor)
+    -> validate -> retry once if needed] -> compose reply -> update memory
+    (learning) -> record metrics -> return
 
 Only the WhatsApp auto-reply job (`jobs.handlers.process_inbound_whatsapp_message`)
 calls this today — callers that already choose an explicit agent (the chat
@@ -30,21 +31,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.executor import ExecutedStep
 from agents.registry import UnknownAgentError
-from memory.manager import memory_manager
-from models.message import MessageDirection
 from models.user import User
 from observability.metrics import (
     record_intent_classification,
-    record_memory_lookup,
     record_pipeline_run,
     record_pipeline_stage,
     record_priority_classification,
     record_validation_retry,
 )
-from orchestrator.intent import Intent, IntentEngine, IntentResult
+from orchestrator.context import ContextBuilder
+from orchestrator.intent import IntentEngine, IntentResult
 from orchestrator.learning import LearningEngine
 from orchestrator.planning import CognitivePlanner, Plan, PlanStep, PlanStepStatus
-from orchestrator.priority import Priority, PriorityEngine, PriorityResult
+from orchestrator.priority import PriorityEngine, PriorityResult
 from orchestrator.service import ai_orchestrator
 from orchestrator.validation import ResponseValidator
 from providers.llm.base import ChatMessage, TokenUsage
@@ -54,14 +53,6 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 _MAX_VALIDATION_ATTEMPTS = 2  # first try + one bounded retry, never unbounded
-_SHORT_TERM_LIMIT = 10
-_LIGHT_INTENTS = (Intent.GREETING, Intent.SMALL_TALK)
-_KNOWLEDGE_INTENTS = (
-    Intent.RESEARCH,
-    Intent.WEB_SEARCH,
-    Intent.DOCUMENT,
-    Intent.QUESTION,
-)
 
 
 def normalize_message(text: str) -> str:
@@ -69,14 +60,6 @@ def normalize_message(text: str) -> str:
     language understanding: this stage only guards against noisy input
     (leading/trailing/duplicated whitespace) skewing intent detection."""
     return " ".join((text or "").split())
-
-
-def _needs_deep_context(intent: IntentResult, priority: PriorityResult) -> bool:
-    """Skip long-term/knowledge lookups for cheap, low-stakes messages —
-    'avoid loading unnecessary context' from the brief, made concrete."""
-    if priority.level in (Priority.HIGH, Priority.URGENT):
-        return True
-    return intent.top not in _LIGHT_INTENTS
 
 
 class CognitiveResult(BaseModel):
@@ -98,12 +81,14 @@ class CognitivePipeline:
         self,
         intent_engine: IntentEngine | None = None,
         priority_engine: PriorityEngine | None = None,
+        context_builder: ContextBuilder | None = None,
         planner: CognitivePlanner | None = None,
         validator: ResponseValidator | None = None,
         learning: LearningEngine | None = None,
     ) -> None:
         self._intent_engine = intent_engine or IntentEngine()
         self._priority_engine = priority_engine or PriorityEngine()
+        self._context_builder = context_builder or ContextBuilder()
         self._planner = planner or CognitivePlanner()
         self._validator = validator or ResponseValidator()
         self._learning = learning or LearningEngine()
@@ -132,9 +117,16 @@ class CognitivePipeline:
         )
         record_priority_classification(priority.level.value)
 
-        history, extra_memories, memories_used = await timed(
-            "load_context",
-            self._load_context(db, contact_id, normalized, intent, priority),
+        context = await timed(
+            "build_context",
+            self._context_builder.build(
+                db, user, contact_id, normalized, intent, priority
+            ),
+        )
+        history, extra_memories, memories_used = (
+            context.history,
+            context.memories,
+            context.memories_used,
         )
 
         plan = await timed(
@@ -186,65 +178,6 @@ class CognitivePipeline:
             validation_attempts=validation_attempts,
             stage_durations_ms=stage_durations,
         )
-
-    async def _load_context(
-        self,
-        db: AsyncSession,
-        contact_id: int | None,
-        message: str,
-        intent: IntentResult,
-        priority: PriorityResult,
-    ) -> tuple[list[ChatMessage], list[dict], int]:
-        """Short-term history + preferences + summary always (cheap, local
-        Postgres reads); long-term/knowledge semantic search only when the
-        message actually warrants it."""
-        history: list[ChatMessage] = []
-        extra_memories: list[dict] = []
-
-        if contact_id is not None:
-            recent = await memory_manager.short_term(
-                db, contact_id, limit=_SHORT_TERM_LIMIT
-            )
-            record_memory_lookup("short_term")
-            history = [
-                ChatMessage(
-                    role="user"
-                    if entry.direction == MessageDirection.INBOUND
-                    else "assistant",
-                    content=entry.content,
-                )
-                for entry in recent
-                if entry.content
-            ]
-
-            preferences = await memory_manager.get_preferences(db, contact_id)
-            record_memory_lookup("preferences")
-            if preferences:
-                extra_memories.append(
-                    {"source": "preferences", "content": str(preferences)}
-                )
-
-            summary = await memory_manager.get_summary(db, contact_id)
-            record_memory_lookup("summary")
-            if summary:
-                extra_memories.append({"source": "summary", "content": summary})
-
-        if _needs_deep_context(intent, priority):
-            try:
-                long_term = await memory_manager.long_term_search(message, contact_id)
-                record_memory_lookup("long_term")
-                extra_memories.extend(long_term)
-
-                if intent.top in _KNOWLEDGE_INTENTS:
-                    knowledge = await memory_manager.knowledge_search(message)
-                    record_memory_lookup("knowledge")
-                    extra_memories.extend(knowledge)
-            except Exception as exc:  # noqa: BLE001 - memory is an enhancement, not a requirement
-                logger.warning(
-                    "Semantic memory lookup skipped (vector store unavailable): %s", exc
-                )
-
-        return history, extra_memories, len(extra_memories)
 
     async def _execute_plan(
         self,

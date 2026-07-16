@@ -4,7 +4,7 @@ to STUB_REPLY without an API key)."""
 
 import pytest
 
-from orchestrator.intent import Intent, IntentEngine
+from orchestrator.intent import Intent, IntentEngine, IntentHypothesis, IntentResult
 from providers.llm.base import ChatMessage, LLMProvider, LLMResult, ToolCallRequest
 
 
@@ -154,3 +154,60 @@ async def test_unknown_intent_labels_from_model_are_discarded():
     result = await IntentEngine(llm=llm).classify("oi")
     # Falls back to the heuristic since no valid hypothesis survived.
     assert result.top == Intent.GREETING
+
+
+# --- Ambiguity detection -------------------------------------------------------
+def test_single_high_confidence_hypothesis_is_not_ambiguous():
+    result = IntentResult(
+        top=Intent.GREETING,
+        hypotheses=[IntentHypothesis(intent=Intent.GREETING, confidence=0.95)],
+    )
+    assert result.is_ambiguous is False
+
+
+def test_single_low_confidence_hypothesis_is_ambiguous():
+    """Even with nothing to compare against, low confidence alone isn't a
+    safe enough read of the message."""
+    result = IntentResult(
+        top=Intent.SMALL_TALK,
+        hypotheses=[IntentHypothesis(intent=Intent.SMALL_TALK, confidence=0.4)],
+    )
+    assert result.is_ambiguous is True
+
+
+def test_close_competing_hypotheses_are_ambiguous():
+    result = IntentResult(
+        top=Intent.QUESTION,
+        hypotheses=[
+            IntentHypothesis(intent=Intent.QUESTION, confidence=0.6),
+            IntentHypothesis(intent=Intent.RESEARCH, confidence=0.55),
+        ],
+    )
+    assert result.is_ambiguous is True
+
+
+def test_clear_leader_over_a_runner_up_is_not_ambiguous():
+    result = IntentResult(
+        top=Intent.GREETING,
+        hypotheses=[
+            IntentHypothesis(intent=Intent.GREETING, confidence=0.9),
+            IntentHypothesis(intent=Intent.SMALL_TALK, confidence=0.2),
+        ],
+    )
+    assert result.is_ambiguous is False
+
+
+def test_no_hypotheses_at_all_is_ambiguous():
+    result = IntentResult(top=Intent.SMALL_TALK, hypotheses=[])
+    assert result.is_ambiguous is True
+
+
+def test_is_ambiguous_round_trips_through_model_dump():
+    """Exposed as a computed field so it survives into the structured log
+    payload (CognitivePipeline._log_run dumps intent.hypotheses today; a
+    future caller dumping the whole IntentResult gets is_ambiguous for free)."""
+    result = IntentResult(
+        top=Intent.GREETING,
+        hypotheses=[IntentHypothesis(intent=Intent.GREETING, confidence=0.95)],
+    )
+    assert result.model_dump()["is_ambiguous"] is False

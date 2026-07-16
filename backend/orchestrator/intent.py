@@ -12,7 +12,7 @@ decision path, mirroring how `providers/llm/*` already degrade to STUB_REPLY.
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from providers.llm.base import ChatMessage, LLMProvider, ToolSpec
 from providers.llm.factory import get_llm_provider
@@ -45,9 +45,30 @@ class IntentHypothesis(BaseModel):
     confidence: float
 
 
+# Ambiguous when the top hypothesis doesn't clearly lead the runner-up (gap
+# below this), or when it's low-confidence even on its own -- either way, a
+# single category isn't a safe enough read of the message to skip caution
+# downstream (e.g. CognitivePlanner asking for confirmation).
+_AMBIGUITY_GAP_THRESHOLD = 0.15
+_AMBIGUITY_CONFIDENCE_FLOOR = 0.5
+
+
 class IntentResult(BaseModel):
     top: Intent
     hypotheses: list[IntentHypothesis]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_ambiguous(self) -> bool:
+        if not self.hypotheses:
+            return True
+        top_confidence = self.hypotheses[0].confidence
+        if top_confidence < _AMBIGUITY_CONFIDENCE_FLOOR:
+            return True
+        if len(self.hypotheses) < 2:
+            return False
+        runner_up_confidence = self.hypotheses[1].confidence
+        return (top_confidence - runner_up_confidence) < _AMBIGUITY_GAP_THRESHOLD
 
 
 _CLASSIFY_INTENT_TOOL = ToolSpec(

@@ -142,14 +142,14 @@ O custo estimado usa uma tabela estática de preços por milhão de tokens (`pro
 
 ## Cognitive Pipeline (Fase 4.2)
 
-A previsão da Fase 3 — "este método de seleção [de agente] cresce de nome explícito para um classificador de intenção" — se concretizou como o Cognitive Pipeline: o ponto de entrada para "uma mensagem chegou, pense antes de agir", usado pelo auto-reply do WhatsApp (`jobs/handlers.py::process_inbound_whatsapp_message`). Não é uma camada nova: é uma composição, dentro da camada de "Coordenação cognitiva" já existente (`orchestrator/`), de componentes pequenos e independentes — cada um testável isoladamente — que terminam delegando a execução real ao mesmo `AIOrchestrator.run` de sempre.
+A previsão da Fase 3 — "este método de seleção [de agente] cresce de nome explícito para um classificador de intenção" — se concretizou como o Cognitive Pipeline: o ponto de entrada para "uma mensagem chegou, pense antes de agir", usado pelo auto-reply do WhatsApp (`jobs/handlers.py::process_inbound_whatsapp_message`). Não é uma camada nova: é uma composição, dentro da camada de "Coordenação cognitiva" já existente (`orchestrator/`), de componentes pequenos e independentes — cada um testável isoladamente — que terminam delegando a execução real ao mesmo `AIOrchestrator.run` de sempre. `orchestrator/context.py::ContextBuilder` (adicionado na milestone "Cognitive Pipeline: mapeamento completo", abaixo) reúne o contexto — curto prazo, preferências e resumo continuam escopados pelo contato; metas prontas, tarefas pendentes e próximos eventos de calendário do **dono** da instância entram no contexto independente de contato.
 
 ```mermaid
 flowchart TD
     A[Mensagem recebida] --> B[Normalizar]
     B --> C["Intent Engine\n(orchestrator/intent.py)"]
     C --> D["Priority Engine\n(orchestrator/priority.py)"]
-    D --> E["Carregar contexto\ncurto prazo + preferências + resumo"]
+    D --> E["Context Builder\ncurto prazo + preferências + resumo\n+ metas + tarefas + calendário do dono"]
     E --> F{"Contexto profundo\nnecessário?"}
     F -- sim --> G["Memória longo prazo\n(Qdrant)"]
     G --> H{"Intenção pede\nconhecimento?"}
@@ -707,6 +707,62 @@ StateManager central:
 Mesma lógica do StateManager: cada uma vira trabalho real no dia em que um
 fluxo concreto precisar dela — não antes, como componente genérico sem
 consumidor.
+
+## Cognitive Pipeline: mapeamento completo
+
+Uma terceira missão pediu "o pipeline de raciocínio completo": Context
+Builder, Intent Analyzer, Reasoning Engine, Action Planner, Execution
+Dispatcher, Reflection Engine. Mesma checagem contra o código já existente
+aplicada ao Runtime e ao Orchestrator (seções acima): **as seis peças já
+existiam**, como o próprio Cognitive Pipeline (`orchestrator/`, seção
+"Cognitive Pipeline (Fase 4.2)" acima) — desta vez, ao contrário das duas
+missões anteriores, nenhuma peça inteira faltava, mas três capacidades
+específicas, nomeadas explicitamente no pedido, realmente não existiam.
+Essas três foram implementadas de verdade nesta milestone; o resto foi só
+formalizado.
+
+| Peça pedida | Já existe hoje | O que foi adicionado nesta milestone |
+| --- | --- | --- |
+| **Context Builder** | `CognitivePipeline._load_context` já reunia curto prazo + preferências + resumo + memória longa + conhecimento | Extraído para `orchestrator/context.py::ContextBuilder` (componente próprio, testável isoladamente) **+ metas, tarefas e eventos de calendário do dono** passam a entrar no contexto — nenhum dos três estava conectado ao pipeline antes |
+| **Intent Analyzer** | `orchestrator/intent.py::IntentEngine` já classificava intenção com múltiplas hipóteses e confiança | `IntentResult.is_ambiguous` (computed field) — antes a ambiguidade só existia implicitamente na lista de hipóteses; agora é uma decisão explícita e testável (confiança baixa isolada, ou disputa próxima entre as duas primeiras hipóteses) |
+| **Reasoning Engine** | `orchestrator/planning.py::CognitivePlanner` já fazia planejamento multi-etapa e já expunha `reasoning` (texto livre do modelo) | `Plan.confidence` — o modelo agora reporta quão confiante está na própria decomposição do plano (não a mesma coisa que a confiança do Intent Analyzer, que mede a *classificação*, não o *plano*); caminho de fallback marca `confidence=0.3` explicitamente, nunca finge certeza |
+| **Action Planner** | Mesmo `CognitivePlanner` — "gerar plano de execução" é literalmente `create_plan` | — (mesma peça que Reasoning Engine; o pedido nomeou a mesma capacidade duas vezes com rótulos diferentes) |
+| **Execution Dispatcher** | `orchestrator.service.ai_orchestrator.run` (Agent Registry) + `AgentExecutor` (Tool Registry) + publicações no Event Bus em cada etapa | — (100% já implementado; nada a acrescentar) |
+| **Reflection Engine** | `orchestrator/validation.py::ResponseValidator` (qualidade/falha) + `orchestrator/learning.py::LearningEngine` (atualiza memória) | — (ver "capacidades deliberadamente adiadas" abaixo para o que essas duas peças ainda não fazem) |
+
+### Capacidades deliberadamente adiadas
+
+- **"Determinar ferramentas necessárias" (Intent Analyzer).** Pré-calcular
+  quais tools uma intenção vai precisar duplicaria o que o `AgentExecutor`
+  já faz dinamicamente a cada turno, através do próprio function calling do
+  modelo — o princípio já estabelecido em `planning.py` ("o Planner nunca
+  chama uma ferramenta") se estende aqui: decidir *qual* ferramenta é
+  sempre responsabilidade do `AgentExecutor`/Tool Registry, nunca de uma
+  etapa anterior do pipeline.
+- **Avaliação de alternativas e detecção de contradições (Reasoning
+  Engine).** O Planner aceita o plano que o modelo devolve; não gera
+  planos alternativos para comparar, nem verifica se um plano contradiz um
+  compromisso já registrado (ex: uma etapa que cancela algo que outra
+  etapa do mesmo plano acabou de criar). Sem um caso de uso real até
+  agora que precise disso.
+- **Estimativa de custo/tempo e identificação de bloqueios antes de
+  executar (Action Planner).** Custo é medido depois da execução
+  (`estimate_cost_usd`, por token realmente gasto), nunca estimado antes;
+  bloqueio de etapa (`depends_on`) só é verificado no momento de rodar
+  aquela etapa, não como um relatório antecipado de todo o plano.
+- **"Melhorar o planejamento futuro" (Reflection Engine).** `LearningEngine`
+  atualiza `Contact.categories`; `ResponseValidator` decide um retry
+  imediato. Nenhum dos dois altera decisões de planejamento de conversas
+  *futuras* com base em falhas passadas — não existe um mecanismo de
+  feedback do tipo "esta combinação intenção+agente falhou N vezes,
+  reduza a confiança nela da próxima vez". Um mecanismo assim exige desenho
+  próprio (o que conta como falha recorrente, janela de tempo, como não
+  virar um viés permanente contra um agente por um problema já corrigido)
+  — não algo para implementar de passagem dentro desta milestone.
+
+Mesma lógica das duas seções anteriores: cada adiamento é por ausência de
+consumidor real e/ou necessidade de desenho próprio, não por esquecimento —
+documentado aqui para nunca ser confundido com uma lacuna silenciosa.
 
 ## Decisões e trade-offs
 

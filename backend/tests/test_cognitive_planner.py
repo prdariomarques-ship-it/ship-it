@@ -183,3 +183,77 @@ async def test_needs_confirmation_flag_is_propagated():
         "cancela tudo", _intent(Intent.STORE), _PRIORITY
     )
     assert plan.needs_confirmation is True
+
+
+# --- Plan confidence ---------------------------------------------------------
+@pytest.mark.asyncio
+async def test_confidence_from_the_model_is_propagated():
+    llm = ScriptedLLM(
+        LLMResult(
+            tool_calls=[
+                ToolCallRequest(
+                    id="c1",
+                    name="create_plan",
+                    arguments={
+                        "steps": [{"objective": "marcar reunião", "agent": "personal"}],
+                        "confidence": 0.82,
+                    },
+                )
+            ]
+        )
+    )
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "marca uma reunião", _intent(Intent.SCHEDULE), _PRIORITY
+    )
+    assert plan.confidence == 0.82
+
+
+@pytest.mark.asyncio
+async def test_confidence_defaults_to_1_when_the_model_omits_it():
+    llm = ScriptedLLM(
+        LLMResult(
+            tool_calls=[
+                ToolCallRequest(
+                    id="c1",
+                    name="create_plan",
+                    arguments={"steps": [{"objective": "x", "agent": "assistant"}]},
+                )
+            ]
+        )
+    )
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "x", _intent(Intent.QUESTION), _PRIORITY
+    )
+    assert plan.confidence == 1.0
+
+
+@pytest.mark.asyncio
+async def test_confidence_is_clamped_to_the_0_1_range():
+    llm = ScriptedLLM(
+        LLMResult(
+            tool_calls=[
+                ToolCallRequest(
+                    id="c1",
+                    name="create_plan",
+                    arguments={
+                        "steps": [{"objective": "x", "agent": "assistant"}],
+                        "confidence": 5.0,
+                    },
+                )
+            ]
+        )
+    )
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "x", _intent(Intent.QUESTION), _PRIORITY
+    )
+    assert plan.confidence == 1.0
+
+
+@pytest.mark.asyncio
+async def test_fallback_plan_has_low_confidence():
+    """A keyword-hint single-step plan is a degraded guess, never a reasoned
+    decision -- its confidence must reflect that, not claim certainty."""
+    plan = await CognitivePlanner(llm=RaisingLLM()).create_plan(
+        "oi", _intent(Intent.GREETING), _PRIORITY
+    )
+    assert plan.confidence == 0.3
