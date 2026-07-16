@@ -598,6 +598,67 @@ namespace HTTP dedicado e um painel Next.js:
   Orchestrator, que estava fora do escopo autorizado desta sprint. Detalhes
   completos: [`docs/DASHBOARD.md`](DASHBOARD.md).
 
+## Dario OS Core Runtime
+
+Uma forma útil de enxergar tudo descrito acima é como um **runtime**: as
+peças que qualquer funcionalidade nova (um agente, uma automação, uma
+integração) usa para rodar de forma assíncrona, orientada a eventos,
+concorrente, tolerante a falha, resiliente a restart e observável — em vez
+de reimplementar essas propriedades a cada módulo novo. As oito peças
+canônicas desse tipo de runtime já existem aqui, seis delas desde a Fase 3;
+esta seção só nomeia o conjunto explicitamente e aponta para onde cada uma
+já está detalhada neste documento, para que "construir o runtime" nunca
+seja reinterpretado, por engano, como construir um sistema paralelo do zero.
+
+| Peça do runtime | Implementação real | Onde está detalhado | Testes |
+| --- | --- | --- | --- |
+| **AgentManager** | `agents/registry.py` (auto-discovery + `@register_agent`) + `agents/executor.py` (loop de execução) | [Agent Registry e Tool Registry](#agent-registry-e-tool-registry-arquitetura-de-plugin), [Agentes](#agentes) | `tests/test_registries.py`, `tests/test_agent_executor.py`, `tests/test_provider_fallback.py` |
+| **EventBus** | `events/bus.py` — pub/sub in-process + fan-out Redis best-effort | [Event Bus](#event-bus) | `tests/test_events.py` |
+| **TaskQueue** | Tabela `jobs` (Postgres, durável) + `jobs/service.py` (enfileirar) + `jobs/registry.py` (`@job_handler`) | [Fila de jobs](#fila-de-jobs) | `tests/test_jobs.py` |
+| **Scheduler** | `jobs/worker.py::JobWorker` — polling assíncrono, claim atômico (`SELECT ... FOR UPDATE SKIP LOCKED`), retry com backoff exponencial, recuperação de jobs órfãos a cada tick | [Fila de jobs](#fila-de-jobs) | `tests/test_jobs.py`, `tests/test_job_worker_concurrency.py` |
+| **MemoryManager** | `memory/manager.py` — fachada única (curto prazo, longo prazo, conhecimento, preferências, resumo, categorias) | [Memory Manager](#memory-manager) | `tests/test_memory_manager.py`, `tests/test_memory_service_search.py`, `tests/test_memory_service_delete.py` |
+| **ToolRegistry** | `agents/tools/registry.py` — auto-registro no `__post_init__` de `Tool` | [Agent Registry e Tool Registry](#agent-registry-e-tool-registry-arquitetura-de-plugin) | `tests/test_registries.py`, `tests/test_tool_isolation.py` |
+| **HealthMonitor** | `observability/health.py` — `/health` (liveness), `/health/ready` (readiness: Postgres obrigatório, Redis/Qdrant/WhatsApp degradam) | [Observabilidade](#observabilidade) | `tests/test_health.py` |
+| **StateManager** | Deliberadamente não existe um componente central — ver abaixo | — | — |
+
+Cada linha (exceto a última) é uma peça em produção, não um esqueleto: tem
+implementação completa, cobertura de teste dedicada, e é a dependência real
+de código que já roda (chat, auto-reply do WhatsApp, Cognitive Pipeline,
+Sprints 1–4). Pedir para "construir" qualquer uma delas do zero substituiria
+algo que já funciona por uma segunda implementação paralela — exatamente o
+tipo de duplicação que este runtime existe para evitar (`Open/Closed`, ver
+Padrões aplicados acima).
+
+### Por que não existe um StateManager central
+
+Estado no Dario OS é deliberadamente **distribuído por domínio**, não
+centralizado:
+
+| Estado | Onde vive |
+| --- | --- |
+| Preferências/categorias/resumo de contato | `Contact.preferences` / `.categories` / `.summary` (Postgres), via `MemoryManager` |
+| Status de execução de job | Tabela `jobs` (Postgres) — a própria fonte de verdade que o Scheduler consulta |
+| Sessão do WhatsApp (conectado/desconectado/reautenticando) | Cada `providers/whatsapp/*` reporta seu próprio estado via `parse_connection_event`; nada fora do provider guarda esse estado |
+| Progresso de um plano do Cognitive Pipeline | Vive só na variável local `Plan` durante a execução — não sobrevive além de uma mensagem, por design (nenhum passo depende de estado de uma mensagem anterior além do que `MemoryManager` já carrega) |
+| Assinaturas do Event Bus | Dicionário in-process (`events/bus.py`), reconstruído no import — não é estado de negócio, é configuração de runtime |
+
+Nenhum desses precisa hoje ser lido ou escrito por mais de um domínio ao
+mesmo tempo, e cada um já tem seu próprio dono claro (`MemoryManager` para
+contato, `JobRepository` para jobs, cada `WhatsAppProvider` para sessão). Um
+`StateManager` central agregaria esses estados sob uma única API sem
+resolver nenhum problema real existente — em troca, criaria um ponto de
+acoplamento único entre domínios hoje independentes (um bug ali afetaria
+contatos, jobs e sessões WhatsApp ao mesmo tempo) e uma segunda fonte de
+verdade a manter sincronizada com o Postgres, que já é a fonte de verdade
+real de tudo que precisa sobreviver a um restart.
+
+Esta é uma decisão arquitetural deliberada, não uma lacuna: se um caso de
+uso futuro precisar genuinamente de estado compartilhado entre domínios (por
+exemplo, um fluxo multi-etapa que hoje não existe e que precise pausar e
+retomar entre mensagens, mantendo estado à parte de `Contact` e `jobs`),
+ele deve nascer com o dono desse estado específico decidido ali — não
+antecipado agora como um componente genérico sem consumidor.
+
 ## Decisões e trade-offs
 
 - Worker de jobs no mesmo processo da API por padrão (simplicidade); a fila durável e o claim atômico já permitem extrair para container dedicado quando a carga justificar, sem mudar nenhum código de enfileiramento.
