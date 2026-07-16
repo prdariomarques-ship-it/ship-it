@@ -50,9 +50,10 @@ quando (se) cada uma será endereçada, ver `ROADMAP_v2.md`.
 
 ## Segurança
 
-- **Sem CSP nem HSTS configurados no Caddy.**
-- **Dependências do frontend com CVEs conhecidas** (`next@14.2.21`,
-  `postcss`) — corrigir exige um upgrade major do Next.js.
+- **Sem CSP configurada no Caddy** (HSTS já está — `docker/caddy/Caddyfile`).
+- **Dependências do frontend com CVEs conhecidas** (`next@14.2.35`, o
+  patch mais recente da série 14.x; `postcss` transitivo) — corrigir as
+  5 restantes exige um upgrade major do Next.js (16.x).
 
 ## Backup
 
@@ -64,7 +65,8 @@ quando (se) cada uma será endereçada, ver `ROADMAP_v2.md`.
 - **Google OAuth nunca foi validado ponta a ponta contra o Google real**
   em nenhuma sessão de desenvolvimento até agora — apenas por código e
   testes com um provider falso.
-- **`docker compose up` completo nunca foi executado** em nenhum
-  ambiente de sandbox usado até agora — a estrutura do compose está
-  validada, a subida real depende de um ambiente com acesso normal ao
-  Docker Hub.
+- **`docker compose up` completo já foi validado em produção** (os 12
+  serviços rodam de fato, com múltiplos ciclos de rebuild+redeploy e
+  `/health/ready` confirmado). O que continua sem validação é um ambiente
+  de sandbox isolado (CI ou local, fora da máquina de produção) — cada
+  sandbox usado até agora bloqueia o pull de imagem do Docker Hub.
