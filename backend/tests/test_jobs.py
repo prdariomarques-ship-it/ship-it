@@ -173,6 +173,50 @@ async def test_scheduled_job_not_picked_before_time(session_factory, worker):
 
 
 @pytest.mark.asyncio
+async def test_unknown_handler_fails_job_gracefully(session_factory, worker):
+    """JobService.enqueue never validates the name against the registry (only
+    the HTTP API does, at the router level) -- a job can end up queued for a
+    name whose handler was since removed or renamed mid-deploy. resolve_handler
+    raising UnknownJobError must be handled like any other handler failure
+    (recorded via the normal retry/failure bookkeeping), not an unhandled
+    exception that skips repository updates and kills the tick."""
+    async with session_factory() as session:
+        job = await JobService(session).enqueue("test.no-such-handler", max_attempts=1)
+
+    assert await worker.run_once() == 1
+
+    async with session_factory() as session:
+        refreshed = await session.get(type(job), job.id)
+        assert refreshed.status == JobStatus.FAILED
+        assert "No handler registered" in refreshed.last_error
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_survives_a_failing_tick(worker, monkeypatch):
+    """The background poll loop (JobWorker._run) must log and continue on the
+    next tick instead of dying when run_once raises unexpectedly -- otherwise
+    a single bad tick (e.g. a transient DB outage) would silently stop all job
+    processing until the whole process is restarted. This is the actual
+    fault-tolerant/restart-resilient contract of the runtime's Scheduler."""
+    import asyncio
+
+    monkeypatch.setattr(worker._settings, "jobs_poll_interval_seconds", 0)
+    calls: list[int] = []
+
+    async def _flaky_run_once():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("tick blew up")
+        worker._stopping.set()
+        return 0
+
+    monkeypatch.setattr(worker, "run_once", _flaky_run_once)
+    await asyncio.wait_for(worker._run(), timeout=5)
+
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_jobs_api_enqueue_and_cancel(client, auth_headers):
     @job_handler("test.api")
     async def _api(db, payload):

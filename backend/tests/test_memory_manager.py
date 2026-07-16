@@ -123,3 +123,45 @@ async def test_set_preference_unknown_contact_raises(session_factory):
 async def test_get_preferences_unknown_contact_returns_empty_dict(session_factory):
     async with session_factory() as session:
         assert await memory_manager.get_preferences(session, 999999) == {}
+
+
+@pytest.mark.asyncio
+async def test_add_categories_appends_new_ones(session_factory, contact):
+    async with session_factory() as session:
+        added = await memory_manager.add_categories(session, contact.id, ["vip", "atacado"])
+    assert added == ["vip", "atacado"]
+
+    async with session_factory() as session:
+        refreshed = await session.get(Contact, contact.id)
+        assert refreshed.categories == ["vip", "atacado"]
+
+
+@pytest.mark.asyncio
+async def test_add_categories_skips_ones_already_present(session_factory, contact):
+    """The docstring promises learning never writes the same fact twice."""
+    async with session_factory() as session:
+        await memory_manager.add_categories(session, contact.id, ["vip"])
+
+    async with session_factory() as session:
+        added = await memory_manager.add_categories(session, contact.id, ["vip", "novo"])
+    assert added == ["novo"]
+
+    async with session_factory() as session:
+        refreshed = await session.get(Contact, contact.id)
+        assert refreshed.categories == ["vip", "novo"]
+
+
+@pytest.mark.asyncio
+async def test_add_categories_all_already_present_is_a_no_op(session_factory, contact):
+    async with session_factory() as session:
+        await memory_manager.add_categories(session, contact.id, ["vip"])
+
+    async with session_factory() as session:
+        added = await memory_manager.add_categories(session, contact.id, ["vip"])
+    assert added == []
+
+
+@pytest.mark.asyncio
+async def test_add_categories_unknown_contact_returns_empty_list(session_factory):
+    async with session_factory() as session:
+        assert await memory_manager.add_categories(session, 999999, ["vip"]) == []
