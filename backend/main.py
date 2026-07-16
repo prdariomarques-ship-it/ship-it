@@ -26,6 +26,7 @@ from chat.router import router as chat_router
 from gcalendar.router import router as gcalendar_router
 from gcontacts.router import router as gcontacts_router
 from gdrive.router import router as gdrive_router
+from goals.router import router as goals_router
 from jobs.router import router as jobs_router
 from jobs.worker import job_worker
 from mail.router import router as mail_router
@@ -179,6 +180,7 @@ def create_app() -> FastAPI:
     app.include_router(contacts_router, prefix=prefix)
     app.include_router(messages_router, prefix=prefix)
     app.include_router(tasks_router, prefix=prefix)
+    app.include_router(goals_router, prefix=prefix)
     app.include_router(calendar_router, prefix=prefix)
     app.include_router(notes_router, prefix=prefix)
     app.include_router(church_router, prefix=prefix)

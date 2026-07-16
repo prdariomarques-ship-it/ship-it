@@ -7,6 +7,7 @@ from models.gcalendar_account import GoogleCalendarAccount
 from models.gcontacts_account import GoogleContactsAccount
 from models.gdrive_account import GoogleDriveAccount
 from models.gdrive_indexed_file import GoogleDriveIndexedFile
+from models.goal import Goal, GoalDependency, GoalPriority, GoalStatus
 from models.job import Job, JobStatus
 from models.log import LogEntry
 from models.message import Message, MessageDirection, MessageMediaType
@@ -26,6 +27,10 @@ __all__ = [
     "GoogleContactsAccount",
     "GoogleDriveAccount",
     "GoogleDriveIndexedFile",
+    "Goal",
+    "GoalDependency",
+    "GoalPriority",
+    "GoalStatus",
     "Job",
     "JobStatus",
     "LogEntry",

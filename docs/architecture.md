@@ -659,6 +659,55 @@ retomar entre mensagens, mantendo estado à parte de `Contact` e `jobs`),
 ele deve nascer com o dono desse estado específico decidido ali — não
 antecipado agora como um componente genérico sem consumidor.
 
+## Dario OS Orchestrator
+
+Uma missão pediu "a camada de inteligência que coordena todo agente":
+GoalManager, Planner, Orchestrator, Context Engine, Decision Engine,
+Execution Engine. A mesma checagem contra o código já existente aplicada ao
+Runtime (seção acima) valeu aqui: **5 dos 6 componentes já existiam em
+produção**, sob o nome Cognitive Pipeline (`orchestrator/`, detalhado acima
+em "Cognitive Pipeline (Fase 4.2)"). Só `GoalManager` era genuinamente novo
+— e foi o único construído do zero nesta milestone.
+
+| Peça pedida | Já existe hoje | Onde |
+| --- | --- | --- |
+| **Orchestrator** | `orchestrator/service.py::AIOrchestrator` — seleciona agente, roda sob timeout, retry via fila de jobs, publica eventos | [AI Orchestrator](#ai-orchestrator) |
+| **Planner** | `orchestrator/planning.py::CognitivePlanner` — decompõe em até 5 etapas, cada uma com agente e dependência (etapa dependente vira `SKIPPED` se a anterior falhar) | [Fluxo do Planner](#fluxo-do-planner) |
+| **Context Engine** | O próprio Cognitive Pipeline: curto prazo + preferências + resumo + memória longa + conhecimento, carregados sob demanda | [Fluxo de memória (Fase 4.2)](#fluxo-de-memória-fase-42) |
+| **Decision Engine** | `orchestrator/intent.py` + `orchestrator/priority.py` — pontuam intenção/prioridade com confiança via function calling, com heurística de fallback | [Cognitive Pipeline (Fase 4.2)](#cognitive-pipeline-fase-42) |
+| **Execution Engine** | `agents/executor.py::AgentExecutor` — executa, monitora (`ExecutedStep`) e recupera via troca automática de provider | [Fluxo de ferramentas](#fluxo-de-ferramentas) |
+| **GoalManager** | **Novo** — nenhum equivalente existia | `goals/`, ver [`docs/GOALS.md`](GOALS.md) |
+
+### Capacidades deliberadamente adiadas
+
+A checagem também identificou 3 capacidades específicas que a missão pedia
+e que, de fato, não existem em nenhum dos componentes acima — mas que não
+têm consumidor real hoje, mesmo raciocínio já aplicado à ausência de um
+StateManager central:
+
+- **Coordenação paralela de múltiplos agentes.** O Planner roteia cada etapa
+  para um agente, uma de cada vez, sequencialmente. Paralelizar etapas
+  independentes do mesmo plano exigiria mudar `CognitivePipeline` para
+  identificar quais etapas não dependem umas das outras e rodá-las com
+  `asyncio.gather` — nenhum plano real gerado até hoje tem etapas
+  independentes numerosas o suficiente para justificar a complexidade.
+- **Execução retomável entre restarts.** Um plano do Cognitive Pipeline vive
+  só na memória de uma requisição; um crash no meio perde o progresso.
+  Persistir e retomar exigiria estender o modelo de Job para carregar um
+  plano inteiro, não só um payload simples — `GoalManager` já deixa a base
+  disso pronta para o domínio de metas (`GoalRepository.stuck_in_progress`,
+  ver `docs/GOALS.md`), mas nada ainda conecta um Goal a uma execução do
+  Cognitive Pipeline.
+- **Reprorização automática de plano em andamento.** Hoje um plano é fixo
+  após criado; reavaliar prioridade/ordem das etapas restantes com base em
+  eventos novos durante a execução não existe. `GoalManager.priority_score`
+  resolve isso para metas paradas na fila (`ready_goals` sempre reordena na
+  leitura), mas não para um plano do Cognitive Pipeline já em execução.
+
+Mesma lógica do StateManager: cada uma vira trabalho real no dia em que um
+fluxo concreto precisar dela — não antes, como componente genérico sem
+consumidor.
+
 ## Decisões e trade-offs
 
 - Worker de jobs no mesmo processo da API por padrão (simplicidade); a fila durável e o claim atômico já permitem extrair para container dedicado quando a carga justificar, sem mudar nenhum código de enfileiramento.

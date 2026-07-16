@@ -37,6 +37,12 @@ from agents.tools.gdrive import (
     summarize_google_drive_document_tool,
     update_google_drive_index_tool,
 )
+from agents.tools.goals import (
+    complete_goal_tool,
+    create_goal_tool,
+    list_goals_tool,
+    update_goal_progress_tool,
+)
 from agents.tools.mail import (
     detect_pending_email_actions_tool,
     read_email_thread_tool,
@@ -123,4 +129,8 @@ class AssistantAgent(BaseAgent):
             index_google_drive_folder_tool,
             summarize_google_drive_document_tool,
             update_google_drive_index_tool,
+            create_goal_tool,
+            list_goals_tool,
+            update_goal_progress_tool,
+            complete_goal_tool,
         ]

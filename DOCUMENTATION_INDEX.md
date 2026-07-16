@@ -67,6 +67,7 @@ These documents were marked deprecated during Phase 0 (2026-07-11) with a notice
 | Calendar Integration | docs/CALENDAR.md |
 | Email Integration | docs/EMAIL.md |
 | Google Workspace Integration | docs/DRIVE.md, docs/CONTACTS.md |
+| Goals / Orchestrator | docs/GOALS.md, docs/architecture.md ("Dario OS Orchestrator") |
 | WhatsApp Integration | docs/architecture.md, backend/providers/whatsapp/README.md |
 | Workflows | docs/WORKFLOWS.md |
 | API | docs/api.md |
