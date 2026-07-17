@@ -126,6 +126,13 @@ class Settings(BaseSettings):
     # Event Bus (best-effort Redis fan-out; in-process delivery never depends on it)
     events_channel: str = "darioos:events"
 
+    # Context Observation Engine (observation/) — keeps a CurrentContext
+    # snapshot fresh via a self-rescheduling job (jobs/), not a new timer
+    # primitive; see docs/OBSERVATION_ENGINE.md.
+    observation_enabled: bool = True
+    observation_interval_seconds: float = 300.0  # re-observe even with no triggering event
+    observation_context_limit: int = 5  # items per dimension; matches orchestrator.context._OWNER_CONTEXT_LIMIT
+
     # Mail (Gmail) — a domain independent of WhatsApp/Loja/Igreja/Investimentos/Agenda.
     # Optional: unset means the Gmail integration simply isn't available (no boot
     # failure) — only /api/mail/connect requires all three to be configured.

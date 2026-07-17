@@ -25,15 +25,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from goals.service import GoalService
 from memory.manager import memory_manager
 from models.calendar import CalendarEvent
-from models.goal import Goal
 from models.message import MessageDirection
-from models.task import Task, TaskStatus
+from models.task import TaskStatus
 from models.user import User
 from observability.metrics import record_memory_lookup
 from orchestrator.intent import Intent, IntentResult
 from orchestrator.priority import Priority, PriorityResult
 from providers.llm.base import ChatMessage
-from repositories.base import SQLAlchemyRepository
+from repositories.task import TaskRepository
+from services.descriptions import describe_calendar_event, describe_goal, describe_task
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -49,39 +49,12 @@ _KNOWLEDGE_INTENTS = (
 )
 
 
-class _TaskRepo(SQLAlchemyRepository[Task]):
-    model = Task
-
-
 def needs_deep_context(intent: IntentResult, priority: PriorityResult) -> bool:
     """Skip long-term/knowledge lookups for cheap, low-stakes messages —
     'avoid loading unnecessary context' from the brief, made concrete."""
     if priority.level in (Priority.HIGH, Priority.URGENT):
         return True
     return intent.top not in _LIGHT_INTENTS
-
-
-def _describe_goal(goal: Goal) -> str:
-    parts = [goal.title, f"prioridade {goal.priority.value}"]
-    if goal.deadline:
-        parts.append(f"prazo {goal.deadline.date().isoformat()}")
-    if goal.progress_percent:
-        parts.append(f"{goal.progress_percent}% concluída")
-    return "; ".join(parts)
-
-
-def _describe_task(task: Task) -> str:
-    parts = [task.title]
-    if task.due_date:
-        parts.append(f"prazo {task.due_date.date().isoformat()}")
-    return "; ".join(parts)
-
-
-def _describe_event(event: CalendarEvent) -> str:
-    when = event.starts_at.isoformat()
-    return f"{event.title} em {when}" + (
-        f" ({event.location})" if event.location else ""
-    )
 
 
 class Context:
@@ -164,18 +137,18 @@ class ContextBuilder:
             logger.warning("Goal context lookup skipped: %s", exc)
             return []
         record_memory_lookup("goal")
-        return [{"source": "goal", "content": _describe_goal(goal)} for goal in ready]
+        return [{"source": "goal", "content": describe_goal(goal)} for goal in ready]
 
     async def _gather_tasks(self, db: AsyncSession, user: User) -> list[dict]:
         try:
-            tasks = await _TaskRepo(db).list(
+            tasks = await TaskRepository(db).list(
                 user_id=user.id, status=TaskStatus.PENDING, limit=_OWNER_CONTEXT_LIMIT
             )
         except Exception as exc:  # noqa: BLE001 - context is an enhancement, never a requirement
             logger.warning("Task context lookup skipped: %s", exc)
             return []
         record_memory_lookup("task")
-        return [{"source": "task", "content": _describe_task(task)} for task in tasks]
+        return [{"source": "task", "content": describe_task(task)} for task in tasks]
 
     async def _gather_calendar(self, db: AsyncSession, user: User) -> list[dict]:
         try:
@@ -194,7 +167,7 @@ class ContextBuilder:
             return []
         record_memory_lookup("calendar")
         return [
-            {"source": "calendar", "content": _describe_event(event)}
+            {"source": "calendar", "content": describe_calendar_event(event)}
             for event in events
         ]
 

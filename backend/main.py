@@ -7,9 +7,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import jobs.handlers  # noqa: F401 - register the built-in job handlers
+import observation.scheduler  # noqa: F401 - register the observation.tick job handler
 from admin.router import router as admin_router
 from agents.router import router as agents_router
+from database.session import async_session_factory
 from jobs.handlers import register_event_subscribers
+from observation.events import (
+    register_event_subscribers as register_observation_event_subscribers,
+)
+from observation.scheduler import start as start_observation_scheduler
 from api.routes import (
     calendar_router,
     church_router,
@@ -99,8 +105,12 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(json_output=settings.log_json)
     register_event_subscribers()
+    register_observation_event_subscribers()
     if settings.jobs_enabled and settings.environment != "test":
         job_worker.start()
+        if settings.observation_enabled:
+            async with async_session_factory() as session:
+                await start_observation_scheduler(session)
     logger.info(
         "%s v%s started (%s)",
         settings.app_name,

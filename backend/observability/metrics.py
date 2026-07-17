@@ -106,6 +106,23 @@ PIPELINE_MEMORY_LOOKUPS = Counter(
     labelnames=("kind",),  # short_term | long_term | knowledge | preferences | summary
 )
 
+OBSERVATION_RUNS = Counter(
+    "darioos_observation_runs_total",
+    "CurrentContext snapshots built by the Context Observation Engine",
+    labelnames=("trigger",),  # scheduler | event | startup
+)
+
+OBSERVATION_DURATION = Histogram(
+    "darioos_observation_duration_seconds",
+    "Duration of one Context Observation Engine snapshot build",
+)
+
+OBSERVATION_SOURCE_ERRORS = Counter(
+    "darioos_observation_source_errors_total",
+    "Best-effort observation sources skipped (dependency unavailable) while building CurrentContext",
+    labelnames=("source",),
+)
+
 metrics_router = APIRouter(tags=["observability"])
 
 
@@ -186,3 +203,12 @@ def record_validation_retry() -> None:
 
 def record_memory_lookup(kind: str) -> None:
     PIPELINE_MEMORY_LOOKUPS.labels(kind).inc()
+
+
+def record_observation_run(trigger: str, duration_seconds: float) -> None:
+    OBSERVATION_RUNS.labels(trigger).inc()
+    OBSERVATION_DURATION.observe(duration_seconds)
+
+
+def record_observation_source_error(source: str) -> None:
+    OBSERVATION_SOURCE_ERRORS.labels(source).inc()

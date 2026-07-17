@@ -34,3 +34,15 @@ class JobRepository(SQLAlchemyRepository[Job]):
             .limit(limit)
         )
         return list((await self.session.execute(statement)).scalars().all())
+
+    async def pending_by_name(self, name: str) -> Job | None:
+        """First QUEUED or RUNNING job with this name — lets a self-rescheduling
+        handler (e.g. observation.tick) check whether its own chain is already
+        alive before enqueueing a competing one (restart) or pull it forward
+        (an event that warrants an earlier run than the next scheduled tick)."""
+        statement = (
+            select(Job)
+            .where(Job.name == name, Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
+            .limit(1)
+        )
+        return (await self.session.execute(statement)).scalars().first()

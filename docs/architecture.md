@@ -619,6 +619,7 @@ seja reinterpretado, por engano, como construir um sistema paralelo do zero.
 | **MemoryManager** | `memory/manager.py` — fachada única (curto prazo, longo prazo, conhecimento, preferências, resumo, categorias) | [Memory Manager](#memory-manager) | `tests/test_memory_manager.py`, `tests/test_memory_service_search.py`, `tests/test_memory_service_delete.py` |
 | **ToolRegistry** | `agents/tools/registry.py` — auto-registro no `__post_init__` de `Tool` | [Agent Registry e Tool Registry](#agent-registry-e-tool-registry-arquitetura-de-plugin) | `tests/test_registries.py`, `tests/test_tool_isolation.py` |
 | **HealthMonitor** | `observability/health.py` — `/health` (liveness), `/health/ready` (readiness: Postgres obrigatório, Redis/Qdrant/WhatsApp degradam) | [Observabilidade](#observabilidade) | `tests/test_health.py` |
+| **ContextObservationEngine** | `observation/` — fotografia (`CurrentContext`) do estado atual (metas, tarefas, agenda, eventos, conversas, trabalho pendente, memória), mantida por um job auto-reagendável no `JobWorker` acima + Event Bus | [Context Observation Engine](OBSERVATION_ENGINE.md) | `tests/test_observation_*.py` |
 | **StateManager** | Deliberadamente não existe um componente central — ver abaixo | — | — |
 
 Cada linha (exceto a última) é uma peça em produção, não um esqueleto: tem
@@ -707,6 +708,24 @@ StateManager central:
 Mesma lógica do StateManager: cada uma vira trabalho real no dia em que um
 fluxo concreto precisar dela — não antes, como componente genérico sem
 consumidor.
+
+## Context Observation Engine
+
+Uma quarta missão pediu um motor que garanta que "o sistema sempre sabe seu
+estado atual antes de tomar uma decisão" — mas, ao contrário das três
+missões anteriores desta seção, não pedia para reaproveitar um componente
+que já existia sob outro nome: `orchestrator/context.py::ContextBuilder`
+(o "Context Engine" da tabela acima) já reunia metas/tarefas/agenda, mas só
+*por mensagem*, *por conversa*, e descartado ao fim da requisição — nunca
+uma fotografia parada, consultável a qualquer momento, do estado do sistema
+inteiro. Essa fotografia (`CurrentContext`) era, de fato, nova; o motor que
+a mantém (`observation/`) reaproveita integralmente o resto do runtime
+listado na tabela acima — `EventBus`, `TaskQueue`/`Scheduler` (nenhum timer
+novo: um job auto-reagendável no `JobWorker` existente), `GoalManager`
+(`GoalService.ready_goals`) e os repositórios existentes. Guia completo:
+**[`docs/OBSERVATION_ENGINE.md`](OBSERVATION_ENGINE.md)** (com
+**[`docs/CURRENT_CONTEXT.md`](CURRENT_CONTEXT.md)** para a forma do modelo e
+**[`docs/EVENT_FLOW.md`](EVENT_FLOW.md)** para a integração com o Event Bus).
 
 ## Cognitive Pipeline: mapeamento completo
 
