@@ -10,6 +10,7 @@ import {
   Database,
   LayoutDashboard,
   MessageCircle,
+  Newspaper,
   ScrollText,
   Server,
   Settings,
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/admin/briefing", label: "Briefing Diário", icon: Newspaper },
   { href: "/admin/timeline", label: "Timeline", icon: Clock },
   { href: "/admin/agents", label: "Agents", icon: Bot },
   { href: "/admin/tools", label: "Tools", icon: Wrench },
