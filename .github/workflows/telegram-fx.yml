@@ -2,8 +2,6 @@ name: Telegram FX Radar
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "11,41 * * * *"
 
 jobs:
   fx-radar:
