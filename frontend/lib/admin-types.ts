@@ -159,3 +159,96 @@ export interface MetricsSnapshot {
 }
 
 export type ExecutionsPeriod = "today" | "24h" | "7d" | "30d";
+
+// --- Context Observation Engine (backend/observation/) -----------------------------
+// Mirrors backend/observation/models.py::ContextItem / CurrentContext exactly.
+export interface ContextItem {
+  source: string;
+  content: string;
+}
+
+export interface CurrentContext {
+  user_id: number;
+  generated_at: string;
+  trigger: string;
+  goals: ContextItem[];
+  tasks: ContextItem[];
+  calendar: ContextItem[];
+  recent_events: ContextItem[];
+  conversations: ContextItem[];
+  pending_work: ContextItem[];
+  memory: ContextItem[];
+  degraded_sources: string[];
+}
+
+// --- Goals / Tasks / Calendar (mirrors goals/router.py, api/schemas.py) ------------
+export type GoalStatus =
+  | "awaiting_approval"
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "cancelled";
+export type GoalPriority = "low" | "medium" | "high" | "urgent";
+
+export interface GoalRead {
+  id: number;
+  user_id: number;
+  title: string;
+  description: string | null;
+  status: GoalStatus;
+  priority: GoalPriority;
+  deadline: string | null;
+  progress_percent: number;
+  requires_approval: boolean;
+  approved_at: string | null;
+  approved_by_id: number | null;
+  recurrence_interval_days: number | null;
+  recurrence_parent_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TaskStatus = "pending" | "in_progress" | "done" | "cancelled";
+export type TaskPriority = "low" | "medium" | "high";
+
+export interface TaskRead {
+  id: number;
+  user_id: number;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CalendarEventRead {
+  id: number;
+  user_id: number;
+  title: string;
+  description: string | null;
+  location: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  reminder_minutes: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// --- Jobs (mirrors jobs/router.py::JobRead) -----------------------------------------
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface JobRead {
+  id: number;
+  name: string;
+  payload: Record<string, unknown>;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  scheduled_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}

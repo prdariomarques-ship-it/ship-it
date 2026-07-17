@@ -25,6 +25,9 @@ from models.job import Job, JobStatus
 from models.log import LogEntry
 from models.message import Message, MessageDirection
 from models.user import User
+from observation.engine import context_observation_engine
+from observation.models import CurrentContext
+from repositories.user import UserRepository
 from services.audit import record_log
 from services.cache import cache_service
 from utils.config import get_settings
@@ -464,6 +467,29 @@ async def admin_whatsapp(db: DbSession) -> schemas.WhatsAppStatus:
         messages_sent=sent,
         messages_received=received,
     )
+
+
+@router.get("/observation", response_model=CurrentContext)
+async def admin_observation(db: DbSession) -> CurrentContext:
+    """The Context Observation Engine's `CurrentContext` for the instance
+    owner — thin HTTP window onto `observation/engine.py`, no new logic.
+    Returns the cached snapshot when one exists (kept fresh by the
+    self-rescheduling `observation.tick` job and by Event Bus activity, see
+    docs/OBSERVATION_ENGINE.md); builds one on demand the first time this is
+    called before any tick has run, so the dashboard never shows nothing
+    just because the process recently restarted.
+    """
+    owner = await UserRepository(db).get_first_admin()
+    if owner is None:
+        raise HTTPException(
+            status_code=404, detail="No admin user registered yet"
+        )
+    snapshot = context_observation_engine.current(owner.id)
+    if snapshot is None:
+        snapshot = await context_observation_engine.observe(
+            db, owner, trigger="event:admin_dashboard"
+        )
+    return snapshot
 
 
 # --- P6: Job Management Operations (ADMIN-only, state-changing) ---

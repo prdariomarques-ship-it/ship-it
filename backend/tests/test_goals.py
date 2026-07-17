@@ -371,6 +371,31 @@ async def test_ready_goals_ranks_by_score_not_creation_order(session_factory, us
     assert [g.title for g in ready] == ["Urgent", "Medium", "Low"]
 
 
+@pytest.mark.asyncio
+async def test_ready_goals_with_a_persisted_deadline_does_not_crash(
+    session_factory, user
+):
+    """Regression test: a goal round-tripped through the database can come
+    back with a naive `deadline` depending on the backend (SQLite drops
+    tzinfo on DateTime(timezone=True) columns; Postgres doesn't) —
+    `priority_score` must handle both. Every other scoring test constructs
+    `Goal` objects in memory (never persisted), so this gap went undetected
+    until `GET /api/goals/ready` 500'd against a real, persisted,
+    deadline-bearing goal (see goals/scoring.py::priority_score)."""
+    async with session_factory() as session:
+        await GoalService(session).create_goal(
+            user.id,
+            "Meta com prazo",
+            priority=GoalPriority.HIGH,
+            deadline=datetime.now(timezone.utc) + timedelta(days=3),
+        )
+
+    async with session_factory() as session:
+        ready = await GoalService(session).ready_goals(user.id)
+
+    assert [g.title for g in ready] == ["Meta com prazo"]
+
+
 # --- EventBus + audit log integration --------------------------------------------
 @pytest.mark.asyncio
 async def test_create_goal_publishes_to_event_bus_and_records_audit_log(

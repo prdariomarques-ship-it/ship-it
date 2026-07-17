@@ -15,6 +15,7 @@ from models.job import Job, JobStatus
 from models.log import LogEntry
 from models.message import Message, MessageDirection, MessageMediaType
 from models.user import User, UserRole
+from observation.engine import context_observation_engine
 
 ADMIN_ENDPOINTS = [
     "/api/admin",
@@ -29,6 +30,7 @@ ADMIN_ENDPOINTS = [
     "/api/admin/users",
     "/api/admin/metrics",
     "/api/admin/whatsapp",
+    "/api/admin/observation",
 ]
 
 
@@ -880,3 +882,77 @@ async def test_admin_job_operations_require_admin_role(
         f"/api/admin/jobs/{job_id}/retry", headers=user_headers
     )
     assert response.status_code == 403
+
+
+# --- /admin/observation -------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_observation_engine():
+    """The Context Observation Engine's in-memory cache is a real singleton
+    (see observation/engine.py) — reset it around every test in this file so
+    a snapshot built by one test can never leak into another."""
+    context_observation_engine.reset()
+    yield
+    context_observation_engine.reset()
+
+
+@pytest.mark.asyncio
+async def test_admin_observation_returns_current_context_shape(
+    client, admin_headers
+):
+    response = await client.get("/api/admin/observation", headers=admin_headers)
+    body = response.json()
+    assert response.status_code == 200
+    for field in (
+        "user_id",
+        "generated_at",
+        "trigger",
+        "goals",
+        "tasks",
+        "calendar",
+        "recent_events",
+        "conversations",
+        "pending_work",
+        "memory",
+        "degraded_sources",
+    ):
+        assert field in body
+
+
+@pytest.mark.asyncio
+async def test_admin_observation_builds_on_demand_when_nothing_cached_yet(
+    client, admin_headers, admin_user
+):
+    """No observation.tick has ever run in this test — the endpoint must
+    still return a usable snapshot instead of 404/empty-by-surprise."""
+    assert context_observation_engine.current(admin_user.id) is None
+
+    response = await client.get("/api/admin/observation", headers=admin_headers)
+
+    assert response.status_code == 200
+    assert response.json()["trigger"] == "event:admin_dashboard"
+    assert context_observation_engine.current(admin_user.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_observation_serves_the_cached_snapshot_without_rebuilding(
+    client, admin_headers
+):
+    first = await client.get("/api/admin/observation", headers=admin_headers)
+    second = await client.get("/api/admin/observation", headers=admin_headers)
+
+    assert first.json()["generated_at"] == second.json()["generated_at"]
+
+
+@pytest.mark.asyncio
+async def test_admin_observation_reflects_a_seeded_goal(
+    client, admin_headers, admin_user, session_factory
+):
+    from goals.service import GoalService
+
+    async with session_factory() as session:
+        await GoalService(session).create_goal(admin_user.id, "Meta do painel")
+
+    response = await client.get("/api/admin/observation", headers=admin_headers)
+
+    goal_titles = " ".join(item["content"] for item in response.json()["goals"])
+    assert "Meta do painel" in goal_titles

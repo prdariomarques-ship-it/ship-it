@@ -7,13 +7,19 @@ import type {
   AdminIndex,
   AdminLogEntry,
   AgentAdminInfo,
+  CalendarEventRead,
   ComponentStatus,
+  CurrentContext,
   ExecutionEntry,
   ExecutionsPeriod,
+  GoalRead,
   GoogleWorkspaceStatus,
+  JobRead,
+  JobStatus,
   MemoryStats,
   MetricsSnapshot,
   SystemInfo,
+  TaskRead,
   ToolAdminInfo,
   UserAdminRead,
   WhatsAppStatus,
@@ -145,6 +151,59 @@ export function useAdminWhatsApp() {
   return useQuery({
     queryKey: ["admin", "whatsapp"],
     queryFn: () => apiFetch<WhatsAppStatus>("/admin/whatsapp"),
+    refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
+
+// --- Operational Dashboard: CurrentContext (observation/), Goals, Tasks, Calendar,
+// Jobs. All reuse endpoints that already existed before this dashboard — the only
+// net-new backend surface is GET /admin/observation itself (a thin read over the
+// already-built Context Observation Engine, see docs/OBSERVATION_ENGINE.md).
+
+export function useAdminObservation() {
+  return useQuery({
+    queryKey: ["admin", "observation"],
+    queryFn: () => apiFetch<CurrentContext>("/admin/observation"),
+    refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
+
+export function useReadyGoals() {
+  return useQuery({
+    queryKey: ["goals", "ready"],
+    queryFn: () => apiFetch<GoalRead[]>("/goals/ready"),
+    refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+export function useGoalsAwaitingApproval() {
+  return useQuery({
+    queryKey: ["goals", "awaiting_approval"],
+    queryFn: () => apiFetch<GoalRead[]>("/goals?status=awaiting_approval"),
+    refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+export function useTasks() {
+  return useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => apiFetch<TaskRead[]>("/tasks?limit=200"),
+    refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+export function useCalendarEvents() {
+  return useQuery({
+    queryKey: ["calendar"],
+    queryFn: () => apiFetch<CalendarEventRead[]>("/calendar?limit=200"),
+    refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+export function useJobsByStatus(status: JobStatus) {
+  return useQuery({
+    queryKey: ["jobs", status],
+    queryFn: () => apiFetch<JobRead[]>(`/jobs?status=${status}&limit=50`),
     refetchInterval: LIVE_INTERVAL_MS,
   });
 }

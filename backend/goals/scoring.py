@@ -34,7 +34,13 @@ def priority_score(goal: Goal, *, now: datetime | None = None) -> float:
     score = _PRIORITY_WEIGHT[goal.priority]
     if goal.deadline is None:
         return score
-    days_remaining = (goal.deadline - now).total_seconds() / 86400
+    # SQLite (unlike Postgres) drops tzinfo on DateTime(timezone=True) columns
+    # on read-back, returning a naive datetime — normalize before subtracting
+    # so this never crashes regardless of which backend persisted `goal`.
+    deadline = goal.deadline
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    days_remaining = (deadline - now).total_seconds() / 86400
     urgency = max(
         0.0, (_DEADLINE_HORIZON_DAYS - days_remaining) / _DEADLINE_HORIZON_DAYS
     )
