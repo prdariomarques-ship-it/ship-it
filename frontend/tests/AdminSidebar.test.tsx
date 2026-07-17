@@ -8,11 +8,11 @@ vi.mock("next/navigation", () => ({
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 
 describe("AdminSidebar", () => {
-  it("renders all 14 menu items (12 from the original spec + Timeline/Phase 2 + Briefing Diário/Phase 3)", () => {
+  it("renders all 15 menu items (12 from the original spec + Timeline/Phase 2 + Briefing Diário/Phase 3 + Central de Ações/Phase 4)", () => {
     render(<AdminSidebar />);
     const labels = [
-      "Dashboard", "Briefing Diário", "Timeline", "Agents", "Tools", "Executions", "Memory (vector)", "Google Workspace",
-      "WhatsApp", "Users", "Logs", "Metrics", "System", "Settings",
+      "Dashboard", "Briefing Diário", "Central de Ações", "Timeline", "Agents", "Tools", "Executions", "Memory (vector)",
+      "Google Workspace", "WhatsApp", "Users", "Logs", "Metrics", "System", "Settings",
     ];
     for (const label of labels) {
       expect(screen.getByText(label)).toBeInTheDocument();

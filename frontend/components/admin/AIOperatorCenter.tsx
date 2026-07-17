@@ -1,7 +1,8 @@
 "use client";
 
-import { Check, CheckCircle2, Clock3, RotateCcw, X } from "lucide-react";
+import { Check, CheckCircle2, Clock3, X } from "lucide-react";
 
+import { ActionWorkflowControl } from "@/components/admin/ActionWorkflowControl";
 import { Badge } from "@/components/admin/ui/badge";
 import { Button } from "@/components/admin/ui/button";
 import { EmptyState } from "@/components/admin/EmptyState";
@@ -44,33 +45,19 @@ function estimatedTimeLabel(minutes: number | null): string {
 
 interface InsightRowProps {
   insight: OperatorInsight;
-  onApproveGoal: (goalId: number) => void;
-  approvingGoalId: number | null;
-  onRetryJob: (jobId: number) => void;
-  retryingJobId: number | null;
   onDismiss: (id: string) => void;
   onSnooze: (id: string) => void;
   onComplete: (id: string) => void;
   highlight?: boolean;
 }
 
-function InsightRow({
-  insight,
-  onApproveGoal,
-  approvingGoalId,
-  onRetryJob,
-  retryingJobId,
-  onDismiss,
-  onSnooze,
-  onComplete,
-  highlight = false,
-}: InsightRowProps) {
-  const actionPending =
-    insight.action?.kind === "approve_goal"
-      ? approvingGoalId === insight.action.targetId
-      : insight.action?.kind === "retry_job"
-        ? retryingJobId === insight.action.targetId
-        : false;
+function InsightRow({ insight, onDismiss, onSnooze, onComplete, highlight = false }: InsightRowProps) {
+  // Insights with a real executable action (see ActionWorkflowControl) are
+  // resolved by running that workflow, not by a separate local-only "mark
+  // as done" — showing both would be two different completion semantics on
+  // the same card. The generic check button is the fallback for insights
+  // the system genuinely can't execute or verify on its own.
+  const hasRealAction = Boolean(insight.action);
 
   return (
     <li
@@ -94,29 +81,13 @@ function InsightRow({
           {insight.impact}
         </p>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        {insight.action ? (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={actionPending}
-            onClick={() =>
-              insight.action?.kind === "approve_goal"
-                ? onApproveGoal(insight.action.targetId)
-                : onRetryJob(insight.action!.targetId)
-            }
-          >
-            {insight.action.kind === "retry_job" ? (
-              <RotateCcw className="h-3.5 w-3.5" />
-            ) : (
-              <CheckCircle2 className="h-3.5 w-3.5" />
-            )}
-            {insight.action.label}
+      <div className="flex shrink-0 flex-wrap items-start gap-1.5">
+        <ActionWorkflowControl insight={insight} />
+        {!hasRealAction ? (
+          <Button variant="ghost" size="sm" title="Marcar como concluída" onClick={() => onComplete(insight.id)}>
+            <Check className="h-3.5 w-3.5" />
           </Button>
         ) : null}
-        <Button variant="ghost" size="sm" title="Marcar como concluída" onClick={() => onComplete(insight.id)}>
-          <Check className="h-3.5 w-3.5" />
-        </Button>
         <Button variant="ghost" size="sm" title="Adiar por 4h" onClick={() => onSnooze(insight.id)}>
           <Clock3 className="h-3.5 w-3.5" />
         </Button>
@@ -130,19 +101,9 @@ function InsightRow({
 
 interface AIOperatorCenterProps {
   insights: OperatorInsight[];
-  onApproveGoal: (goalId: number) => void;
-  approvingGoalId: number | null;
-  onRetryJob: (jobId: number) => void;
-  retryingJobId: number | null;
 }
 
-export function AIOperatorCenter({
-  insights,
-  onApproveGoal,
-  approvingGoalId,
-  onRetryJob,
-  retryingJobId,
-}: AIOperatorCenterProps) {
+export function AIOperatorCenter({ insights }: AIOperatorCenterProps) {
   const { isHidden, dismiss, complete, snooze } = useOperatorInsightState();
 
   // recent_change is history (Timeline's domain, see MEMORY_TIMELINE.md),
@@ -167,15 +128,7 @@ export function AIOperatorCenter({
     items: visible.filter((insight) => insight.bucket === bucket && insight.id !== doNow?.id),
   })).filter((group) => group.items.length > 0);
 
-  const rowProps = {
-    onApproveGoal,
-    approvingGoalId,
-    onRetryJob,
-    retryingJobId,
-    onDismiss: dismiss,
-    onSnooze: snooze,
-    onComplete: complete,
-  };
+  const rowProps = { onDismiss: dismiss, onSnooze: snooze, onComplete: complete };
 
   return (
     <div className="flex flex-col gap-5">

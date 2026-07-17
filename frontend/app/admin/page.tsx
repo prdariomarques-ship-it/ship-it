@@ -151,32 +151,11 @@ export default function AdminDashboardPage() {
     ]
   );
 
-  const [approvingGoalId, setApprovingGoalId] = useState<number | null>(null);
-  const [retryingJobId, setRetryingJobId] = useState<number | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<number | null>(null);
 
-  const approveGoal = useMutation({
-    mutationFn: (goalId: number) => apiFetch(`/goals/${goalId}/approve`, { method: "POST" }),
-    onMutate: (goalId) => setApprovingGoalId(goalId),
-    onSuccess: () => {
-      toast({ title: "Meta aprovada", variant: "success" });
-      queryClient.invalidateQueries({ queryKey: ["goals"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "observation"] });
-    },
-    onError: (error: Error) => toast({ title: "Falha ao aprovar meta", description: error.message, variant: "destructive" }),
-    onSettled: () => setApprovingGoalId(null),
-  });
-
-  const retryJob = useMutation({
-    mutationFn: (jobId: number) => apiFetch(`/admin/jobs/${jobId}/retry`, { method: "POST" }),
-    onMutate: (jobId) => setRetryingJobId(jobId),
-    onSuccess: () => {
-      toast({ title: "Job reenviado para a fila", variant: "success" });
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-    onError: (error: Error) => toast({ title: "Falha ao reenviar job", description: error.message, variant: "destructive" }),
-    onSettled: () => setRetryingJobId(null),
-  });
+  // Approve-goal and retry-job mutations now live in
+  // hooks/use-action-execution.ts, shared with the Operator Center, the
+  // Daily Briefing and the Action Center (Phase 4) — see ACTION_CENTER.md.
 
   const cancelJob = useMutation({
     mutationFn: (jobId: number) => apiFetch(`/admin/jobs/${jobId}/cancel`, { method: "POST" }),
@@ -210,13 +189,7 @@ export default function AdminDashboardPage() {
             calendar.isLoading ? (
               <LoadingRows count={4} />
             ) : (
-              <AIOperatorCenter
-                insights={insights}
-                onApproveGoal={(goalId) => approveGoal.mutate(goalId)}
-                approvingGoalId={approvingGoalId}
-                onRetryJob={(jobId) => retryJob.mutate(jobId)}
-                retryingJobId={retryingJobId}
-              />
+              <AIOperatorCenter insights={insights} />
             )}
           </CardContent>
         </Card>

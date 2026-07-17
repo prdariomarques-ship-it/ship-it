@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Users,
   Wrench,
+  Zap,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ import { cn } from "@/lib/utils";
 const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { href: "/admin/briefing", label: "Briefing Diário", icon: Newspaper },
+  { href: "/admin/action-center", label: "Central de Ações", icon: Zap },
   { href: "/admin/timeline", label: "Timeline", icon: Clock },
   { href: "/admin/agents", label: "Agents", icon: Bot },
   { href: "/admin/tools", label: "Tools", icon: Wrench },

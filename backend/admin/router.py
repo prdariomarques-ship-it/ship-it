@@ -228,6 +228,7 @@ async def admin_tools() -> list[schemas.ToolAdminInfo]:
 async def admin_logs(
     db: DbSession,
     source: str | None = None,
+    source_prefix: str | None = None,
     exclude_source: str | None = None,
     level: str | None = None,
     search: str | None = None,
@@ -255,12 +256,20 @@ async def admin_logs(
     genuinely noteworthy events; the Timeline fetches tick activity
     separately, with its own small limit, purely to report "still observing
     regularly" rather than to enumerate every tick.
+
+    `source_prefix` (added for the Action Center, see ACTION_CENTER.md) is
+    the same "filter before limit, not after" fix as exclude_source, needed
+    because every Action Center execution kind gets its own exact source
+    string (`admin:action.complete_task`, `admin:action.retry_job`, ...) —
+    there is no single exact `source` value that means "every action log".
     """
     statement = (
         select(LogEntry).order_by(LogEntry.id.desc()).limit(limit).offset(offset)
     )
     if source:
         statement = statement.where(LogEntry.source == source)
+    if source_prefix:
+        statement = statement.where(LogEntry.source.startswith(source_prefix))
     if exclude_source:
         statement = statement.where(LogEntry.source != exclude_source)
     if level:
@@ -686,3 +695,53 @@ async def admin_retry_job(
         "status": JobStatus.QUEUED.value,
         "scheduled_at": now.isoformat(),
     }
+
+
+# --- P7: Action Center (Phase 4) ---
+#
+# The Action Center itself performs no new writes here — every action it
+# offers (complete a task, approve a goal, retry a job, create a follow-up
+# task/event) already goes through its existing endpoint (PATCH /tasks/{id},
+# POST /goals/{id}/approve, POST /admin/jobs/{id}/retry, POST /tasks,
+# POST /calendar). This endpoint exists only to answer the one question none
+# of those generic endpoints can: *why* did this write happen, and which
+# recommendation caused it. Same record_log + event_bus pattern already used
+# by job cancel/retry above; the resulting `admin:action.*` log entries flow
+# straight into the existing Timeline (frontend/lib/timeline.ts already
+# categorizes any `admin:`-prefixed source) — no separate history subsystem.
+@router.post(
+    "/actions/log",
+    response_model=schemas.ActionLogRead,
+    summary="Record an Action Center execution for the audit trail",
+    tags=["admin", "actions"],
+)
+async def admin_log_action(
+    payload: schemas.ActionLogCreate,
+    db: DbSession,
+) -> LogEntry:
+    entry = await record_log(
+        db,
+        source=f"admin:action.{payload.action_type}",
+        message=f"Ação executada: {payload.recommendation_title}",
+        level="info" if payload.result == "success" else "warning",
+        payload={
+            "action_type": payload.action_type,
+            "category": payload.category,
+            "recommendation_title": payload.recommendation_title,
+            "result": payload.result,
+            "related_entities": payload.related_entities,
+            "estimated_minutes": payload.estimated_minutes,
+            "detail": payload.detail,
+        },
+    )
+
+    await event_bus.publish(
+        "admin.action_executed",
+        {
+            "action_type": payload.action_type,
+            "category": payload.category,
+            "result": payload.result,
+        },
+    )
+
+    return entry

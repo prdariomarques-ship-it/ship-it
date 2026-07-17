@@ -150,6 +150,14 @@ describe("buildOperatorInsights — missed tasks (urgent bucket)", () => {
     const insights = buildOperatorInsights({ ...baseInput, tasks: [task] });
     expect(insights.find((i) => i.id === "missed-4")).toBeUndefined();
   });
+
+  it("offers a real complete_task action plus a reschedule alternative (Phase 4)", () => {
+    const task = makeTask({ id: 3, due_date: new Date(NOW.getTime() - 3_600_000).toISOString() });
+    const insights = buildOperatorInsights({ ...baseInput, tasks: [task] });
+    const insight = insights.find((i) => i.id === "missed-3");
+    expect(insight?.action).toEqual({ label: "Concluir tarefa", kind: "complete_task", targetId: 3 });
+    expect(insight?.alternativeActions).toEqual([{ label: "Adiar 1 dia", kind: "reschedule_task", targetId: 3 }]);
+  });
 });
 
 describe("buildOperatorInsights — highest priority", () => {
@@ -162,6 +170,16 @@ describe("buildOperatorInsights — highest priority", () => {
 
     expect(insights.find((i) => i.id === "priority-goal-1")?.bucket).toBe("urgent");
     expect(insights.find((i) => i.id === "priority-goal-2")?.bucket).toBe("today");
+  });
+
+  it("offers a schedule_time action with a real draft (Phase 4)", () => {
+    const goal = makeGoal({ id: 1, title: "Minha meta", priority: "urgent" });
+    const insights = buildOperatorInsights({ ...baseInput, readyGoals: [goal] });
+    const action = insights.find((i) => i.id === "priority-goal-1")?.action;
+    expect(action?.kind).toBe("schedule_time");
+    expect(action?.targetId).toBe(1);
+    expect(action?.draft).toBeDefined();
+    expect((action?.draft as { title: string }).title).toContain("Minha meta");
   });
 });
 
@@ -200,6 +218,15 @@ describe("buildOperatorInsights — calendar conflicts", () => {
     const insights = buildOperatorInsights({ ...baseInput, calendarEvents: [a, b] });
     expect(insights.filter((i) => i.category === "calendar_conflict")).toHaveLength(1);
   });
+
+  it("has no executable action but a manualOnlyAction linking to the calendar (Phase 4)", () => {
+    const a = makeEvent({ id: 1, starts_at: "2026-07-17T10:00:00Z", ends_at: "2026-07-17T11:00:00Z" });
+    const b = makeEvent({ id: 2, starts_at: "2026-07-17T10:30:00Z", ends_at: "2026-07-17T11:30:00Z" });
+    const insights = buildOperatorInsights({ ...baseInput, calendarEvents: [a, b] });
+    const conflict = insights.find((i) => i.category === "calendar_conflict");
+    expect(conflict?.action).toBeUndefined();
+    expect(conflict?.manualOnlyAction?.url).toBe("/admin");
+  });
 });
 
 describe("buildOperatorInsights — risk (urgent bucket)", () => {
@@ -231,6 +258,13 @@ describe("buildOperatorInsights — risk (urgent bucket)", () => {
     expect(insight?.reason).toContain("goals, memory");
   });
 
+  it("WhatsApp disconnected and degraded observation are MANUAL_ONLY, not executable (Phase 4)", () => {
+    const context = makeContext({ degraded_sources: ["goals"] });
+    const insights = buildOperatorInsights({ ...baseInput, whatsappConnected: false, context });
+    expect(insights.find((i) => i.id === "risk-whatsapp")?.manualOnlyAction?.url).toBe("/admin/whatsapp");
+    expect(insights.find((i) => i.id === "risk-observation-degraded")?.manualOnlyAction?.url).toBe("/admin");
+  });
+
   it("flags a goal with a 1-day deadline and low progress as urgent", () => {
     const goal = makeGoal({
       id: 7,
@@ -240,6 +274,19 @@ describe("buildOperatorInsights — risk (urgent bucket)", () => {
     });
     const insights = buildOperatorInsights({ ...baseInput, readyGoals: [goal] });
     expect(insights.find((i) => i.id === "risk-goal-7")?.bucket).toBe("urgent");
+  });
+
+  it("offers a create_followup_task action with a real draft for a goal at risk (Phase 4)", () => {
+    const goal = makeGoal({
+      id: 7,
+      title: "Meta arriscada",
+      deadline: new Date(NOW.getTime() + 0.5 * 86_400_000).toISOString(),
+      progress_percent: 20,
+    });
+    const insights = buildOperatorInsights({ ...baseInput, readyGoals: [goal] });
+    const action = insights.find((i) => i.id === "risk-goal-7")?.action;
+    expect(action?.kind).toBe("create_followup_task");
+    expect((action?.draft as { title: string }).title).toContain("Meta arriscada");
   });
 
   it("flags a goal with a 3-day deadline and low progress as today (not urgent yet)", () => {
@@ -268,6 +315,14 @@ describe("buildOperatorInsights — opportunity", () => {
     const goal = makeGoal({ id: 6, title: "Quase pronta", progress_percent: 85 });
     const insights = buildOperatorInsights({ ...baseInput, readyGoals: [goal] });
     expect(insights.find((i) => i.id === "opportunity-goal-6")?.bucket).toBe("opportunity");
+  });
+
+  it("a goal close to completion has no executable action, only a manualOnlyAction (Phase 4)", () => {
+    const goal = makeGoal({ id: 6, title: "Quase pronta", progress_percent: 85 });
+    const insights = buildOperatorInsights({ ...baseInput, readyGoals: [goal] });
+    const insight = insights.find((i) => i.id === "opportunity-goal-6");
+    expect(insight?.action).toBeUndefined();
+    expect(insight?.manualOnlyAction?.url).toBe("/admin");
   });
 
   it("flags a quiet system with no urgent work as an opportunity", () => {

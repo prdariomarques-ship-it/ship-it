@@ -71,6 +71,22 @@ export interface AdminLogEntry {
   created_at: string;
 }
 
+// --- Action Center (Phase 4) — mirrors admin/schemas.py::ActionLogCreate/Read ----
+export interface ActionLogCreate {
+  action_type: string;
+  category: string;
+  recommendation_title: string;
+  result: "success" | "failure";
+  related_entities?: string[];
+  estimated_minutes?: number | null;
+  detail?: string | null;
+}
+
+export interface ActionLogRead {
+  id: number;
+  created_at: string;
+}
+
 export interface GoogleAccountInfo {
   user_id: number;
   label: string;

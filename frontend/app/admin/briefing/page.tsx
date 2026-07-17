@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { Bot, Calendar, ListTodo, MessageCircle, Moon, ShieldAlert, Sparkles, Sun, Sunrise, Target } from "lucide-react";
 
 import { AdminPageHeader } from "@/components/admin/PageHeader";
@@ -28,8 +27,6 @@ import {
   useTasks,
 } from "@/lib/admin-api";
 import { useLastLogin } from "@/hooks/use-last-login";
-import { useToast } from "@/hooks/use-toast";
-import { apiFetch } from "@/hooks/useApi";
 import { buildDailyBriefing } from "@/lib/briefing";
 import type { DayPeriod, ExecutionPlanItem } from "@/lib/briefing";
 import { filterRange } from "@/lib/timeline";
@@ -83,32 +80,9 @@ export default function AdminBriefingPage() {
   const baseRange = filterRange("30d", now);
   const logs = useAdminLogs({ since: baseRange.since?.toISOString(), excludeSource: "job:observation.tick", limit: 1000 });
 
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [approvingGoalId, setApprovingGoalId] = useState<number | null>(null);
-  const [retryingJobId, setRetryingJobId] = useState<number | null>(null);
-
-  const approveGoal = useMutation({
-    mutationFn: (goalId: number) => apiFetch(`/goals/${goalId}/approve`, { method: "POST" }),
-    onMutate: (goalId) => setApprovingGoalId(goalId),
-    onSuccess: () => {
-      toast({ title: "Meta aprovada", variant: "success" });
-      queryClient.invalidateQueries({ queryKey: ["goals"] });
-    },
-    onError: (error: Error) => toast({ title: "Falha ao aprovar meta", description: error.message, variant: "destructive" }),
-    onSettled: () => setApprovingGoalId(null),
-  });
-
-  const retryJob = useMutation({
-    mutationFn: (jobId: number) => apiFetch(`/admin/jobs/${jobId}/retry`, { method: "POST" }),
-    onMutate: (jobId) => setRetryingJobId(jobId),
-    onSuccess: () => {
-      toast({ title: "Job reenviado para a fila", variant: "success" });
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-    onError: (error: Error) => toast({ title: "Falha ao reenviar job", description: error.message, variant: "destructive" }),
-    onSettled: () => setRetryingJobId(null),
-  });
+  // Approve-goal and retry-job mutations now live in
+  // hooks/use-action-execution.ts, shared with the Operator Center and the
+  // Action Center (Phase 4) — see ACTION_CENTER.md.
 
   const isLoading =
     readyGoals.isLoading ||
@@ -223,14 +197,7 @@ export default function AdminBriefingPage() {
                 ) : (
                   <ul className="flex flex-col gap-2">
                     {briefing.topPriorities.map((rec) => (
-                      <BriefingRecommendationCard
-                        key={rec.insight.id}
-                        recommendation={rec}
-                        onApproveGoal={(id) => approveGoal.mutate(id)}
-                        approvingGoalId={approvingGoalId}
-                        onRetryJob={(id) => retryJob.mutate(id)}
-                        retryingJobId={retryingJobId}
-                      />
+                      <BriefingRecommendationCard key={rec.insight.id} recommendation={rec} />
                     ))}
                   </ul>
                 )}
@@ -248,14 +215,7 @@ export default function AdminBriefingPage() {
                 ) : (
                   <ul className="flex flex-col gap-2">
                     {briefing.risks.map((rec) => (
-                      <BriefingRecommendationCard
-                        key={rec.insight.id}
-                        recommendation={rec}
-                        onApproveGoal={(id) => approveGoal.mutate(id)}
-                        approvingGoalId={approvingGoalId}
-                        onRetryJob={(id) => retryJob.mutate(id)}
-                        retryingJobId={retryingJobId}
-                      />
+                      <BriefingRecommendationCard key={rec.insight.id} recommendation={rec} />
                     ))}
                   </ul>
                 )}

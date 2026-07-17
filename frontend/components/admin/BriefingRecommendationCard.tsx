@@ -1,7 +1,7 @@
-import { Bot, RotateCcw, CheckCircle2 } from "lucide-react";
+import { Bot } from "lucide-react";
 
+import { ActionWorkflowControl } from "@/components/admin/ActionWorkflowControl";
 import { Badge } from "@/components/admin/ui/badge";
-import { Button } from "@/components/admin/ui/button";
 import type { BriefingRecommendation } from "@/lib/briefing";
 import type { Severity } from "@/lib/operator";
 
@@ -25,26 +25,10 @@ function estimatedTimeLabel(minutes: number | null): string {
 
 interface BriefingRecommendationCardProps {
   recommendation: BriefingRecommendation;
-  onApproveGoal?: (goalId: number) => void;
-  approvingGoalId?: number | null;
-  onRetryJob?: (jobId: number) => void;
-  retryingJobId?: number | null;
 }
 
-export function BriefingRecommendationCard({
-  recommendation,
-  onApproveGoal,
-  approvingGoalId,
-  onRetryJob,
-  retryingJobId,
-}: BriefingRecommendationCardProps) {
+export function BriefingRecommendationCard({ recommendation }: BriefingRecommendationCardProps) {
   const { insight, whyNow, consequenceIfIgnored } = recommendation;
-  const actionPending =
-    insight.action?.kind === "approve_goal"
-      ? approvingGoalId === insight.action.targetId
-      : insight.action?.kind === "retry_job"
-        ? retryingJobId === insight.action.targetId
-        : false;
 
   return (
     <li className="rounded-md border border-border bg-card p-3">
@@ -70,26 +54,9 @@ export function BriefingRecommendationCard({
         <span className="font-medium text-foreground">Impacto esperado: </span>
         {insight.impact}
       </p>
-      {insight.action && onApproveGoal && onRetryJob ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2"
-          disabled={actionPending}
-          onClick={() =>
-            insight.action?.kind === "approve_goal"
-              ? onApproveGoal(insight.action.targetId)
-              : onRetryJob(insight.action!.targetId)
-          }
-        >
-          {insight.action.kind === "retry_job" ? (
-            <RotateCcw className="h-3.5 w-3.5" />
-          ) : (
-            <CheckCircle2 className="h-3.5 w-3.5" />
-          )}
-          {insight.action.label}
-        </Button>
-      ) : null}
+      <div className="mt-2">
+        <ActionWorkflowControl insight={insight} />
+      </div>
     </li>
   );
 }

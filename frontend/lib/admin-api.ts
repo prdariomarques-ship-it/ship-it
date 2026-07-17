@@ -75,6 +75,7 @@ export function useAdminTools() {
 
 export interface AdminLogsFilters {
   source?: string;
+  sourcePrefix?: string;
   excludeSource?: string;
   level?: string;
   search?: string;
@@ -99,6 +100,7 @@ export function useAdminLogs(filters: AdminLogsFilters) {
       apiFetch<AdminLogEntry[]>(
         `/admin/logs${buildQuery({
           source: filters.source,
+          source_prefix: filters.sourcePrefix,
           exclude_source: filters.excludeSource,
           level: filters.level,
           search: filters.search,

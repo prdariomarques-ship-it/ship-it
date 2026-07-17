@@ -199,6 +199,38 @@ function buildAdminActionEvent(log: AdminLogEntry): TimelineEvent {
   };
 }
 
+// --- Action Center executions (Phase 4) -----------------------------------------------
+/** Every admin:action.* entry is a real execution recorded by
+ * hooks/use-action-execution.ts (see ACTION_CENTER.md) — this is the
+ * "expose history in the existing Timeline instead of a separate history
+ * subsystem" requirement, satisfied entirely by categorizing one more log
+ * source prefix, no new storage. */
+function buildActionCenterEvent(log: AdminLogEntry): TimelineEvent {
+  const p = log.payload as {
+    action_type?: string;
+    recommendation_title?: string;
+    result?: string;
+    related_entities?: string[];
+    detail?: string | null;
+  };
+  const succeeded = p.result !== "failure";
+  return {
+    id: `log-${log.id}`,
+    timestamp: log.created_at,
+    actor: "user",
+    category: "system_events",
+    summary: succeeded
+      ? `Você executou: ${p.recommendation_title ?? log.message}`
+      : `Falha ao executar: ${p.recommendation_title ?? log.message}`,
+    reason: "Ação disparada a partir de uma recomendação no Operador IA / Briefing / Central de Ações.",
+    relatedEntities: p.related_entities ?? [],
+    consequence: succeeded
+      ? "A recomendação foi resolvida diretamente pelo painel, sem passos manuais adicionais."
+      : `A ação falhou${p.detail ? `: ${p.detail}` : ""} — a recomendação continua pendente.`,
+    importance: succeeded ? 40 : 65,
+  };
+}
+
 // --- WhatsApp session/webhook events -------------------------------------------------
 function buildWhatsappInfraEvent(log: AdminLogEntry): TimelineEvent {
   return {
@@ -241,6 +273,7 @@ function buildLogEvents(logs: AdminLogEntry[]): TimelineEvent[] {
     if (log.source.startsWith("goal:")) events.push(buildGoalEvent(log));
     else if (log.source.startsWith("job:")) events.push(buildJobEvent(log, log.source.slice("job:".length)));
     else if (log.source === "cognitive_pipeline") events.push(buildPipelineEvent(log));
+    else if (log.source.startsWith("admin:action.")) events.push(buildActionCenterEvent(log));
     else if (log.source.startsWith("admin:")) events.push(buildAdminActionEvent(log));
     else if (log.source.startsWith("whatsapp:") || log.source === "webhook:whatsapp")
       events.push(buildWhatsappInfraEvent(log));

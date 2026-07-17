@@ -11,6 +11,8 @@ import type {
   JobRead,
   TaskRead,
 } from "@/lib/admin-types";
+import { buildFollowupTaskDraft, buildScheduleTimeDraft } from "@/lib/actions";
+import type { FollowupTaskDraft, ScheduleTimeDraft } from "@/lib/actions";
 
 export type OperatorCategory =
   | "highest_priority"
@@ -37,10 +39,26 @@ export type Severity = "urgent" | "attention" | "info";
  * — see AI_OPERATOR.md "Why these three numbers, not a spectrum". */
 const CONFIDENCE_SCORE: Record<Confidence, number> = { high: 95, medium: 65, low: 35 };
 
+// Every kind here targets one concrete, already-identified entity — the
+// generic "no specific entity, just go look at something" case is handled
+// separately by lib/actions.ts's MANUAL_ONLY fallback, not by this union.
+export type OperatorActionKind =
+  | "approve_goal"
+  | "retry_job"
+  | "complete_task"
+  | "reschedule_task"
+  | "create_followup_task"
+  | "schedule_time";
+
 export interface OperatorAction {
   label: string;
-  kind: "approve_goal" | "retry_job";
+  kind: OperatorActionKind;
   targetId: number;
+  /** Only for kinds that create a new record (create_followup_task,
+   * schedule_time) — the exact content that will be created, computed here
+   * where the real entity (goal) is available, so the UI can show it before
+   * the user confirms instead of re-deriving it from insight.title. */
+  draft?: FollowupTaskDraft | ScheduleTimeDraft;
 }
 
 export interface OperatorInsight {
@@ -60,6 +78,15 @@ export interface OperatorInsight {
   estimatedMinutes: number | null;
   severity: Severity;
   action?: OperatorAction;
+  /** OR-branches of the same workflow (e.g. "Resolve overdue task": mark
+   * completed OR reschedule) — alternatives to `action`, not additional
+   * required steps. See lib/actions.ts's WORKFLOW_STEPS for what each kind
+   * actually does end-to-end. */
+  alternativeActions?: OperatorAction[];
+  /** Set only when the insight has no safe/confirmable action to offer —
+   * the honest MANUAL_ONLY case (see lib/actions.ts): a link to where a
+   * human has to go look, plus why the system won't decide for them. */
+  manualOnlyAction?: { label: string; url: string; reason: string };
 }
 
 export interface OperatorInput {
@@ -239,6 +266,8 @@ export function buildOperatorInsights(input: OperatorInput): OperatorInsight[] {
         confidenceTier: "high",
         estimatedMinutes: null,
         severity: "attention",
+        action: { label: "Concluir tarefa", kind: "complete_task", targetId: task.id },
+        alternativeActions: [{ label: "Adiar 1 dia", kind: "reschedule_task", targetId: task.id }],
       });
     } else if (isDueSoon(task.due_date, now, 48)) {
       insights.push({
@@ -252,6 +281,8 @@ export function buildOperatorInsights(input: OperatorInput): OperatorInsight[] {
         confidenceTier: "high",
         estimatedMinutes: null,
         severity: "info",
+        action: { label: "Concluir tarefa", kind: "complete_task", targetId: task.id },
+        alternativeActions: [{ label: "Adiar 1 dia", kind: "reschedule_task", targetId: task.id }],
       });
     }
   }
@@ -272,6 +303,12 @@ export function buildOperatorInsights(input: OperatorInput): OperatorInsight[] {
       confidenceTier: "high",
       estimatedMinutes: null,
       severity: goal.priority === "urgent" ? "urgent" : "attention",
+      action: {
+        label: "Agendar tempo para isso",
+        kind: "schedule_time",
+        targetId: goal.id,
+        draft: buildScheduleTimeDraft(goal.title, now),
+      },
     });
   }
 
@@ -291,12 +328,27 @@ export function buildOperatorInsights(input: OperatorInput): OperatorInsight[] {
         confidenceTier: "medium",
         estimatedMinutes: null,
         severity: "attention",
+        action: {
+          label: "Criar tarefa de acompanhamento",
+          kind: "create_followup_task",
+          targetId: goal.id,
+          draft: buildFollowupTaskDraft(goal.title, now),
+        },
       });
     }
   }
 
   // --- Today: calendar conflicts ------------------------------------------------
-  insights.push(...findCalendarConflicts(input.calendarEvents));
+  insights.push(
+    ...findCalendarConflicts(input.calendarEvents).map((insight) => ({
+      ...insight,
+      manualOnlyAction: {
+        label: "Abrir agenda",
+        url: "/admin",
+        reason: "Decidir qual compromisso manter (ou remarcar) exige julgamento humano — o sistema não escolhe por você.",
+      },
+    }))
+  );
 
   // --- Urgent: WhatsApp disconnected -----------------------------------------------
   if (input.whatsappConnected === false) {
@@ -311,6 +363,11 @@ export function buildOperatorInsights(input: OperatorInput): OperatorInsight[] {
       confidenceTier: "high",
       estimatedMinutes: 10,
       severity: "urgent",
+      manualOnlyAction: {
+        label: "Abrir WhatsApp",
+        url: "/admin/whatsapp",
+        reason: "Requer escanear o QR code no dispositivo físico conectado — não pode ser feito pelo painel.",
+      },
     });
   }
 
@@ -327,6 +384,11 @@ export function buildOperatorInsights(input: OperatorInput): OperatorInsight[] {
       confidenceTier: "high",
       estimatedMinutes: null,
       severity: "attention",
+      manualOnlyAction: {
+        label: "Abrir painel",
+        url: "/admin",
+        reason: "Uma fonte de observação indisponível é um problema de infraestrutura, não algo que um clique corrige.",
+      },
     });
   }
 
@@ -344,6 +406,11 @@ export function buildOperatorInsights(input: OperatorInput): OperatorInsight[] {
         confidenceTier: "medium",
         estimatedMinutes: null,
         severity: "info",
+        manualOnlyAction: {
+          label: "Abrir meta",
+          url: "/admin",
+          reason: "Terminar a meta exige o trabalho real, não uma ação de um clique.",
+        },
       });
     }
   }

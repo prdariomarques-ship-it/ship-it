@@ -357,6 +357,32 @@ async def test_admin_logs_exclude_source_filters_before_limit_is_applied(
     assert body[0]["source"] == "rare-event"
 
 
+@pytest.mark.asyncio
+async def test_admin_logs_source_prefix_filters_before_limit_is_applied(
+    client, admin_headers, session_factory
+):
+    """Every Action Center execution kind gets its own exact source string
+    (admin:action.complete_task, admin:action.retry_job, ...) — there's no
+    single exact `source` value meaning "every action log", so
+    `source_prefix` has to match several distinct sources at once, and (same
+    crowding-out concern as exclude_source above) apply before `limit`."""
+    async with session_factory() as session:
+        session.add(LogEntry(source="admin:action.complete_task", message="a", payload={}))
+        session.add(LogEntry(source="admin:action.retry_job", message="b", payload={}))
+        for _ in range(5):
+            session.add(LogEntry(source="noisy-source", message="routine", payload={}))
+        await session.commit()
+
+    response = await client.get(
+        "/api/admin/logs",
+        headers=admin_headers,
+        params={"source_prefix": "admin:action.", "limit": 2},
+    )
+    body = response.json()
+    assert len(body) == 2
+    assert {row["source"] for row in body} == {"admin:action.complete_task", "admin:action.retry_job"}
+
+
 # --- /admin/google ----------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_admin_google_never_leaks_the_encrypted_refresh_token(
@@ -1018,3 +1044,128 @@ async def test_admin_observation_reflects_a_seeded_goal(
 
     goal_titles = " ".join(item["content"] for item in response.json()["goals"])
     assert "Meta do painel" in goal_titles
+
+
+# --- /admin/actions/log (Phase 4: Action Center) -----------------------------------
+@pytest.mark.asyncio
+async def test_admin_log_action_success_creates_audit_log(
+    client, admin_headers, session_factory
+):
+    """A successful Action Center execution is persisted with the full
+    recommendation-linkage payload, sourced as admin:action.<type> so it
+    flows straight into the existing Timeline categorization."""
+    response = await client.post(
+        "/api/admin/actions/log",
+        headers=admin_headers,
+        json={
+            "action_type": "complete_task",
+            "category": "missed_task",
+            "recommendation_title": "Tarefa atrasada: Validar backup semanal",
+            "result": "success",
+            "related_entities": ["Validar backup semanal"],
+            "estimated_minutes": 5,
+        },
+    )
+    assert response.status_code == 200
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LogEntry)
+            .where(LogEntry.source == "admin:action.complete_task")
+            .order_by(LogEntry.id.desc())
+        )
+        log = result.scalars().first()
+        assert log is not None
+        assert log.level == "info"
+        assert log.payload["category"] == "missed_task"
+        assert log.payload["result"] == "success"
+        assert log.payload["estimated_minutes"] == 5
+        assert log.payload["related_entities"] == ["Validar backup semanal"]
+
+
+@pytest.mark.asyncio
+async def test_admin_log_action_failure_uses_warning_level(
+    client, admin_headers, session_factory
+):
+    """A failed execution is still recorded — never silently dropped — at
+    warning level so it's visually distinct in the Timeline/logs."""
+    response = await client.post(
+        "/api/admin/actions/log",
+        headers=admin_headers,
+        json={
+            "action_type": "retry_job",
+            "category": "risk",
+            "recommendation_title": "Job falhou: whatsapp.send_text",
+            "result": "failure",
+            "detail": "HTTP 500",
+        },
+    )
+    assert response.status_code == 200
+
+    async with session_factory() as session:
+        result = await session.execute(
+            select(LogEntry)
+            .where(LogEntry.source == "admin:action.retry_job")
+            .order_by(LogEntry.id.desc())
+        )
+        log = result.scalars().first()
+        assert log is not None
+        assert log.level == "warning"
+        assert log.payload["result"] == "failure"
+        assert log.payload["detail"] == "HTTP 500"
+
+
+@pytest.mark.asyncio
+async def test_admin_log_action_appears_via_admin_logs(client, admin_headers):
+    """The whole point of reusing `logs` instead of a new table: an action
+    recorded here must be retrievable through the existing /admin/logs feed
+    (and therefore through the Timeline) with no separate read path."""
+    await client.post(
+        "/api/admin/actions/log",
+        headers=admin_headers,
+        json={
+            "action_type": "approve_goal",
+            "category": "follow_up",
+            "recommendation_title": "Aprovar meta: Migrar WhatsApp",
+            "result": "success",
+        },
+    )
+
+    response = await client.get(
+        "/api/admin/logs",
+        headers=admin_headers,
+        params={"source": "admin:action.approve_goal", "limit": 5},
+    )
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["message"] == "Ação executada: Aprovar meta: Migrar WhatsApp"
+
+
+@pytest.mark.asyncio
+async def test_admin_log_action_requires_authentication(client):
+    response = await client.post(
+        "/api/admin/actions/log",
+        json={
+            "action_type": "complete_task",
+            "category": "missed_task",
+            "recommendation_title": "x",
+            "result": "success",
+        },
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_log_action_requires_admin_role(client, user_headers):
+    response = await client.post(
+        "/api/admin/actions/log",
+        headers=user_headers,
+        json={
+            "action_type": "complete_task",
+            "category": "missed_task",
+            "recommendation_title": "x",
+            "result": "success",
+        },
+    )
+    assert response.status_code == 403

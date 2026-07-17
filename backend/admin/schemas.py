@@ -154,3 +154,25 @@ class AdminIndex(BaseModel):
     google_connected_accounts: int
     whatsapp_connected: bool
     uptime_seconds: float
+
+
+class ActionLogCreate(BaseModel):
+    """One Action Center execution, submitted after the underlying write
+    (task/goal/job/calendar endpoint) has already succeeded or failed —
+    this call only records *why* it happened, it never performs the action
+    itself. See ACTION_CENTER.md."""
+
+    action_type: str
+    category: str
+    recommendation_title: str
+    result: str  # "success" | "failure"
+    related_entities: list[str] = []
+    estimated_minutes: int | None = None
+    detail: str | None = None
+
+
+class ActionLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
