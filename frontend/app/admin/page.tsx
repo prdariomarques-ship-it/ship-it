@@ -19,11 +19,11 @@ import { MetricCard } from "@/components/admin/MetricCard";
 import { MetricChart } from "@/components/admin/charts/MetricChart";
 import { LoadingGrid, LoadingRows } from "@/components/admin/LoadingGrid";
 import { ErrorState } from "@/components/admin/ErrorState";
+import { AIOperatorCenter } from "@/components/admin/AIOperatorCenter";
 import { CurrentContextPanel } from "@/components/admin/CurrentContextPanel";
 import { GoalsPanel } from "@/components/admin/GoalsPanel";
 import { TasksPanel } from "@/components/admin/TasksPanel";
 import { CalendarPanel } from "@/components/admin/CalendarPanel";
-import { SuggestedActionsPanel } from "@/components/admin/SuggestedActionsPanel";
 import { PendingJobsPanel } from "@/components/admin/PendingJobsPanel";
 import { PipelineActivityPanel } from "@/components/admin/PipelineActivityPanel";
 import { LogViewer } from "@/components/admin/LogViewer";
@@ -42,10 +42,12 @@ import {
   useTasks,
 } from "@/lib/admin-api";
 import { useRatePerMinute } from "@/hooks/use-rolling-series";
+import { usePrevious } from "@/hooks/use-previous";
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from "@/hooks/useApi";
 import { sumMetric } from "@/lib/metrics-helpers";
 import { formatNumber, formatUptime } from "@/lib/format";
+import { buildOperatorInsights } from "@/lib/operator";
 
 const FRONTEND_STATUS = {
   name: "frontend",
@@ -109,11 +111,6 @@ export default function AdminDashboardPage() {
       });
   }, [tasks.data]);
 
-  const overdueTasks = useMemo(
-    () => todaysTasks.filter((task) => task.due_date && new Date(task.due_date).getTime() < Date.now()),
-    [todaysTasks]
-  );
-
   const upcomingEvents = useMemo(() => {
     const now = Date.now();
     return (calendar.data ?? [])
@@ -125,6 +122,33 @@ export default function AdminDashboardPage() {
   const pendingJobs = useMemo(
     () => [...(queuedJobs.data ?? []), ...(runningJobs.data ?? [])],
     [queuedJobs.data, runningJobs.data]
+  );
+
+  const previousObservation = usePrevious(observation.data);
+  const insights = useMemo(
+    () =>
+      buildOperatorInsights({
+        readyGoals: readyGoals.data ?? [],
+        awaitingApprovalGoals: awaitingApproval.data ?? [],
+        tasks: tasks.data ?? [],
+        calendarEvents: upcomingEvents,
+        failedJobs: failedJobs.data ?? [],
+        pendingJobs,
+        context: observation.data,
+        previousContext: previousObservation,
+        whatsappConnected: whatsapp.data?.connected,
+      }),
+    [
+      readyGoals.data,
+      awaitingApproval.data,
+      tasks.data,
+      upcomingEvents,
+      failedJobs.data,
+      pendingJobs,
+      observation.data,
+      previousObservation,
+      whatsapp.data?.connected,
+    ]
   );
 
   const [approvingGoalId, setApprovingGoalId] = useState<number | null>(null);
@@ -171,6 +195,32 @@ export default function AdminDashboardPage() {
         title="Dashboard"
         subtitle="Operação do Dario OS inteira, em uma tela: contexto atual, metas, tarefas, agenda, WhatsApp, jobs e atividade do Cognitive Pipeline."
       />
+
+      {/* AI Operator Center: the first thing the user sees — what needs
+          attention, what to do next, what's at risk, what's automatable,
+          every recommendation explained. See AI_OPERATOR.md. */}
+      <section className="mb-8">
+        <h2 className="mb-3 text-sm font-medium text-muted-foreground">Operador IA</h2>
+        <Card>
+          <CardContent className="pt-4">
+            {awaitingApproval.isLoading ||
+            failedJobs.isLoading ||
+            tasks.isLoading ||
+            readyGoals.isLoading ||
+            calendar.isLoading ? (
+              <LoadingRows count={4} />
+            ) : (
+              <AIOperatorCenter
+                insights={insights}
+                onApproveGoal={(goalId) => approveGoal.mutate(goalId)}
+                approvingGoalId={approvingGoalId}
+                onRetryJob={(jobId) => retryJob.mutate(jobId)}
+                retryingJobId={retryingJobId}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </section>
 
       {/* Panel 9: System Health */}
       <section className="mb-8">
@@ -269,29 +319,6 @@ export default function AdminDashboardPage() {
 
       <section className="mb-8">
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Operação</h2>
-
-        {/* Panel 8: AI Suggested Actions — the Action Center */}
-        <Card className="mb-4">
-          <CardHeader>
-            <CardTitle>Ações sugeridas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {awaitingApproval.isLoading || failedJobs.isLoading || tasks.isLoading || readyGoals.isLoading ? (
-              <LoadingRows count={3} />
-            ) : (
-              <SuggestedActionsPanel
-                awaitingApproval={awaitingApproval.data ?? []}
-                failedJobs={failedJobs.data ?? []}
-                overdueTasks={overdueTasks}
-                topReadyGoal={readyGoals.data?.[0] ?? null}
-                onApproveGoal={(goalId) => approveGoal.mutate(goalId)}
-                approvingGoalId={approvingGoalId}
-                onRetryJob={(jobId) => retryJob.mutate(jobId)}
-                retryingJobId={retryingJobId}
-              />
-            )}
-          </CardContent>
-        </Card>
 
         {/* Panel 1: CurrentContext */}
         <Card className="mb-4">
