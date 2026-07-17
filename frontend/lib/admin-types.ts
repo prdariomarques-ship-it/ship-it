@@ -252,3 +252,17 @@ export interface JobRead {
   last_error: string | null;
   created_at: string;
 }
+
+// --- Messages (mirrors api/schemas.py::MessageRead) ---------------------------------
+export type MessageDirection = "inbound" | "outbound";
+
+export interface MessageRead {
+  id: number;
+  contact_id: number;
+  direction: MessageDirection;
+  media_type: string;
+  content: string;
+  external_id: string | null;
+  created_at: string;
+  updated_at: string;
+}

@@ -1,6 +1,6 @@
 """Admin Dashboard API (Sprint 4): read-only, ADMIN-only, never leaks secrets."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -293,6 +293,68 @@ async def test_admin_logs_filters_by_level_and_search(
     body = response.json()
     assert len(body) == 1
     assert body[0]["source"] == "webhook"
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_filters_by_since_and_until(
+    client, admin_headers, session_factory
+):
+    """`since`/`until` — added for the Memory Timeline (docs/MEMORY_TIMELINE.md)
+    — express a real calendar range, unlike the trailing-window `period` on
+    /admin/executions (needed to express "yesterday" as its own day, not
+    "now minus 48h")."""
+    old = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    recent = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+    async with session_factory() as session:
+        session.add_all(
+            [
+                LogEntry(source="old", message="ancient", payload={}, created_at=old),
+                LogEntry(source="fresh", message="recent", payload={}, created_at=recent),
+            ]
+        )
+        await session.commit()
+
+    since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    response = await client.get(
+        "/api/admin/logs", headers=admin_headers, params={"since": since}
+    )
+    sources = {row["source"] for row in response.json()}
+    assert "fresh" in sources
+    assert "old" not in sources
+
+    until = datetime(2020, 6, 1, tzinfo=timezone.utc).isoformat()
+    response = await client.get(
+        "/api/admin/logs", headers=admin_headers, params={"until": until}
+    )
+    sources = {row["source"] for row in response.json()}
+    assert "old" in sources
+    assert "fresh" not in sources
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_exclude_source_filters_before_limit_is_applied(
+    client, admin_headers, session_factory
+):
+    """Regression guard for the Memory Timeline's actual failure mode: a
+    high-volume noisy source (like job:observation.tick) must not be able
+    to crowd a genuinely rare event off the page just by being excluded
+    *after* `limit` truncates the result — `exclude_source` has to apply
+    inside the query itself."""
+    async with session_factory() as session:
+        session.add(LogEntry(source="rare-event", message="the one that matters", payload={}))
+        for _ in range(5):
+            session.add(LogEntry(source="noisy-source", message="routine tick", payload={}))
+        await session.commit()
+
+    response = await client.get(
+        "/api/admin/logs",
+        headers=admin_headers,
+        params={"exclude_source": "noisy-source", "limit": 1},
+    )
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["source"] == "rare-event"
 
 
 # --- /admin/google ----------------------------------------------------------------

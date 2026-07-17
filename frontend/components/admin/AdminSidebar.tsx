@@ -6,6 +6,7 @@ import {
   Activity,
   BarChart3,
   Bot,
+  Clock,
   Database,
   LayoutDashboard,
   MessageCircle,
@@ -21,10 +22,11 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/admin/timeline", label: "Timeline", icon: Clock },
   { href: "/admin/agents", label: "Agents", icon: Bot },
   { href: "/admin/tools", label: "Tools", icon: Wrench },
   { href: "/admin/executions", label: "Executions", icon: Activity },
-  { href: "/admin/memory", label: "Memory", icon: Database },
+  { href: "/admin/memory", label: "Memory (vector)", icon: Database },
   { href: "/admin/google", label: "Google Workspace", icon: ShieldCheck },
   { href: "/admin/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { href: "/admin/users", label: "Users", icon: Users },

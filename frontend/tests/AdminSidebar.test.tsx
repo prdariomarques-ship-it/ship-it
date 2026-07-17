@@ -8,10 +8,10 @@ vi.mock("next/navigation", () => ({
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 
 describe("AdminSidebar", () => {
-  it("renders all 12 menu items required by the spec", () => {
+  it("renders all 13 menu items (12 from the original spec + Timeline, Phase 2)", () => {
     render(<AdminSidebar />);
     const labels = [
-      "Dashboard", "Agents", "Tools", "Executions", "Memory", "Google Workspace",
+      "Dashboard", "Timeline", "Agents", "Tools", "Executions", "Memory (vector)", "Google Workspace",
       "WhatsApp", "Users", "Logs", "Metrics", "System", "Settings",
     ];
     for (const label of labels) {

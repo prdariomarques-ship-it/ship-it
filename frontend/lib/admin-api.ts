@@ -17,6 +17,7 @@ import type {
   JobRead,
   JobStatus,
   MemoryStats,
+  MessageRead,
   MetricsSnapshot,
   SystemInfo,
   TaskRead,
@@ -74,8 +75,11 @@ export function useAdminTools() {
 
 export interface AdminLogsFilters {
   source?: string;
+  excludeSource?: string;
   level?: string;
   search?: string;
+  since?: string;
+  until?: string;
   limit?: number;
 }
 
@@ -93,7 +97,15 @@ export function useAdminLogs(filters: AdminLogsFilters) {
     queryKey: ["admin", "logs", filters],
     queryFn: () =>
       apiFetch<AdminLogEntry[]>(
-        `/admin/logs${buildQuery({ source: filters.source, level: filters.level, search: filters.search, limit: filters.limit ?? 100 })}`
+        `/admin/logs${buildQuery({
+          source: filters.source,
+          exclude_source: filters.excludeSource,
+          level: filters.level,
+          search: filters.search,
+          since: filters.since,
+          until: filters.until,
+          limit: filters.limit ?? 100,
+        })}`
       ),
     refetchInterval: NORMAL_INTERVAL_MS,
   });
@@ -205,5 +217,27 @@ export function useJobsByStatus(status: JobStatus) {
     queryKey: ["jobs", status],
     queryFn: () => apiFetch<JobRead[]>(`/jobs?status=${status}&limit=50`),
     refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
+
+// --- Memory & Timeline (Phase 2): reuses /messages (existing) and the
+// since/until extension to /admin/logs (the one backend change this phase
+// needed) — see MEMORY_TIMELINE.md.
+
+export function useRecentMessages(limit = 200) {
+  return useQuery({
+    queryKey: ["messages", limit],
+    queryFn: () => apiFetch<MessageRead[]>(`/messages?limit=${limit}`),
+    refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+/** Every goal regardless of status (not just `ready`) — the Timeline needs
+ * completed/cancelled goals too, unlike the Operator Center's ready-only view. */
+export function useAllGoals() {
+  return useQuery({
+    queryKey: ["goals", "all"],
+    queryFn: () => apiFetch<GoalRead[]>("/goals?limit=200"),
+    refetchInterval: NORMAL_INTERVAL_MS,
   });
 }

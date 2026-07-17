@@ -228,20 +228,49 @@ async def admin_tools() -> list[schemas.ToolAdminInfo]:
 async def admin_logs(
     db: DbSession,
     source: str | None = None,
+    exclude_source: str | None = None,
     level: str | None = None,
     search: str | None = None,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[dict]:
+    """`since`/`until` (added for the Memory Timeline, see
+    docs/MEMORY_TIMELINE.md) mirror the date-range idea `/admin/executions`
+    already established with `period` — a real range instead of a fixed
+    trailing window, since a calendar day like "yesterday" can't be
+    expressed as "now minus a timedelta". The 1000-row ceiling (up from 200)
+    exists because a 30-day/"everything" Timeline view needs enough raw
+    rows for the frontend's curation logic to filter down from — see
+    frontend/lib/timeline.ts, which is where the actual "what's noteworthy"
+    judgment lives, not here.
+
+    `exclude_source` (also added for the Timeline) filters *before* the
+    `limit` is applied — required, not cosmetic: `observation.tick` writes
+    two rows every few minutes, so a naive "most recent N rows" fetch lets
+    that routine noise crowd out real events (a goal created a day ago can
+    fall off a 1000-row page entirely once enough ticks have run since).
+    Excluding it at the query level means the row budget is spent on
+    genuinely noteworthy events; the Timeline fetches tick activity
+    separately, with its own small limit, purely to report "still observing
+    regularly" rather than to enumerate every tick.
+    """
     statement = (
         select(LogEntry).order_by(LogEntry.id.desc()).limit(limit).offset(offset)
     )
     if source:
         statement = statement.where(LogEntry.source == source)
+    if exclude_source:
+        statement = statement.where(LogEntry.source != exclude_source)
     if level:
         statement = statement.where(LogEntry.level == level)
     if search:
         statement = statement.where(LogEntry.message.ilike(f"%{search}%"))
+    if since:
+        statement = statement.where(LogEntry.created_at >= since)
+    if until:
+        statement = statement.where(LogEntry.created_at < until)
     rows = (await db.execute(statement)).scalars().all()
     return [
         {
