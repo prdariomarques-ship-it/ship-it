@@ -95,11 +95,33 @@ async def list_messages(
     contact_id: int | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[Message]:
+) -> list[schemas.MessageRead]:
     statement = select(Message).order_by(Message.id.desc()).limit(limit).offset(offset)
     if contact_id is not None:
         statement = statement.where(Message.contact_id == contact_id)
-    return list((await db.execute(statement)).scalars().all())
+    messages = list((await db.execute(statement)).scalars().all())
+
+    # One extra query for the distinct contacts involved, instead of a join
+    # or per-row lazy-load (which would need selectinload in this async
+    # setup anyway) — simplest way to attach a name/phone to each message.
+    contact_ids = {m.contact_id for m in messages}
+    contacts_by_id = {}
+    if contact_ids:
+        contacts = (
+            (await db.execute(select(Contact).where(Contact.id.in_(contact_ids))))
+            .scalars()
+            .all()
+        )
+        contacts_by_id = {c.id: c for c in contacts}
+
+    result = []
+    for m in messages:
+        contact = contacts_by_id.get(m.contact_id)
+        read = schemas.MessageRead.model_validate(m)
+        read.contact_name = contact.name if contact else None
+        read.contact_phone = contact.phone if contact else None
+        result.append(read)
+    return result
 
 
 # --- Logs (read-only, admin) ------------------------------------------------

@@ -1,13 +1,56 @@
+"use client";
+
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    <div className="admin-scroll w-full overflow-auto">
-      <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
-    </div>
-  )
+  ({ className, ...props }, ref) => {
+    const scrollRef = React.useRef<HTMLDivElement | null>(null);
+    const tableRef = React.useRef<HTMLTableElement | null>(null);
+    const [canScroll, setCanScroll] = React.useState(false);
+
+    const setTableRefs = React.useCallback(
+      (node: HTMLTableElement | null) => {
+        tableRef.current = node;
+        if (typeof ref === "function") ref(node);
+        else if (ref) ref.current = node;
+      },
+      [ref]
+    );
+
+    React.useEffect(() => {
+      const wrapper = scrollRef.current;
+      const table = tableRef.current;
+      if (!wrapper || !table) return;
+      const check = () => setCanScroll(wrapper.scrollWidth > wrapper.clientWidth);
+      check();
+      // Observe the <table> itself, not the overflow:auto wrapper — the
+      // wrapper's own box never changes size (it's the table's *content*
+      // that grows wider once rows populate), so a ResizeObserver on the
+      // wrapper never fired and the hint never appeared after data loaded.
+      const observer = new ResizeObserver(check);
+      observer.observe(table);
+      return () => observer.disconnect();
+    }, []);
+
+    return (
+      <div>
+        <div className="admin-scroll w-full overflow-auto" ref={scrollRef}>
+          <table ref={setTableRefs} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+        </div>
+        {/* The table already scrolled horizontally without this — nothing
+            hinted that it could, so narrow screens just saw truncated
+            columns (confirmed in HOMOLOGATION_REPORT_v1.3.1.md). Only shown
+            when the table is actually wider than its container. */}
+        {canScroll && (
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            ← arraste para o lado para ver mais →
+          </p>
+        )}
+      </div>
+    );
+  }
 );
 Table.displayName = "Table";
 

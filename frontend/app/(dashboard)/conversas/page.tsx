@@ -14,7 +14,12 @@ export default function ConversasPage() {
         path="/messages"
         columns={[
           { key: "id", label: "#" },
-          { key: "contact_id", label: "Contato" },
+          {
+            key: "contact_name",
+            label: "Contato",
+            render: (value, row) =>
+              (value as string | null) ?? (row.contact_phone as string | null) ?? `#${row.contact_id}`,
+          },
           {
             key: "direction",
             label: "Direção",

@@ -63,6 +63,11 @@ class ContactRead(_Read):
 # --- Messages -------------------------------------------------------------
 class MessageRead(_Read):
     contact_id: int
+    # Denormalized from Contact at query time (see list_messages) — the UI
+    # showed the raw contact_id otherwise, with no way to tell who a
+    # conversation was actually with without a separate lookup.
+    contact_name: str | None = None
+    contact_phone: str | None = None
     direction: MessageDirection
     media_type: MessageMediaType
     content: str

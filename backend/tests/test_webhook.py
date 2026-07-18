@@ -29,6 +29,10 @@ async def test_whatsapp_webhook_stores_message_and_contact(client, auth_headers)
     messages = await client.get("/api/messages", headers=auth_headers)
     assert messages.json()[0]["content"] == "Olá, tudo bem?"
     assert messages.json()[0]["direction"] == "inbound"
+    # Regression: this used to be missing, forcing the UI to show the raw
+    # numeric contact_id instead of who the conversation was actually with.
+    assert messages.json()[0]["contact_name"] == "João"
+    assert messages.json()[0]["contact_phone"] == "5511988887777"
 
 
 @pytest.mark.asyncio
