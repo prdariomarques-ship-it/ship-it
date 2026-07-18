@@ -1,5 +1,6 @@
 from observability.health import router as health_router
 from observability.metrics import metrics_middleware, metrics_router
+from observability.version import router as version_router
 from observability.request_context import (
     RequestIDMiddleware,
     get_request_id,
@@ -37,6 +38,7 @@ __all__ = [
     "health_router",
     "metrics_middleware",
     "metrics_router",
+    "version_router",
     "RequestIDMiddleware",
     "get_request_id",
     "get_trace_id",

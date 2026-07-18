@@ -48,6 +48,7 @@ from observability import (
     metrics_middleware,
     metrics_router,
     setup_tracing,
+    version_router,
 )
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
@@ -219,6 +220,7 @@ def create_app() -> FastAPI:
     app.include_router(metrics_router)
 
     prefix = settings.api_prefix
+    app.include_router(version_router, prefix=prefix)
     app.include_router(auth_router, prefix=prefix)
     app.include_router(chat_router, prefix=prefix)
     app.include_router(memory_router, prefix=prefix)
