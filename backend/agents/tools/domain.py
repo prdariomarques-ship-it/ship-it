@@ -4,6 +4,7 @@ from agents.tools.base import Tool, ToolContext, ok
 from models.store import StoreCustomer
 from repositories.base import SQLAlchemyRepository
 from repositories.church import ChurchMemberRepository
+from services.validation import validate_email, validate_phone_e164
 
 
 class _StoreRepo(SQLAlchemyRepository[StoreCustomer]):
@@ -55,6 +56,10 @@ async def _list_store_customers(context: ToolContext) -> str:
 async def _add_store_customer(
     context: ToolContext, name: str, phone: str | None = None, email: str | None = None
 ) -> str:
+    if phone is not None and not validate_phone_e164(phone):
+        raise ValueError("phone must be in E.164 format, e.g. +5511987654321")
+    if email is not None and not validate_email(email):
+        raise ValueError("email is not a valid address")
     customer = await _StoreRepo(context.db).create(name=name, phone=phone, email=email)
     return ok(customer_id=customer.id, name=customer.name)
 

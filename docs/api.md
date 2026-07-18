@@ -94,8 +94,9 @@ As sete ferramentas (`list_google_drive_files`, `search_google_drive_files`, `re
 | POST | `/api/workflows/{name}/trigger` | Dispara um workflow do n8n |
 | GET | `/api/jobs` | Lista jobs da fila (admin; filtro `?status=`) |
 | POST | `/api/jobs` | Enfileira job (`{name, payload, delay_seconds, max_attempts}`) (admin) |
-| POST | `/api/jobs/{id}/cancel` | Cancela job pendente (admin) |
 | GET | `/api/jobs/handlers` | Handlers registrados (admin) |
+| POST | `/api/admin/jobs/{id}/cancel` | Cancela job `QUEUED`/`RUNNING` (admin; lock atômico, log de auditoria, evento `admin.job_cancelled`) |
+| POST | `/api/admin/jobs/{id}/retry` | Reenfileira job `FAILED`/`CANCELLED` (admin) |
 
 ## Recursos (CRUD)
 

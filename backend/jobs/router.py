@@ -1,4 +1,10 @@
-"""Job queue management endpoints (admin only)."""
+"""Job queue management endpoints (admin only).
+
+Cancel/retry with the full state-transition guards (row lock, audit log,
+event publish) live under `admin/router.py` (`POST /admin/jobs/{id}/cancel`,
+`POST /admin/jobs/{id}/retry`) — that's what the dashboard calls. This router
+covers listing, enqueueing, and introspecting registered handlers.
+"""
 
 from datetime import datetime
 from typing import Annotated
@@ -73,19 +79,3 @@ async def enqueue_job(payload: JobCreate, db: DbSession) -> Job:
         delay_seconds=payload.delay_seconds,
         max_attempts=payload.max_attempts,
     )
-
-
-@router.post("/{job_id}/cancel", response_model=JobRead)
-async def cancel_job(job_id: int, db: DbSession) -> Job:
-    repository = JobRepository(db)
-    job = await repository.get(job_id)
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Job not found"
-        )
-    if job.status not in (JobStatus.QUEUED, JobStatus.RUNNING):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Job is already {job.status.value}",
-        )
-    return await repository.update(job, status=JobStatus.CANCELLED)

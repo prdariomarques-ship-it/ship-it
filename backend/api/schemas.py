@@ -2,10 +2,11 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from models.message import MessageDirection, MessageMediaType
 from models.task import TaskPriority, TaskStatus
+from services.validation import validate_phone_e164
 
 
 class _Read(BaseModel):
@@ -16,8 +17,22 @@ class _Read(BaseModel):
     updated_at: datetime
 
 
+class _PhoneValidated:
+    """Enforces E.164 on any `phone` field (manually-entered data only —
+    WhatsApp-sourced contacts are created straight from the repository,
+    bypassing these schemas, so this never touches webhook-ingested numbers).
+    """
+
+    @field_validator("phone")
+    @classmethod
+    def _validate_phone(cls, value: str | None) -> str | None:
+        if value is not None and not validate_phone_e164(value):
+            raise ValueError("phone must be in E.164 format, e.g. +5511987654321")
+        return value
+
+
 # --- Contacts -------------------------------------------------------------
-class ContactCreate(BaseModel):
+class ContactCreate(_PhoneValidated, BaseModel):
     name: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     categories: list[str] = []
@@ -26,7 +41,7 @@ class ContactCreate(BaseModel):
     tags: list[str] = []
 
 
-class ContactUpdate(BaseModel):
+class ContactUpdate(_PhoneValidated, BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     categories: list[str] | None = None
@@ -130,7 +145,7 @@ class NoteRead(_Read):
 
 
 # --- Church -----------------------------------------------------------------
-class ChurchMemberCreate(BaseModel):
+class ChurchMemberCreate(_PhoneValidated, BaseModel):
     name: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     role: str | None = Field(default=None, max_length=100)
@@ -139,7 +154,7 @@ class ChurchMemberCreate(BaseModel):
     notes: str | None = None
 
 
-class ChurchMemberUpdate(BaseModel):
+class ChurchMemberUpdate(_PhoneValidated, BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     role: str | None = Field(default=None, max_length=100)
@@ -158,7 +173,7 @@ class ChurchMemberRead(_Read):
 
 
 # --- Store ------------------------------------------------------------------
-class StoreCustomerCreate(BaseModel):
+class StoreCustomerCreate(_PhoneValidated, BaseModel):
     name: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     email: EmailStr | None = None
@@ -166,7 +181,7 @@ class StoreCustomerCreate(BaseModel):
     notes: str | None = None
 
 
-class StoreCustomerUpdate(BaseModel):
+class StoreCustomerUpdate(_PhoneValidated, BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     email: EmailStr | None = None

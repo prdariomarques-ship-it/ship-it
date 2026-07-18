@@ -222,7 +222,7 @@ async def test_worker_loop_survives_a_failing_tick(worker, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_jobs_api_enqueue_and_cancel(client, auth_headers):
+async def test_jobs_api_enqueue(client, auth_headers):
     @job_handler("test.api")
     async def _api(db, payload):
         pass
@@ -240,6 +240,6 @@ async def test_jobs_api_enqueue_and_cancel(client, auth_headers):
     )
     assert unknown.status_code == 422
 
-    cancelled = await client.post(f"/api/jobs/{job_id}/cancel", headers=auth_headers)
-    assert cancelled.status_code == 200
-    assert cancelled.json()["status"] == "cancelled"
+    listed = await client.get("/api/jobs", headers=auth_headers)
+    assert listed.status_code == 200
+    assert any(job["id"] == job_id for job in listed.json())
