@@ -83,6 +83,67 @@ testes E2E.
 
 ----------------------------------------
 
+## v1.3.0 — 2026-07-18 (tag em `d64b8be`)
+
+**AI Operator Center, Memory & Timeline, Daily Briefing, Action Center**
+
+Ciclo de produto construído sobre a v1.2.0, sem infraestrutura nova, sem
+LLM no caminho crítico, sem novas fontes de dado:
+
+1. **AI Operator Center** (`/admin`).
+2. **Memory & Timeline** (`/admin/timeline`).
+3. **Daily Briefing** (`/admin/briefing`).
+4. **Action Center** (`/admin/action-center`).
+
+Passou por Release Candidate (`v1.3.0-rc1`, 2026-07-17) e auditoria de
+estabilização (`RC1_AUDIT.md`, prontidão 82%) antes do GA. A auditoria
+encontrou 1 achado Crítico (sidebar do admin sem responsividade mobile em
+~375px) — corrigido e deployado no mesmo dia (prontidão 90% após o fix).
+5 bugs reais corrigidos ao longo do ciclo (eviction de log do
+`observation.tick`, evento "updated" do calendário nunca aparecendo, bug
+de timezone no briefing, corrida no Action Center, mais duas duplicações
+pegas na própria auditoria). 886 testes de backend, 240 de frontend,
+100% passando.
+
+Ver `RC1_AUDIT.md`, `RELEASE_NOTES.md`, `CHANGELOG.md`,
+`RC1_RELEASE_REPORT.md`.
+
+----------------------------------------
+
+## v1.3.1 — 2026-07-18
+
+**Patch: resolução dos achados Medium do RC1_AUDIT.md**
+
+A auditoria da v1.3.0 tinha deixado 2 achados Medium marcados
+explicitamente como "precisam de decisão de produto, não fix mecânico":
+
+- `services/validation.py` tinha 4 funções sem nenhum chamador
+  (`validate_url`, `validate_file_path`, `validate_email`,
+  `validate_phone_e164`). Investigação confirmou que as duas primeiras não
+  têm superfície de entrada real em lugar nenhum do backend — removidas.
+  As outras duas tinham uma lacuna real
+  (`agents/tools/domain.py::_add_store_customer`, uma tool de agente que
+  gravava e-mail/telefone extraído do WhatsApp sem validação nenhuma) —
+  agora plugadas ali, além do campo `phone` em `Contact`/`ChurchMember`/
+  `StoreCustomer`. No processo, `validate_phone_e164` foi corrigida para
+  aceitar telefone com ou sem `+` — a versão original exigia `+`
+  obrigatório, incompatível com a convenção real do produto (WhatsApp
+  chega sem `+`, confirmado por um teste já existente).
+- `jobs/router.py` tinha 3 endpoints sem chamador no frontend. Dois são
+  superfície de automação admin intencional (documentada em `docs/api.md`)
+  — mantidos. O terceiro, `POST /jobs/{id}/cancel`, era uma duplicata
+  **inferior** de `POST /admin/jobs/{id}/cancel` (o que o dashboard de
+  fato usa) — sem lock de linha, sem log de auditoria, sem evento. Risco
+  latente, não só código morto — removido.
+
+864 testes de backend passando (queda de 886 pela remoção dos 21 testes
+das funções mortas, não regressão), lint limpo, sem migração de banco, sem
+mudança de frontend.
+
+Ver `RELEASE_READINESS.md`, `CURRENT_PROJECT_STATE.md`.
+
+----------------------------------------
+
 ## Convenção de versionamento
 
 O projeto segue [SemVer](https://semver.org/lang/pt-BR/) informalmente:
