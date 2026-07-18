@@ -344,10 +344,19 @@ async def admin_memory(db: DbSession) -> schemas.MemoryStats:
     )
     try:
         info = await memory_service.client.get_collection(settings.qdrant_collection)
+        # `indexed_vectors_count` is how many vectors Qdrant has promoted into
+        # its HNSW approximate-search index — it stays 0 below the
+        # collection's `indexing_threshold` (10k points here) even though
+        # every point already has its vector and is fully searchable via
+        # brute force. Using it as "how many vectors exist" made this look
+        # broken on a real, healthy, small collection (88 points, 0
+        # "indexed" — confirmed directly against a live collection). This
+        # schema is single-vector-per-point (no named vectors), so
+        # `points_count` *is* the vector count a user actually means.
         collection_stats = schemas.MemoryCollectionStats(
             name=settings.qdrant_collection,
             points_count=info.points_count,
-            vectors_count=info.indexed_vectors_count,
+            vectors_count=info.points_count,
             status=info.status.value if info.status is not None else None,
         )
     except Exception:  # noqa: BLE001 - collection may not exist yet on a fresh install

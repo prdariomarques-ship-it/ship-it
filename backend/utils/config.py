@@ -4,6 +4,16 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from utils.version_file import read_version_file
+
+# VERSION.json is the release process's single source of truth (see
+# RC1_AUDIT.md / RELEASE_NOTES.md) — app_version used to be a hardcoded
+# literal here, drifting out of sync with the actual tagged release the
+# moment a new one shipped (confirmed live: showed "0.2.1" while the repo
+# was on v1.3.1). Reports "unknown" rather than a fabricated number when no
+# VERSION.json exists (e.g. running from source without a release build).
+_APP_VERSION_DEFAULT = read_version_file().get("version", "unknown")
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -12,7 +22,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "Dario OS"
-    app_version: str = "0.2.1"
+    app_version: str = _APP_VERSION_DEFAULT
     environment: str = "development"
     api_prefix: str = "/api"
     log_json: bool = False  # structured JSON logs (recommended in production)

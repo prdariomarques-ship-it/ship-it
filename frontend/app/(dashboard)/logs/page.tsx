@@ -1,26 +1,12 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import PageHeader from "@/components/PageHeader";
-import ResourceTable from "@/components/ResourceTable";
-
+// This page and /admin/logs served the exact same admin-only LogEntry data
+// (both endpoints require the same admin role, no user-scoping) with very
+// different capability: this one had no filter and no pagination beyond a
+// fixed limit=50, so it showed nothing but back-to-back job:observation.tick
+// noise. Rather than duplicate /admin/logs's filter+search UI a second time,
+// redirect here — anyone with this URL bookmarked still lands somewhere
+// useful instead of the inferior duplicate.
 export default function LogsPage() {
-  return (
-    <>
-      <PageHeader title="Logs" subtitle="Auditoria de eventos do sistema." />
-      <ResourceTable
-        path="/logs"
-        columns={[
-          { key: "created_at", label: "Data" },
-          {
-            key: "level",
-            label: "Nível",
-            render: (value) => <span className="badge">{String(value)}</span>,
-          },
-          { key: "source", label: "Origem" },
-          { key: "message", label: "Mensagem" },
-        ]}
-        emptyMessage="Nenhum log registrado."
-      />
-    </>
-  );
+  redirect("/admin/logs");
 }

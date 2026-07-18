@@ -1,6 +1,7 @@
 """Admin Dashboard API (Sprint 4): read-only, ADMIN-only, never leaks secrets."""
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -454,6 +455,32 @@ async def test_admin_memory_counts_embeddings_by_source(
     assert body["embeddings_total"] == 3
     assert body["embeddings_by_source"] == {"whatsapp": 2, "knowledge": 1}
     assert body["cache_backend"] in ("redis", "in-memory (fallback)")
+
+
+@pytest.mark.asyncio
+async def test_admin_memory_vectors_count_matches_points_not_indexed_subset(
+    client, admin_headers
+):
+    """Regression: `vectors_count` used to read Qdrant's `indexed_vectors_count`
+    (vectors promoted into the HNSW index — stays 0 below the collection's
+    indexing_threshold even when every point is fully searchable via brute
+    force), making the dashboard show contradictory numbers for the same
+    collection (confirmed live: 88 points, 0 "indexed"). It must read
+    `points_count` instead, since this collection has no named/multi-vectors
+    — one point is one vector."""
+    fake_info = MagicMock(points_count=88, indexed_vectors_count=0)
+    fake_info.status.value = "green"
+
+    from memory.service import memory_service
+
+    with patch.object(
+        memory_service, "_client", MagicMock(get_collection=AsyncMock(return_value=fake_info))
+    ):
+        response = await client.get("/api/admin/memory", headers=admin_headers)
+
+    body = response.json()
+    assert body["collection"]["points_count"] == 88
+    assert body["collection"]["vectors_count"] == 88
 
 
 # --- /admin/executions ------------------------------------------------------------
