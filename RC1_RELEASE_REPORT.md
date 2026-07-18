@@ -56,11 +56,17 @@ Carried over from `KNOWN_LIMITATIONS.md` (unchanged by this cycle — none of th
 
 ## Deployment status
 
-**Not deployed to production.** This RC was validated against an isolated demo environment (SQLite, seeded data, ports 8010/3300) — the production containers (`darioos-backend-1`, `darioos-frontend-1`) have not been rebuilt or restarted as part of this release. The tag and `VERSION.json` exist so a deploy can happen deliberately, on request, rather than as a side effect of tagging. `VERSION.json` is bundled into the backend image on the next `docker compose build backend` (already `COPY`-ed via the existing `COPY . .` in `backend/Dockerfile` — no Dockerfile change needed).
+**Deployed to production** on 2026-07-18 (`docker compose build backend frontend` + `docker compose up -d backend frontend`, from `docker/docker-compose.yml`, which builds directly from this repo's `backend/`/`frontend/` — no separate deploy clone). Migrations checked before deploy: zero new Alembic revisions since the previously-running build, confirmed via file mtimes; `alembic upgrade head` ran as part of container start with nothing to apply. Post-deploy verification, all through the real Caddy-fronted domain (`https://localhost`, self-signed HTTPS):
+
+- `GET /health` → `200 {"status":"ok",...}`
+- `GET /api/version` → `200`, reports `"version": "1.3.0-rc1"`, `"commit": "bfa84f92283676e6ecbccd1f078fa62af135e49d"`, `"environment": "production"`
+- `/admin`, `/admin/timeline`, `/admin/briefing`, `/admin/action-center` → all `200` (unauthenticated shell load — full authenticated interaction was not re-tested against real production data, on purpose, since this cycle's features include the Action Center's real write actions and production is not a safe place to exercise those for a smoke test)
+- Both containers healthy 3+ minutes post-restart, zero errors/exceptions in backend or frontend logs
+- No other services touched (`postgres`, `redis`, `qdrant`, `openwa`, `caddy`, `n8n`, `jaeger`, `prometheus`, `alertmanager`, `grafana` were not rebuilt or restarted)
 
 ## Rollback instructions
 
-Since nothing was deployed, there is nothing to roll back yet. For when this RC (or the eventual v1.3.0 GA) does get deployed:
+If this deployment needs to be reverted:
 
 1. **Fastest rollback — redeploy the previous tag:**
    ```bash
