@@ -2,6 +2,36 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [1.3.0-rc1] - 2026-07-17
+
+AI Operator Center, Memory & Timeline, Daily Briefing, Action Center — o dashboard deixa de ser um painel de leitura e passa a responder "o que eu devo fazer agora?" e a executar a resposta. Sem alteração de arquitetura backend além do estritamente necessário para cada funcionalidade (ver justificativa de cada endpoint novo abaixo). Auditoria de release: `RC1_AUDIT.md`.
+
+### Adicionado
+
+- **AI Operator Center** (`/admin`, seção topo): sintetiza metas, tarefas, agenda, jobs e o Contexto Atual em recomendações agrupadas por urgência (🔥 urgente / ⚠️ hoje / 💡 oportunidade / 🤖 automação), cada uma com motivo, confiança (tiers fixos 95/65/35, nunca uma probabilidade inventada), impacto esperado e tempo estimado. Zero chamada a LLM no caminho crítico — cada insight é uma regra determinística sobre dados reais. Detalhes: `AI_OPERATOR.md`.
+- **Memory & Timeline** (`/admin/timeline`): transforma o log de auditoria bruto em memória operacional — oito seções por assunto (conversas, metas, tarefas, agenda, WhatsApp, decisões da IA, eventos do sistema, Observation Engine), cada evento com por-quê, consequência e entidades relacionadas. Filtros por dia-calendário real (Hoje/Ontem/7 dias/30 dias/Tudo — não uma janela de 48h fixa) e "o que mudou desde ontem/desde meu último login". Corrige um bug real de produção: `job:observation.tick` (2 linhas a cada poucos minutos) podia expulsar eventos raros de uma página de 1000 linhas antes mesmo de chegar ao frontend — `exclude_source` em `/admin/logs` agora filtra na query, não depois do `limit`. Detalhes: `MEMORY_TIMELINE.md`.
+- **Daily Briefing** (`/admin/briefing`): briefing executivo narrativo — parágrafo de abertura, resumo executivo, prioridades/riscos/oportunidades com "por que agora"/"consequência se ignorado", plano de execução Manhã/Tarde/Noite (sugestão por urgência, nunca uma agenda imposta), saúde do dia (0-100, fórmula de 6 fatores totalmente auditável na própria UI). Detalhes: `DAILY_BRIEFING.md`.
+- **Action Center** (`/admin/action-center`): toda recomendação agora expõe um workflow executável de verdade — concluir/adiar tarefa, aprovar meta, reenviar job falhado, criar tarefa de acompanhamento, agendar tempo na agenda — cada um classificado `SAFE_AUTOMATIC` (um clique), `REQUIRES_CONFIRMATION` (dois cliques, com **Action Preview**: o que vai acontecer, o que é afetado, se pode ser desfeito, tempo estimado, efeitos colaterais, confiança de execução) ou `MANUAL_ONLY` (link + explicação de por que o sistema não decide sozinho). Automation Score (ações concluídas hoje, minutos economizados, confirmações pendentes) derivado só de execuções reais registradas, nunca de estimativa sem evidência. Histórico de execução exposto na Timeline já existente, sem subsistema novo. Detalhes: `ACTION_CENTER.md`.
+- `POST /admin/actions/log`: registra a execução de uma ação do Action Center no mesmo `logs`/Event Bus já usado por `admin_cancel_job`/`admin_retry_job` — nenhuma tabela nova.
+- `source_prefix` em `GET /admin/logs`: necessário porque cada tipo de ação grava sob sua própria fonte exata (`admin:action.complete_task`, `admin:action.retry_job`, ...) — não existe um único `source` que signifique "todo log de ação".
+- `since`/`until`/`exclude_source` em `GET /admin/logs` (Memory & Timeline).
+
+### Corrigido
+
+- `_TaskRepo` duplicado byte-a-byte de `repositories/task.py::TaskRepository` em `agents/tools/productivity.py` — mesma classe de duplicação já corrigida uma vez para outros dois arquivos, esta terceira ocorrência havia passado despercebida.
+- Quatro pontos reimplementando `new Date(iso).toLocaleString("pt-BR")` em vez do já existente `lib/format.ts::formatDateTime` (que também adiciona proteção contra null) — consolidados.
+- Race condition no Action Center: o Automation Score e a lista "Concluídas" podiam mostrar dado desatualizado logo após uma ação bem-sucedida, porque a invalidação de `admin.logs` disparava antes do registro de auditoria (deliberadamente fire-and-forget) realmente ter sido gravado. Corrigido encadeando a invalidação na promise da própria escrita.
+- Bug de fuso horário no plano de execução do Daily Briefing: `periodForHour` usava `.getHours()` (hora local) em vez de `.getUTCHours()`, inconsistente com todo o resto do código (`lib/timeline.ts`).
+- `buildCalendarEvents` do Timeline sempre tratava `since === undefined` como "sempre criado, nunca atualizado" — a visão "Tudo" nunca conseguia mostrar um evento atualizado, não importa o quão óbvio fosse.
+
+### Testes
+
+883 testes de backend (+6 desde v1.2.0), 231 testes de frontend (+123 desde v1.2.0). `tsc --noEmit`, `next lint` e `next build` limpos. Validado em navegador contra ambiente demo isolado (banco SQLite seedado com dados realistas), zero erros de console na passagem final.
+
+### Observações
+
+Ver `RC1_AUDIT.md` para a auditoria completa de release: 1 achado crítico (sidebar do painel admin sem responsividade mobile — não corrigido nesta versão, ver o próprio documento para o porquê), achados médios e menores, medições de performance (tempo de start do backend, latência de API, tamanho de bundle) e prontidão de release estimada em 82%.
+
 ## [1.2.0] - 2026-07-11
 
 Dashboard Administrativo e Production Hardening — sem novas funcionalidades

@@ -15,14 +15,15 @@ import { Button } from "@/components/admin/ui/button";
 import { useActionExecution } from "@/hooks/use-action-execution";
 import { buildActionPreview, planAction, planAlternatives } from "@/lib/actions";
 import type { ActionPlan } from "@/lib/actions";
+import { formatDateTime } from "@/lib/format";
 import type { OperatorInsight } from "@/lib/operator";
 
 function draftSummary(plan: ActionPlan): string | null {
   if (!plan.draft) return null;
   if ("due_date" in plan.draft) {
-    return `"${plan.draft.title}" — prazo ${new Date(plan.draft.due_date).toLocaleString("pt-BR")}`;
+    return `"${plan.draft.title}" — prazo ${formatDateTime(plan.draft.due_date)}`;
   }
-  return `"${plan.draft.title}" — ${new Date(plan.draft.starts_at).toLocaleString("pt-BR")}`;
+  return `"${plan.draft.title}" — ${formatDateTime(plan.draft.starts_at)}`;
 }
 
 function WorkflowTrail({ steps }: { steps: string[] }) {

@@ -31,6 +31,11 @@ These are the single source of truth for platform and core architecture:
 | **KNOWN_LIMITATIONS.md** | Formal limitations catalog with context | ✅ Authoritative |
 | **VERSION_HISTORY.md** | Version-by-version changelog with architectural notes | ✅ Authoritative |
 | **CHANGELOG.md** | Latest release notes and changes | ✅ Authoritative |
+| **RC1_AUDIT.md** | Release Candidate audit for v1.3.0 (AI Operator Center, Memory & Timeline, Daily Briefing, Action Center) — findings, fixes applied, performance measurements, readiness score | ✅ Authoritative (Core, 2026-07-17) |
+| **AI_OPERATOR.md** | AI Operator Center (`/admin`) — insight categories, confidence tiers, one-click actions | ✅ Authoritative (Core) |
+| **MEMORY_TIMELINE.md** | Timeline / operational memory (`/admin/timeline`) — event sourcing, curation, "what changed" queries | ✅ Authoritative (Core) |
+| **DAILY_BRIEFING.md** | Daily Briefing (`/admin/briefing`) — narrative composition, health score, execution plan | ✅ Authoritative (Core) |
+| **ACTION_CENTER.md** | Action Center (`/admin/action-center`) — executable workflows, classification, Action Preview, Automation Score | ✅ Authoritative (Core) |
 
 ## Removed Documents
 
@@ -72,6 +77,10 @@ These documents were marked deprecated during Phase 0 (2026-07-11) with a notice
 | Workflows | docs/WORKFLOWS.md |
 | API | docs/api.md |
 | Dashboard | (see PROJECT_STATUS.md) |
+| AI Operator Center | AI_OPERATOR.md |
+| Timeline / Operational Memory | MEMORY_TIMELINE.md |
+| Daily Briefing | DAILY_BRIEFING.md |
+| Action Center | ACTION_CENTER.md |
 
 ## How to Navigate This Project
 
@@ -99,6 +108,6 @@ These documents were marked deprecated during Phase 0 (2026-07-11) with a notice
 
 ---
 
-**Last Updated**: 2026-07-11 (Phase 0 consolidation)  
+**Last Updated**: 2026-07-11 (Phase 0 consolidation); 2026-07-17 (added RC1_AUDIT.md + the four Core Product Evolution docs — AI_OPERATOR.md, MEMORY_TIMELINE.md, DAILY_BRIEFING.md, ACTION_CENTER.md)  
 **Maintained By**: Claude Code (Chief Software Architect)  
 **Approved By**: (Awaiting approval of Phase 0)

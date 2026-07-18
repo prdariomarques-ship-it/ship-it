@@ -13,6 +13,7 @@ import type {
 } from "@/lib/admin-types";
 import { buildFollowupTaskDraft, buildScheduleTimeDraft } from "@/lib/actions";
 import type { FollowupTaskDraft, ScheduleTimeDraft } from "@/lib/actions";
+import { formatDateTime } from "@/lib/format";
 
 export type OperatorCategory =
   | "highest_priority"
@@ -109,9 +110,7 @@ const PRIORITY_LABEL: Record<string, string> = {
   urgent: "urgente",
 };
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString("pt-BR");
-}
+const formatDate = formatDateTime;
 
 function isOverdue(dueDate: string | null, now: Date): boolean {
   return !!dueDate && new Date(dueDate).getTime() < now.getTime();

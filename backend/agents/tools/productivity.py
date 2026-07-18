@@ -5,12 +5,9 @@ from datetime import datetime
 from agents.tools.base import Tool, ToolContext, ok
 from models.calendar import CalendarEvent
 from models.note import Note
-from models.task import Task, TaskPriority, TaskStatus
+from models.task import TaskPriority, TaskStatus
 from repositories.base import SQLAlchemyRepository
-
-
-class _TaskRepo(SQLAlchemyRepository[Task]):
-    model = Task
+from repositories.task import TaskRepository as _TaskRepo
 
 
 class _EventRepo(SQLAlchemyRepository[CalendarEvent]):

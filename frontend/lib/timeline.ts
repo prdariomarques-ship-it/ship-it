@@ -12,6 +12,7 @@ import type {
   MessageRead,
   TaskRead,
 } from "@/lib/admin-types";
+import { formatDateTime } from "@/lib/format";
 
 export type Actor = "user" | "ai" | "system";
 
@@ -421,7 +422,7 @@ function buildCalendarEvents(events: CalendarEventRead[], since: Date | undefine
           actor: "user",
           category: "calendar_changes",
           summary: `Evento criado: ${event.title}`,
-          reason: `Agendado para ${new Date(event.starts_at).toLocaleString("pt-BR")}.`,
+          reason: `Agendado para ${formatDateTime(event.starts_at)}.`,
           relatedEntities: [event.title],
           consequence: "Adicionado à agenda.",
           importance: 25,

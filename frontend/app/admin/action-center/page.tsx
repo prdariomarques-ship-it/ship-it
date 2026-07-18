@@ -38,6 +38,7 @@ import { buildOperatorInsights } from "@/lib/operator";
 import type { OperatorInsight } from "@/lib/operator";
 import { computeAutomationScore, parseActionLog, planAction } from "@/lib/actions";
 import type { ActionLogItem, ActionPlan } from "@/lib/actions";
+import { formatDateTime } from "@/lib/format";
 
 const ACTION_LOG_LIMIT = 200;
 
@@ -78,7 +79,7 @@ function LogItem({ log, tone }: { log: ActionLogItem; tone: "success" | "destruc
         <Badge variant={tone}>{tone === "success" ? "concluída" : "falhou"}</Badge>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        {new Date(log.createdAt).toLocaleString("pt-BR")}
+        {formatDateTime(log.createdAt)}
         {log.relatedEntities.length > 0 ? ` — ${log.relatedEntities.join(", ")}` : ""}
         {log.estimatedMinutes !== null ? ` — ~${log.estimatedMinutes}min` : ""}
       </p>
