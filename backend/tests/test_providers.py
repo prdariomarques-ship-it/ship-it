@@ -626,3 +626,176 @@ async def test_whatsapp_request_max_attempts_override_skips_retry(monkeypatch):
             await provider._request("GET", "http://example.test/ping", max_attempts=1)
 
     assert _FailingClient.attempts == 1
+
+
+# --- OpenWA send_*: success field must be validated, not just HTTP status ---
+# GitHub Issue #3: easy-api answers HTTP 200 for both a successful send and a
+# rejected one — only the body's `success` field tells them apart. These
+# cover every case OpenWAProvider._post() must classify correctly.
+class _SingleResponseClient:
+    """One canned response for every request — sufficient for _post(), which
+    makes exactly one HTTP call per send."""
+
+    def __init__(self, response):
+        self._response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    async def request(self, method, url, json=None, headers=None):
+        return self._response
+
+
+def _patch_openwa_client(response):
+    return patch(
+        "providers.whatsapp.base.httpx.AsyncClient",
+        return_value=_SingleResponseClient(response),
+    )
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_succeeds_when_success_true():
+    """HTTP 200 + success=true: the confirmed-good case must still work,
+    returning the response body unchanged."""
+    body = {"success": True, "response": "message sent"}
+    with _patch_openwa_client(_json_response(body)):
+        result = await OpenWAProvider()._post("sendText", {"to": "5511999@c.us"})
+    assert result == body
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_raises_when_success_false_preserving_openwa_message():
+    """HTTP 200 + success=false (the actual bug from Issue #3, reproduced
+    live against a real non-contact recipient) must raise, and the raised
+    error must preserve OpenWA's own explanation, not just say 'failed'."""
+    from providers.whatsapp.base import WhatsAppProviderError
+
+    body = {
+        "success": False,
+        "response": "ERROR: Not a contact. Unlock this feature and support "
+        "open-wa by getting a license: https://get.openwa.dev/l/5511993366903",
+    }
+    with _patch_openwa_client(_json_response(body)):
+        with pytest.raises(WhatsAppProviderError, match="Not a contact"):
+            await OpenWAProvider()._post("sendText", {"to": "5511900000001@c.us"})
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_raises_on_success_false_with_nested_error_shape():
+    """The other failure shape easy-api uses (seen on getConnectionState:
+    `{"error": {"name", "message"}}` instead of a `response` string) must
+    also raise and preserve the nested message, not just fall back to a
+    generic detail."""
+    from providers.whatsapp.base import WhatsAppProviderError
+
+    body = {
+        "success": False,
+        "error": {"name": "TypeError", "message": "Cannot read properties of undefined"},
+    }
+    with _patch_openwa_client(_json_response(body)):
+        with pytest.raises(WhatsAppProviderError, match="Cannot read properties"):
+            await OpenWAProvider()._post("sendText", {"to": "5511999@c.us"})
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_raises_when_success_field_missing():
+    """A response with no `success` key at all must be treated as failure,
+    not as an implicit success — 'confirmed sent' requires an explicit
+    success=true, not merely the absence of an error."""
+    from providers.whatsapp.base import WhatsAppProviderError
+
+    body = {"foo": "bar"}
+    with _patch_openwa_client(_json_response(body)):
+        with pytest.raises(WhatsAppProviderError):
+            await OpenWAProvider()._post("sendText", {"to": "5511999@c.us"})
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_raises_on_malformed_json():
+    """A response claiming to be JSON but that fails to parse must raise a
+    WhatsAppProviderError, not propagate a raw json.JSONDecodeError (which
+    the route layer's `except WhatsAppProviderError` wouldn't catch, turning
+    it into an unhandled 500 instead of a clean 502)."""
+    from providers.whatsapp.base import WhatsAppProviderError
+
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.headers = {"content-type": "application/json"}
+    response.json = MagicMock(side_effect=ValueError("Expecting value: line 1 column 1"))
+    with _patch_openwa_client(response):
+        with pytest.raises(WhatsAppProviderError):
+            await OpenWAProvider()._post("sendText", {"to": "5511999@c.us"})
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_raises_on_http_500(monkeypatch):
+    """A transport-level HTTP 500 (already handled by _request's
+    raise_for_status, before success is ever inspected) must still surface as
+    WhatsAppProviderError from _post/send_* — never as a successful send."""
+    import httpx as httpx_module
+
+    from providers.whatsapp.base import WhatsAppProviderError
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "whatsapp_request_max_attempts", 1)
+
+    response = MagicMock()
+    response.raise_for_status = MagicMock(
+        side_effect=httpx_module.HTTPStatusError(
+            "500 Internal Server Error", request=MagicMock(), response=MagicMock()
+        )
+    )
+    with _patch_openwa_client(response):
+        with pytest.raises(WhatsAppProviderError):
+            await OpenWAProvider().send_text("5511999", "oi")
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_text_never_returns_status_sent_on_rejection():
+    """End-to-end through the public send_text() method (not just _post
+    directly): a rejected send must raise, never return a dict a caller
+    could mistake for `{"status": "sent"}`."""
+    from providers.whatsapp.base import WhatsAppProviderError
+
+    body = {"success": False, "response": "ERROR: rejected"}
+    with _patch_openwa_client(_json_response(body)):
+        with pytest.raises(WhatsAppProviderError):
+            await OpenWAProvider().send_text("5511999", "oi")
+
+
+@pytest.mark.asyncio
+async def test_openwa_send_image_file_audio_location_all_validate_success():
+    """Every send_* method shares _post — confirm each one individually
+    raises on success=false rather than assuming coverage from send_text
+    alone."""
+    from providers.whatsapp.base import WhatsAppProviderError
+
+    body = {"success": False, "response": "ERROR: rejected"}
+    provider = OpenWAProvider()
+    with _patch_openwa_client(_json_response(body)):
+        with pytest.raises(WhatsAppProviderError):
+            await provider.send_image("5511999", "http://example.test/a.png")
+        with pytest.raises(WhatsAppProviderError):
+            await provider.send_file("5511999", "http://example.test/a.pdf")
+        with pytest.raises(WhatsAppProviderError):
+            await provider.send_audio("5511999", "http://example.test/a.ogg")
+        with pytest.raises(WhatsAppProviderError):
+            await provider.send_location("5511999", -23.5, -46.6)
+
+
+def test_baileys_evolution_official_send_unchanged():
+    """Scope guard for Issue #3: only OpenWAProvider gained a _post-level
+    success check. The other providers still raise purely from HTTP status
+    (via the shared _request), with no body-level success field involved —
+    confirm none of them grew a `_post`/`success` check of their own."""
+    import inspect
+
+    for provider_cls in (BaileysProvider, EvolutionProvider, OfficialProvider):
+        source = inspect.getsource(provider_cls)
+        assert "success" not in source, (
+            f"{provider_cls.__name__} unexpectedly references 'success' — "
+            "Issue #3 scope was OpenWA only"
+        )

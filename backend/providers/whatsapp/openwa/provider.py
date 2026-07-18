@@ -15,9 +15,13 @@ from providers.whatsapp.base import (
     DeliveryStatus,
     InboundMessage,
     WhatsAppProvider,
+    WhatsAppProviderError,
     normalize_phone,
 )
 from utils.config import get_settings
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 _KNOWN_MEDIA = {"text", "image", "pdf", "audio", "location"}
 
@@ -37,13 +41,62 @@ class OpenWAProvider(WhatsAppProvider):
     def _headers(self) -> dict:
         return {"api_key": self._api_key} if self._api_key else {}
 
+    @staticmethod
+    def _error_detail(result: dict) -> str:
+        """Pull the human-readable message out of either error shape easy-api
+        uses: `{"error": {"name", "message"}}` (e.g. getConnectionState) or
+        `{"response": "ERROR: ..."}` (e.g. sendText). Never includes `args` —
+        that's the caller's own payload (message content, recipient), not
+        OpenWA's error, and may be sensitive."""
+        error = result.get("error")
+        if isinstance(error, dict):
+            return str(error.get("message") or error.get("name") or error)
+        response = result.get("response")
+        if response:
+            return str(response)
+        return "OpenWA reported failure with no error detail in the response"
+
     async def _post(self, endpoint: str, args: dict) -> dict:
-        return await self._request(
-            "POST",
-            f"{self._base_url}/{endpoint}",
-            json_body={"args": args},
-            headers=self._headers(),
-        )
+        """POST to an easy-api send endpoint and treat the result as failed
+        unless it explicitly confirms success.
+
+        easy-api answers HTTP 200 for both successful sends and rejected ones
+        (e.g. `{"success": false, "response": "ERROR: Not a contact..."}` —
+        reproduced live against a non-contact recipient) — confirmed the same
+        `success`-not-HTTP-status contract already documented on
+        `health_check`. `_request`'s `raise_for_status()` only ever sees a
+        200, so nothing before this method could have caught a rejection;
+        every send_* method routes through here, so checking once here covers
+        all of them. Anything other than `success is True` (missing field,
+        `false`, a non-boolean value) is treated as a failure — sending is
+        exactly the case where reporting a maybe-delivered message as sent is
+        worse than being strict about what counts as confirmed.
+        """
+        try:
+            result = await self._request(
+                "POST",
+                f"{self._base_url}/{endpoint}",
+                json_body={"args": args},
+                headers=self._headers(),
+            )
+        except ValueError as exc:
+            # response.json() failed to decode the body (malformed JSON).
+            # Never let a body we can't even parse be treated as a send.
+            logger.warning(
+                "OpenWA %s returned a response that could not be parsed as JSON: %s",
+                endpoint,
+                exc,
+            )
+            raise WhatsAppProviderError(
+                f"OpenWA {endpoint} returned malformed JSON"
+            ) from exc
+
+        if result.get("success") is not True:
+            detail = self._error_detail(result)
+            logger.warning("OpenWA %s failed: %s", endpoint, detail)
+            raise WhatsAppProviderError(f"OpenWA {endpoint} failed: {detail}")
+
+        return result
 
     @staticmethod
     def _chat_id(to: str) -> str:

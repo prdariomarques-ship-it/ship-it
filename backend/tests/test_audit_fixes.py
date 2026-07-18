@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from main import _validate_production_settings
 from models.job import Job
+from models.message import Message
 from repositories.contact import ContactRepository
 from services.rate_limit import RateLimiter, rate_limiter
 from utils.config import get_settings
@@ -153,6 +154,43 @@ async def test_outbound_send_triggers_summary_job(
     async with factory() as session:
         jobs = (await session.execute(select(Job))).scalars().all()
     assert "contact.summarize" in {job.name for job in jobs}
+
+
+# --- GitHub Issue #3: a rejected OpenWA send must never look like a sent one -
+@pytest.mark.asyncio
+async def test_rejected_send_returns_502_and_persists_nothing(
+    client, auth_headers, db_engine
+):
+    """Once OpenWAProvider.send_text raises on success=false (Issue #3's fix),
+    the route must surface a 502 — never {"status": "sent"} — and must never
+    reach persist_outbound_message, so no Message row exists for a send
+    OpenWA actually rejected."""
+    from providers.whatsapp.base import WhatsAppProviderError
+
+    with patch(
+        "providers.whatsapp.openwa.provider.OpenWAProvider.send_text",
+        new=AsyncMock(
+            side_effect=WhatsAppProviderError(
+                "OpenWA sendText failed: ERROR: Not a contact..."
+            )
+        ),
+    ):
+        response = await client.post(
+            "/api/whatsapp/send-text",
+            json={"to": "5511900000005", "content": "olá!"},
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 502
+    body = response.json()
+    assert body.get("status") != "sent"
+    assert "message_id" not in body
+    assert "Not a contact" in body["detail"]
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        messages = (await session.execute(select(Message))).scalars().all()
+    assert not any(m.content == "olá!" for m in messages)
 
 
 # --- Contact creation race ----------------------------------------------------

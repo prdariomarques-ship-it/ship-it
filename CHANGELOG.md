@@ -2,6 +2,16 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased]
+
+### Corrigido
+
+- **Correct OpenWA outbound success detection.** `OpenWAProvider._post()` (usado por `send_text`, `send_image`, `send_file`, `send_audio`, `send_location`) só validava erro de transporte HTTP — nunca o campo `success` do corpo da resposta. easy-api responde `HTTP 200` tanto pra um envio aceito quanto pra um rejeitado (`{"success": false, "response": "ERROR: Not a contact..."}`, reproduzido ao vivo contra um número que não é contato), então uma mensagem rejeitada era silenciosamente reportada como enviada (`{"status": "sent", "message_id": N}`) e persistida como `Message` de saída, sem nunca receber confirmação de entrega. Agora `_post()` exige `success is True`; qualquer outro valor (`false`, ausente, não-booleano) levanta `WhatsAppProviderError`, preservando a mensagem de erro original do OpenWA quando disponível — o mesmo formato de correção já aplicado em `health_check()`. Apenas o provider OpenWA foi alterado; Baileys/Evolution/Official não usam esse contrato e ficaram intocados. Rastreado em GitHub Issue #3.
+
+### Testes
+
+Cobertura nova em `test_providers.py` (success=true, success=false nos dois formatos de erro do easy-api, campo `success` ausente, JSON malformado, HTTP 500, e os 4 métodos de mídia/localização individualmente) e um teste de integração em `test_audit_fixes.py` confirmando que a rota `/api/whatsapp/send-text` responde `502` — nunca `{"status": "sent"}` — e não persiste `Message` quando o envio é rejeitado.
+
 ## [1.3.1] - 2026-07-18
 
 Patch: resolve os dois achados Medium deixados em aberto por `RC1_AUDIT.md` — ambos explicitamente marcados como "precisam de decisão de produto, não fix mecânico". Sem funcionalidade nova, sem migração de banco, sem mudança de frontend. Análise completa: `RELEASE_READINESS.md`.
