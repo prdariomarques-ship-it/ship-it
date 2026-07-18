@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/useApi", () => ({
@@ -35,5 +35,13 @@ describe("AdminHeader", () => {
     ]);
     renderWithQueryClient(<AdminHeader userEmail="admin@dario.os" />);
     await waitFor(() => expect(screen.getByText("atenção necessária")).toBeInTheDocument());
+  });
+
+  it("calls onToggleSidebar when the mobile menu button is clicked (RC1_AUDIT.md Finding #1)", () => {
+    mockedApiFetch.mockReturnValue(new Promise(() => {}));
+    const onToggleSidebar = vi.fn();
+    renderWithQueryClient(<AdminHeader userEmail="admin@dario.os" onToggleSidebar={onToggleSidebar} />);
+    fireEvent.click(screen.getByLabelText("Abrir menu"));
+    expect(onToggleSidebar).toHaveBeenCalledOnce();
   });
 });

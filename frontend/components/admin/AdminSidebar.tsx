@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -17,6 +18,7 @@ import {
   ShieldCheck,
   Users,
   Wrench,
+  X,
   Zap,
 } from "lucide-react";
 
@@ -40,39 +42,83 @@ const NAV_ITEMS = [
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
-export function AdminSidebar() {
+interface AdminSidebarProps {
+  /** Mobile-only drawer state — ignored above the `md` breakpoint, where
+   * the sidebar is always visible (see RC1_AUDIT.md Finding #1). */
+  open?: boolean;
+  onClose?: () => void;
+}
+
+export function AdminSidebar({ open = false, onClose }: AdminSidebarProps) {
   const pathname = usePathname();
 
-  return (
-    <nav className="flex h-full w-60 shrink-0 flex-col gap-1 border-r border-border bg-card px-3 py-5">
-      <div className="mb-4 flex items-center gap-2 px-3">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-bold">
-          D
-        </div>
-        <div className="flex flex-col leading-none">
-          <span className="text-sm font-semibold">Dario OS</span>
-          <span className="text-[11px] text-muted-foreground">Admin</span>
-        </div>
-      </div>
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
 
-      {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
-        const active = exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
-        return (
-          <Link
-            key={href}
-            href={href}
-            className={cn(
-              "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
-              active
-                ? "bg-primary/15 font-medium text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            )}
+  return (
+    <>
+      {/* Backdrop: mobile-only, closes the drawer on tap outside it. */}
+      {open ? (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      ) : null}
+
+      <nav
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-full w-60 shrink-0 flex-col gap-1 border-r border-border bg-card px-3 py-5 transition-transform duration-200 ease-in-out",
+          "md:static md:z-auto md:translate-x-0",
+          open ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <div className="mb-4 flex items-center justify-between gap-2 px-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-bold">
+              D
+            </div>
+            <div className="flex flex-col leading-none">
+              <span className="text-sm font-semibold">Dario OS</span>
+              <span className="text-[11px] text-muted-foreground">Admin</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Fechar menu"
+            onClick={onClose}
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
           >
-            <Icon className="h-4 w-4 shrink-0" />
-            {label}
-          </Link>
-        );
-      })}
-    </nav>
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
+          const active = exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+          return (
+            <Link
+              key={href}
+              href={href}
+              onClick={onClose}
+              className={cn(
+                "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
+                active
+                  ? "bg-primary/15 font-medium text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+    </>
   );
 }

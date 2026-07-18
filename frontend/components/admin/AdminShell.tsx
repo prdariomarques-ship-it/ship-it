@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 import { AdminHeader } from "@/components/admin/AdminHeader";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
@@ -11,6 +11,7 @@ import { PortalContainerProvider } from "@/hooks/use-portal-container";
 
 function GuardScreen({ children }: { children: React.ReactNode }) {
   const state = useAdminGuard();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (state.status === "loading") {
     return (
@@ -36,10 +37,10 @@ function GuardScreen({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <AdminSidebar />
+      <AdminSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <AdminHeader userEmail={state.user.email} />
-        <main className="admin-scroll flex-1 overflow-y-auto p-6" tabIndex={0}>
+        <AdminHeader userEmail={state.user.email} onToggleSidebar={() => setSidebarOpen((open) => !open)} />
+        <main className="admin-scroll flex-1 overflow-y-auto p-4 sm:p-6" tabIndex={0}>
           {children}
         </main>
       </div>

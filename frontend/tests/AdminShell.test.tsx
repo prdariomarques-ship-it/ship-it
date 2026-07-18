@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/use-admin-guard", () => ({
@@ -40,5 +40,22 @@ describe("AdminShell", () => {
     expect(screen.getByText("page content")).toBeInTheDocument();
     expect(screen.getByText("admin@dario.os")).toBeInTheDocument();
     expect(screen.getByText("Dashboard")).toBeInTheDocument(); // sidebar item
+  });
+
+  it("toggles the mobile sidebar drawer via the header's menu button (RC1_AUDIT.md Finding #1)", () => {
+    mockedGuard.mockReturnValue({
+      status: "ok",
+      user: { id: 1, email: "admin@dario.os", full_name: "Admin", role: "admin", is_active: true },
+    });
+    render(<AdminShell>page content</AdminShell>);
+
+    const nav = screen.getByRole("navigation");
+    expect(nav).toHaveClass("-translate-x-full"); // closed by default
+
+    fireEvent.click(screen.getByLabelText("Abrir menu"));
+    expect(nav).toHaveClass("translate-x-0");
+
+    fireEvent.click(screen.getByLabelText("Fechar menu"));
+    expect(nav).toHaveClass("-translate-x-full");
   });
 });

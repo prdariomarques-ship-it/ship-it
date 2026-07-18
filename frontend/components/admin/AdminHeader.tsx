@@ -1,21 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Menu } from "lucide-react";
 
 import { useAdminStatus } from "@/lib/admin-api";
 
-export function AdminHeader({ userEmail }: { userEmail: string }) {
+interface AdminHeaderProps {
+  userEmail: string;
+  onToggleSidebar?: () => void;
+}
+
+export function AdminHeader({ userEmail, onToggleSidebar }: AdminHeaderProps) {
   const { data: status } = useAdminStatus();
   const backend = status?.find((item) => item.name === "backend");
   const allOnline = status?.every((item) => item.online) ?? null;
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card/60 px-6">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card/60 px-4 sm:px-6">
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <button
+          type="button"
+          aria-label="Abrir menu"
+          onClick={onToggleSidebar}
+          className="rounded-md p-1.5 hover:bg-accent hover:text-foreground md:hidden"
+        >
+          <Menu className="h-4 w-4" />
+        </button>
         <Link href="/" className="flex items-center gap-1.5 hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" />
-          Voltar ao app
+          <span className="hidden sm:inline">Voltar ao app</span>
         </Link>
       </div>
       <div className="flex items-center gap-4 text-sm">
