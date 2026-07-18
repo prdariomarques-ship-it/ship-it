@@ -106,6 +106,21 @@ class OpenWAProvider(WhatsAppProvider):
         against wa-automate's own CLI, which calls this exact endpoint the
         same way (cli/index.js: `axios.post(".../getConnectionState")`).
 
+        easy-api answers with HTTP 200 even when the call itself failed
+        (`{"success": false, "error": {...}}`), so `_request` never raises for
+        that case — the `success` field, not the HTTP status, is what tells
+        the two apart. getConnectionState can fail this way while the session
+        is genuinely connected: it reads WhatsApp Web's internal Store object
+        model (`Store.State.default.state`), whose shape WhatsApp changes
+        server-side from time to time (the same class of drift documented in
+        docker/openwa/Dockerfile's Store-resolution notes) — confirmed
+        directly: `getConnectionState` was erroring with a `TypeError` while
+        `isConnected` (a DOM-only check, no Store access) still returned
+        `true` and outbound messages kept sending. So a `success: false` here
+        falls back to isConnected instead of being treated as unhealthy
+        outright, to avoid flagging a working session as down over a broken
+        introspection call.
+
         Single-shot (no retry): a readiness probe is polled frequently and
         must answer fast, even when the gateway is genuinely down.
         """
@@ -120,8 +135,23 @@ class OpenWAProvider(WhatsAppProvider):
             )
         except Exception:  # noqa: BLE001 - unreachable/misconfigured gateway = unhealthy, not a crash
             return False
+
+        if result.get("success") is False:
+            try:
+                fallback = await self._request(
+                    "POST",
+                    f"{self._base_url}/isConnected",
+                    json_body={"args": []},
+                    headers=self._headers(),
+                    timeout=5,
+                    max_attempts=1,
+                )
+            except Exception:  # noqa: BLE001 - unreachable/misconfigured gateway = unhealthy, not a crash
+                return False
+            return fallback.get("success") is True and fallback.get("response") is True
+
         state = str(result.get("response", result.get("state", ""))).upper()
-        return state == "CONNECTED" or bool(result)
+        return state == "CONNECTED"
 
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         if payload.get("event") not in (None, "onMessage", "onAnyMessage"):
