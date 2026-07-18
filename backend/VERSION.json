@@ -1,9 +1,9 @@
 {
   "version": "1.3.0-rc1",
-  "commit": "bfa84f92283676e6ecbccd1f078fa62af135e49d",
-  "buildDate": "2026-07-18T00:48:02Z",
-  "backendTests": 883,
-  "frontendTests": 231,
-  "readiness": 82,
+  "commit": "d64b8be5e2ceb59a3b2c84de2c4cb5d53cab716c",
+  "buildDate": "2026-07-18T01:34:50Z",
+  "backendTests": 886,
+  "frontendTests": 240,
+  "readiness": 90,
   "releaseType": "release-candidate"
 }
