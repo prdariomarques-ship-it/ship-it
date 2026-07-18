@@ -2,6 +2,36 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [1.3.1] - 2026-07-18
+
+Patch: resolve os dois achados Medium deixados em aberto por `RC1_AUDIT.md` — ambos explicitamente marcados como "precisam de decisão de produto, não fix mecânico". Sem funcionalidade nova, sem migração de banco, sem mudança de frontend. Análise completa: `RELEASE_READINESS.md`.
+
+### Corrigido
+
+- `agents/tools/domain.py::_add_store_customer` (tool de agente, alimentada por texto extraído do WhatsApp) gravava e-mail/telefone direto no banco sem validação nenhuma — plugado `validate_email`/`validate_phone_e164`, que existiam em `services/validation.py` mas não tinham nenhum chamador em lugar nenhum do backend.
+- `validate_phone_e164` exigia `+` obrigatório (E.164 estrito), incompatível com a convenção real do produto — números vindos do WhatsApp chegam sem `+` (`normalize_phone()` remove), confirmado por um teste já existente (`test_contact_crud`, `"5511999999999"`). Corrigida para aceitar telefone com ou sem `+`, e agora também valida o campo `phone` em `ContactCreate/Update`, `ChurchMemberCreate/Update`, `StoreCustomerCreate/Update`.
+- `POST /jobs/{id}/cancel` era uma duplicata inferior, sem chamador no frontend, de `POST /admin/jobs/{id}/cancel` (o que o dashboard de fato usa) — faltava lock de linha, log de auditoria e publicação de evento. Risco latente de corrida/lacuna de auditoria, não só código morto. Removido; `docs/api.md` atualizado.
+
+### Removido
+
+- `validate_url`/`validate_file_path` de `services/validation.py` — confirmado, por busca em todo o backend, que não existe nenhuma URL controlada por usuário buscada diretamente nem nenhum path vindo de request tocando o filesystem. Código morto desde sempre, não uma lacuna.
+
+### Testes
+
+864 testes de backend (-22 desde v1.3.0-rc1 — 21 pela remoção do código morto, líquido de pequenos ajustes nos testes de telefone), 100% passando, verificado com os caminhos reais do repositório. Frontend não tocado, 240 testes inalterados. Lint (`ruff`) limpo.
+
+## [1.3.0] - 2026-07-18
+
+GA da mesma leva de funcionalidades da `1.3.0-rc1` (ver abaixo). Inclui a correção do único achado Crítico da auditoria de release, que a RC ainda não tinha:
+
+### Corrigido
+
+- Sidebar do painel admin sem responsividade mobile (inutilizável em ~375px) — `AdminShell.tsx` ganhou um drawer com hambúrguer; layout desktop byte-a-byte inalterado. 9 testes novos. Prontidão de release: 82% (na RC) → 90% (após este fix). Ver `RC1_AUDIT.md`, `RC1_RELEASE_REPORT.md`.
+
+### Testes
+
+886 testes de backend (+3 desde a RC1, os novos testes de `GET /api/version`), 240 de frontend (+9, o drawer mobile), 100% passando.
+
 ## [1.3.0-rc1] - 2026-07-17
 
 AI Operator Center, Memory & Timeline, Daily Briefing, Action Center — o dashboard deixa de ser um painel de leitura e passa a responder "o que eu devo fazer agora?" e a executar a resposta. Sem alteração de arquitetura backend além do estritamente necessário para cada funcionalidade (ver justificativa de cada endpoint novo abaixo). Auditoria de release: `RC1_AUDIT.md`.
