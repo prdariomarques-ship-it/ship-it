@@ -39,4 +39,37 @@ describe("ExecutionTimeline", () => {
     expect(screen.getByText("agent:personal")).toBeInTheDocument();
     expect(screen.getByText("personal")).toBeInTheDocument();
   });
+
+  it("labels a queued observation.tick as 'rodando', not 'queued'", () => {
+    // observation.tick is created at the start of its ~5min cycle and only
+    // flips to succeeded when the *next* cycle starts, so "queued" reads as
+    // stuck even though it's just mid-cycle (HOMOLOGATION_REPORT_v1.3.1.md).
+    // Scoped to this one job name — a real queued-and-waiting job elsewhere
+    // in the list must still say "queued".
+    const entries: ExecutionEntry[] = [
+      {
+        kind: "job",
+        id: 3,
+        timestamp: new Date().toISOString(),
+        name: "observation.tick",
+        agent: null,
+        status: "queued",
+        detail: "",
+        duration_seconds: null,
+      },
+      {
+        kind: "job",
+        id: 4,
+        timestamp: new Date().toISOString(),
+        name: "whatsapp.send_text",
+        agent: null,
+        status: "queued",
+        detail: "",
+        duration_seconds: null,
+      },
+    ];
+    render(<ExecutionTimeline entries={entries} />);
+    expect(screen.getByText("rodando")).toBeInTheDocument();
+    expect(screen.getByText("queued")).toBeInTheDocument();
+  });
 });

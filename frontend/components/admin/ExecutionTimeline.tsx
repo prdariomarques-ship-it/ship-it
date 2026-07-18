@@ -17,6 +17,20 @@ const STATUS_TONE: Record<string, "success" | "destructive" | "secondary" | "war
   warning: "warning",
 };
 
+// observation.tick is created at the start of its ~5min cycle and only
+// flips to "succeeded" when the *next* cycle starts — so it legitimately
+// shows "queued" for the whole interval, not because anything is stuck
+// (confirmed against the jobs table, see HOMOLOGATION_REPORT_v1.3.1.md).
+// That's correct for a real queued-and-waiting-for-a-worker job elsewhere
+// in this same list, so the fix is scoped to this one job name rather than
+// relabeling "queued" everywhere.
+function displayStatus(entry: ExecutionEntry): string {
+  if (entry.name === "observation.tick" && entry.status.toLowerCase() === "queued") {
+    return "rodando";
+  }
+  return entry.status;
+}
+
 export function ExecutionTimeline({ entries }: { entries: ExecutionEntry[] }) {
   if (entries.length === 0) {
     return (
@@ -43,7 +57,7 @@ export function ExecutionTimeline({ entries }: { entries: ExecutionEntry[] }) {
             <div className="flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">{entry.name}</span>
-                <Badge variant={tone}>{entry.status}</Badge>
+                <Badge variant={tone}>{displayStatus(entry)}</Badge>
                 {entry.agent ? <Badge variant="outline">{entry.agent}</Badge> : null}
               </div>
               {entry.detail ? <p className="mt-1 text-xs text-muted-foreground">{entry.detail}</p> : null}

@@ -83,14 +83,25 @@ export function LogViewer({ logs, level, onLevelChange, search, onSearchChange }
               <button
                 type="button"
                 onClick={() => setExpanded(expanded === log.id ? null : log.id)}
-                className="flex w-full items-start gap-2 text-left"
+                className="flex w-full flex-wrap items-start gap-x-2 gap-y-1 text-left"
               >
                 <span className="shrink-0 text-muted-foreground">{formatDateTime(log.created_at)}</span>
                 <Badge variant={LEVEL_TONE[log.level] ?? "secondary"} className="shrink-0 uppercase">
                   {log.level}
                 </Badge>
                 <span className="shrink-0 text-muted-foreground">[{log.source}]</span>
-                <span className="truncate text-foreground">{log.message}</span>
+                {/* Was `truncate` (nowrap + ellipsis) — on mobile, where the
+                    row's other shrink-0 elements already fill the full
+                    390px width by themselves, this cut long messages off
+                    with no way to read the rest (clicking the row only
+                    reveals the payload, not the message itself). basis-full
+                    on the parent's flex-wrap drops the message to its own
+                    line when there's no room left in the metadata row,
+                    instead of squeezing it into a 0-width column that still
+                    wrapped every character onto its own (invisible) line. */}
+                <span className="min-w-0 basis-full whitespace-normal break-words text-foreground sm:basis-auto sm:flex-1">
+                  {log.message}
+                </span>
               </button>
               {expanded === log.id && Object.keys(log.payload).length > 0 ? (
                 <pre className="admin-scroll mt-1.5 max-h-40 overflow-auto rounded-sm bg-muted/40 p-2">

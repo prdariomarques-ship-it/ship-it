@@ -33,13 +33,19 @@ export function AdminHeader({ userEmail, onToggleSidebar }: AdminHeaderProps) {
       </div>
       <div className="flex items-center gap-4 text-sm">
         <div className="flex items-center gap-1.5">
+          {/* Dot stays visible at every width — it's the one piece of this
+              row a mobile user actually needs (is something wrong right
+              now?). The label text next to it, plus the heartbeat and the
+              email below, were all unconditionally visible and wrapped onto
+              a second line on narrow screens, colliding with the
+              hamburger/back icons (HOMOLOGATION_REPORT_v1.3.1.md). */}
           <span
             className={
-              "h-2 w-2 rounded-full " +
+              "h-2 w-2 shrink-0 rounded-full " +
               (allOnline === null ? "bg-muted-foreground" : allOnline ? "bg-success" : "bg-destructive")
             }
           />
-          <span className="text-muted-foreground">
+          <span className="hidden text-muted-foreground sm:inline">
             {allOnline === null ? "verificando…" : allOnline ? "todos os sistemas operacionais" : "atenção necessária"}
           </span>
         </div>
@@ -48,7 +54,7 @@ export function AdminHeader({ userEmail, onToggleSidebar }: AdminHeaderProps) {
             heartbeat {new Date(backend.last_heartbeat).toLocaleTimeString("pt-BR")}
           </span>
         ) : null}
-        <span className="text-muted-foreground">{userEmail}</span>
+        <span className="hidden text-muted-foreground sm:inline">{userEmail}</span>
       </div>
     </header>
   );
