@@ -528,14 +528,19 @@ async def test_complete_goal_tool_on_awaiting_approval_goal_reports_error_withou
 
 # --- HTTP API: CRUD, approval, dependencies, isolation ----------------------------
 @pytest.fixture
-async def other_auth_headers(client) -> dict[str, str]:
+async def other_auth_headers(client, auth_headers) -> dict[str, str]:
+    """Depends on `auth_headers` so the admin account always registers
+    first — public registration is closed after that (see test_auth.py),
+    so this second, non-admin account must be created via the admin
+    endpoint using the admin's own token."""
     await client.post(
-        "/api/auth/register",
+        "/api/admin/users",
         json={
             "email": "other@example.com",
             "full_name": "Other",
             "password": "supersecret1",
         },
+        headers=auth_headers,
     )
     response = await client.post(
         "/api/auth/login",

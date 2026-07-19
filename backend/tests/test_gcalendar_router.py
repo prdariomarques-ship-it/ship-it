@@ -58,13 +58,18 @@ async def session_factory(db_engine):
 
 @pytest.fixture
 async def second_user_headers(client, auth_headers):
+    """Depends on `auth_headers` so the admin account always registers
+    first — public registration is closed after that (see test_auth.py),
+    so this second, non-admin account must be created via the admin
+    endpoint using the admin's own token."""
     await client.post(
-        "/api/auth/register",
+        "/api/admin/users",
         json={
             "email": "second@example.com",
             "full_name": "Second",
             "password": "supersecret1",
         },
+        headers=auth_headers,
     )
     response = await client.post(
         "/api/auth/login",

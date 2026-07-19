@@ -18,9 +18,12 @@ from utils.config import get_settings
 class AuthError(Exception):
     """Domain-level auth failure; routers translate it to HTTP status codes."""
 
-    def __init__(self, message: str, conflict: bool = False) -> None:
+    def __init__(
+        self, message: str, conflict: bool = False, forbidden: bool = False
+    ) -> None:
         super().__init__(message)
         self.conflict = conflict
+        self.forbidden = forbidden
 
 
 def _hash_refresh_token(token: str) -> str:
@@ -39,11 +42,46 @@ class AuthService:
         self.settings = get_settings()
 
     async def register(self, email: str, full_name: str, password: str) -> User:
+        """Public, unauthenticated registration — bootstrap only.
+
+        Open self-registration on a system that holds shared, non-user-scoped
+        data (WhatsApp message history, contacts, church members, store
+        customers — see `api/routes.py`) meant anyone who found the login
+        page could create an account and immediately read/write all of it.
+        Closed after the first account exists; every account after that must
+        go through `create_user_as_admin`, gated by `require_admin`.
+        """
+        if await self.users.count() > 0:
+            raise AuthError(
+                "Public registration is closed; ask an administrator to "
+                "create your account",
+                forbidden=True,
+            )
         if await self.users.get_by_email(email) is not None:
             raise AuthError("Email already registered", conflict=True)
-        # Bootstrap: the very first account administers the instance.
-        role = UserRole.ADMIN if await self.users.count() == 0 else UserRole.USER
         # PBKDF2 is CPU-bound (~100ms); run it off the event loop.
+        hashed = await asyncio.to_thread(hash_password, password)
+        return await self.users.create(
+            email=email,
+            full_name=full_name,
+            hashed_password=hashed,
+            role=UserRole.ADMIN,  # the bootstrap account always administers the instance
+        )
+
+    async def create_user_as_admin(
+        self,
+        email: str,
+        full_name: str,
+        password: str,
+        role: UserRole = UserRole.USER,
+    ) -> User:
+        """Admin-only user creation — the only way to add an account once
+        the bootstrap admin exists (see `register`). Callers must enforce
+        `require_admin` themselves; this method has no role check of its
+        own, matching every other service method's convention of trusting
+        the router's dependency to have already gated access."""
+        if await self.users.get_by_email(email) is not None:
+            raise AuthError("Email already registered", conflict=True)
         hashed = await asyncio.to_thread(hash_password, password)
         return await self.users.create(
             email=email,

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin import schemas, service
 from auth.permissions import require_admin
+from auth.service import AuthError, AuthService
 from database.session import get_db
 from events.bus import event_bus
 from models.email_account import EmailAccount
@@ -463,6 +464,31 @@ async def admin_users(
         )
         for row in rows
     ]
+
+
+@router.post("/users", response_model=schemas.UserAdminRead, status_code=201)
+async def create_user(
+    payload: schemas.UserAdminCreate, db: DbSession
+) -> schemas.UserAdminRead:
+    """The only way to add an account once the bootstrap admin exists —
+    public `/auth/register` is closed after the first account (see
+    `AuthService.register`). Gated by `require_admin` at the router level,
+    same as every other endpoint in this file."""
+    try:
+        user = await AuthService(db).create_user_as_admin(
+            payload.email, payload.full_name, payload.password, payload.role
+        )
+    except AuthError as exc:
+        code = 409 if exc.conflict else 400
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    return schemas.UserAdminRead(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role.value,
+        is_active=user.is_active,
+        created_at=user.created_at,
+    )
 
 
 @router.get("/metrics")

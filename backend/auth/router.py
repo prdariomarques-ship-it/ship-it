@@ -27,7 +27,12 @@ Service = Annotated[AuthService, Depends(get_auth_service)]
 
 
 def _http_error(exc: AuthError) -> HTTPException:
-    code = status.HTTP_409_CONFLICT if exc.conflict else status.HTTP_401_UNAUTHORIZED
+    if exc.conflict:
+        code = status.HTTP_409_CONFLICT
+    elif exc.forbidden:
+        code = status.HTTP_403_FORBIDDEN
+    else:
+        code = status.HTTP_401_UNAUTHORIZED
     return HTTPException(status_code=code, detail=str(exc))
 
 

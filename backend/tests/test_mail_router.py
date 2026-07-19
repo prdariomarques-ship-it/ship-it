@@ -58,15 +58,17 @@ def _no_real_network_for_profile_lookup():
 @pytest.fixture
 async def second_user_headers(client, auth_headers):
     """Depends on `auth_headers` so the admin account always registers
-    first — only the very first account in the database bootstraps as
-    admin, and this fixture must reliably land as a plain USER."""
+    first — public registration is closed after that (see test_auth.py),
+    so this second, non-admin account must be created via the admin
+    endpoint using the admin's own token."""
     await client.post(
-        "/api/auth/register",
+        "/api/admin/users",
         json={
             "email": "second@example.com",
             "full_name": "Second",
             "password": "supersecret1",
         },
+        headers=auth_headers,
     )
     response = await client.post(
         "/api/auth/login",

@@ -30,8 +30,23 @@ async def test_register_login_me_flow(client):
 
 
 @pytest.mark.asyncio
-async def test_first_user_is_admin_second_is_not(client):
+async def test_bootstrap_registration_allowed_and_becomes_admin(client):
+    """The very first account, and only the very first, may self-register
+    through the public endpoint — and it always becomes admin."""
     first = await client.post(
+        "/api/auth/register",
+        json={"email": "a@example.com", "full_name": "A", "password": "supersecret1"},
+    )
+    assert first.status_code == 201
+    assert first.json()["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_second_public_registration_denied(client):
+    """Once an account exists, public self-registration is closed — closes
+    the gap where anyone finding the login page could self-provision an
+    account with access to shared data (messages, contacts, church, store)."""
+    await client.post(
         "/api/auth/register",
         json={"email": "a@example.com", "full_name": "A", "password": "supersecret1"},
     )
@@ -39,8 +54,13 @@ async def test_first_user_is_admin_second_is_not(client):
         "/api/auth/register",
         json={"email": "b@example.com", "full_name": "B", "password": "supersecret1"},
     )
-    assert first.json()["role"] == "admin"
-    assert second.json()["role"] == "user"
+    assert second.status_code == 403
+
+    # And the rejected account was never created — it can't log in either.
+    login = await client.post(
+        "/api/auth/login", json={"email": "b@example.com", "password": "supersecret1"}
+    )
+    assert login.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -99,13 +119,98 @@ async def test_logout_revokes_refresh_token(client):
 
 @pytest.mark.asyncio
 async def test_duplicate_email_rejected(client):
+    """Duplicate-email detection now only matters on the admin-created path
+    — the public path always rejects a second registration outright,
+    regardless of email, before this check would ever run."""
+    admin_headers = await _bootstrap_admin(client)
     payload = {
         "email": "dup@example.com",
         "full_name": "Dup",
         "password": "supersecret1",
     }
-    assert (await client.post("/api/auth/register", json=payload)).status_code == 201
-    assert (await client.post("/api/auth/register", json=payload)).status_code == 409
+    first = await client.post("/api/admin/users", json=payload, headers=admin_headers)
+    assert first.status_code == 201
+    second = await client.post("/api/admin/users", json=payload, headers=admin_headers)
+    assert second.status_code == 409
+
+
+async def _bootstrap_admin(client) -> dict[str, str]:
+    await client.post(
+        "/api/auth/register",
+        json={
+            "email": "admin@example.com",
+            "full_name": "Admin",
+            "password": "supersecret1",
+        },
+    )
+    login = await client.post(
+        "/api/auth/login",
+        json={"email": "admin@example.com", "password": "supersecret1"},
+    )
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+@pytest.mark.asyncio
+async def test_admin_created_user_succeeds(client):
+    admin_headers = await _bootstrap_admin(client)
+
+    created = await client.post(
+        "/api/admin/users",
+        json={
+            "email": "newuser@example.com",
+            "full_name": "New User",
+            "password": "supersecret1",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["email"] == "newuser@example.com"
+    assert body["role"] == "user"  # default role, not admin
+    assert "hashed_password" not in body
+
+    # And the created account can actually log in.
+    login = await client.post(
+        "/api/auth/login",
+        json={"email": "newuser@example.com", "password": "supersecret1"},
+    )
+    assert login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_create_user(client):
+    # A second account can only come from the admin endpoint now — use it to
+    # create a plain user, then prove that user can't use the same endpoint.
+    admin_headers = await _bootstrap_admin(client)
+    created = await client.post(
+        "/api/admin/users",
+        json={
+            "email": "plainuser@example.com",
+            "full_name": "Plain User",
+            "password": "supersecret1",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+
+    user_login = await client.post(
+        "/api/auth/login",
+        json={"email": "plainuser@example.com", "password": "supersecret1"},
+    )
+    user_headers = {
+        "Authorization": f"Bearer {user_login.json()['access_token']}"
+    }
+
+    denied = await client.post(
+        "/api/admin/users",
+        json={
+            "email": "shouldnotexist@example.com",
+            "full_name": "Should Not Exist",
+            "password": "supersecret1",
+        },
+        headers=user_headers,
+    )
+    assert denied.status_code == 403
 
 
 @pytest.mark.asyncio

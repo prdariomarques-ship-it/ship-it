@@ -1,16 +1,19 @@
-"""Read-only response models for the admin dashboard (Sprint 4).
+"""Response models for the admin dashboard (Sprint 4), plus one request model
+(`UserAdminCreate`) added when public self-registration was closed.
 
-Every field here is either sourced directly from an existing table/registry
-or explicitly nullable when the underlying data doesn't exist yet (e.g.
-per-execution duration/tokens — see docs/DASHBOARD.md "Limitações
-conhecidas"). Never include a token/secret/password field — see
-`admin/service.py` module docstring for the exclusion list this was
-checked against.
+Every response field here is either sourced directly from an existing
+table/registry or explicitly nullable when the underlying data doesn't exist
+yet (e.g. per-execution duration/tokens — see docs/DASHBOARD.md "Limitações
+conhecidas"). Never include a token/secret/password field in a response
+model — see `admin/service.py` module docstring for the exclusion list this
+was checked against.
 """
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from models.user import UserRole
 
 
 class ComponentStatus(BaseModel):
@@ -136,6 +139,17 @@ class UserAdminRead(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+
+
+class UserAdminCreate(BaseModel):
+    """Admin-only user creation — see `AuthService.create_user_as_admin`.
+    The only way to add an account once the bootstrap admin exists, now
+    that public `/auth/register` is closed after the first account."""
+
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    role: UserRole = UserRole.USER
 
 
 class WhatsAppStatus(BaseModel):
