@@ -1,0 +1,10 @@
+[Unit]
+Description=Dario OS — agenda da verificação do backup diário (03:15)
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

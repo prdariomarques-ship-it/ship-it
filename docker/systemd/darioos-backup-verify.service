@@ -1,0 +1,14 @@
+[Unit]
+Description=Dario OS — verificação do backup diário (PostgreSQL + Qdrant)
+After=network-online.target darioos-backup.service
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/dario-os
+EnvironmentFile=-%h/projects/dario-os/.env
+ExecStart=%h/projects/dario-os/scripts/verify-backup.sh
+TimeoutStartSec=300
+Restart=on-failure
+RestartSec=300
