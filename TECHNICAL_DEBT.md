@@ -5,6 +5,49 @@ não uma lista aspiracional. Cada item aponta a fonte onde foi originalmente
 registrado. Para o que é uma limitação de comportamento observável pelo
 usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
 
+## Achados do audit final de fechamento da Release 1.3.1 (2026-07-19)
+
+Consolidado do audit de produção final antes de fechar a v1.3.1
+(`RELEASE_1_3_1_POSTMORTEM.md`). Nenhum item classificado como P0 —
+os dois achados P0 do audit anterior (registro público aberto, corrida de
+execução duplicada de job) já foram corrigidos e fecham a v1.3.1.
+
+**P1**
+
+- **`docker-compose.yml` ainda tem `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dario}`**
+  — mesmo padrão de fallback silencioso pra credencial fraca que acabou de
+  ser corrigido no Grafana (`GF_SECURITY_ADMIN_PASSWORD:?...`), ainda não
+  aplicado aqui. O valor real em `.env` já foi rotacionado pra um valor
+  forte, mas o compose file em si não falha-fechado — se essa linha do
+  `.env` for perdida, o Postgres sobe silenciosamente com a senha fraca
+  `dario`. Correção: trocar pra `${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}`,
+  mesmo padrão já usado em `JWT_SECRET`/`WEBHOOK_SECRET`/`GF_SECURITY_ADMIN_PASSWORD`.
+- **`chat_router` e `workflows_router` sem nenhuma cobertura de teste** —
+  ambos montados e acessíveis em `main.py`, confirmado zero arquivo de teste
+  para nenhum dos dois. `chat` é a funcionalidade central de IA conversacional,
+  não um caminho secundário.
+- **Caddy não roteia `/health/ready` corretamente** — ver
+  `docs/issues/caddy-health-ready-routing.md` para problema/causa
+  raiz/correção sugerida completos. Alvo: v1.4.
+
+**P2**
+
+- **RBAC**: `contacts`/`church`/`store` não são `user_scoped` — qualquer
+  usuário autenticado (não só admin) lê/escreve todos os registros. Risco
+  reduzido depois do fechamento do registro público (só admin cria contas
+  agora), mas a lacuna de granularidade permanece caso o modelo de
+  confiança mude.
+- **`backend/business/models.py`**: schema CRM completo (`Client`, `Deal`,
+  `Followup`, `Project`, `KPI` — 5 tabelas, índices, FKs, 5 migrations),
+  zero referência em qualquer router/service/tool do resto do backend.
+  Decisão pendente: conectar como feature real ou remover as migrations.
+- **Sem timeout por chamada individual a provider LLM** — o timeout global
+  por job (fechado nesta release, ver P0-2 no postmortem) bound o tempo
+  total de execução, mas não localiza qual chamada específica ficou lenta.
+- **Sem fluxo de "esqueci minha senha"** — só existe troca de senha
+  autenticada (`POST /auth/change-password`); já causou intervenção manual
+  direta no banco antes (ver `BOOTSTRAP_ADMIN.md`).
+
 ## Observabilidade / auditoria
 
 - **Sem tabela de auditoria de execução por agente/tool.** Os contadores
@@ -22,6 +65,14 @@ usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
   Contacts são domínios *read-through* (consultam a API a cada chamada,
   não indexam) — não há dado real de "último sync" para esses três. Ver
   `docs/DASHBOARD.md`.
+- **Sem métrica Prometheus dedicada para "job atingiu o timeout global de
+  execução"** (introduzido no fechamento da v1.3.1, `jobs_execution_timeout_seconds`).
+  Hoje só é visível procurando `"execution limit"` no log persistido
+  (`jobs/events.py`) — uma métrica dedicada (contador por nome de job)
+  tornaria isso monitorável de verdade em produção.
+- **GitHub Issue #2** (`getConnectionState()` lança `TypeError`) segue
+  aberta — não bloqueia (fallback via `isConnected()` funciona), causa raiz
+  já identificada (mudança de formato interno do WhatsApp Web).
 
 ## Segurança
 
@@ -43,20 +94,32 @@ usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
 
 ## Confiabilidade de integrações externas
 
-- **Sem retry/backoff configurável para os providers Google** (Gmail,
-  Calendar, Contacts, Drive) — diferente do WhatsApp, que já tem
-  (`WHATSAPP_REQUEST_MAX_ATTEMPTS`/`WHATSAPP_REQUEST_BACKOFF_SECONDS`).
-  Planejado para v1.3.0 — ver `ROADMAP_v2.md`.
-- **Sem circuit breaker, sem respeito a `Retry-After`, sem bulkhead** em
-  nenhum provider (Google, LLM, WhatsApp). Planejado para v1.3.0.
+- ~~Sem retry/backoff configurável para os providers Google~~ **Resolvido
+  no fechamento da v1.3.1** — `providers/google_http.py`, com respeito a
+  `Retry-After` incluso. Ver `RELEASE_1_3_1_POSTMORTEM.md`.
+- **Sem circuit breaker, nem bulkhead** em nenhum provider (Google, LLM,
+  WhatsApp) — o respeito a `Retry-After` já existe para o Google (acima) e
+  para o WhatsApp; circuit breaker/bulkhead seguem ausentes em todos.
+- **Sem timeout por chamada individual a provider LLM** (ver seção do
+  audit de fechamento no topo deste arquivo) — o timeout global por job
+  cobre o caso mais grave (execução duplicada), mas não localiza qual
+  chamada específica ficou lenta.
+- **Semântica de cancelamento sob Postgres/asyncpg real não testada** — o
+  timeout global de job (`jobs/worker.py`) usa `asyncio.wait_for`, testado
+  contra SQLite; o comportamento de uma conexão asyncpg real sendo
+  cancelada a meio de uma operação não foi verificado neste ciclo.
 
 ## Backup / disaster recovery
 
-- **Volume do Qdrant sem backup automatizado.** `scripts/backup.sh` cobre
-  apenas o PostgreSQL. O texto original de cada memória vive em
-  `Embedding.content` (Postgres, coberto por backup), então uma
-  reconstrução manual do índice Qdrant é teoricamente possível, mas não
-  há script pronto para isso. Ver `DISASTER_RECOVERY.md`.
+- ~~Volume do Qdrant sem backup automatizado~~ **Resolvido no fechamento da
+  v1.3.1** — `scripts/backup.sh` agora cobre Postgres e Qdrant, com timer
+  systemd (03:00) e watchdog de verificação (03:15). Ver `BACKUP.md`,
+  `RELEASE_1_3_1_POSTMORTEM.md`.
+- **Restore do Postgres nunca testado ponta a ponta contra dado real** —
+  `scripts/restore.sh` automatiza os passos, mas rodá-lo de verdade
+  apagaria o banco atual só para provar o script, risco desproporcional ao
+  que estava sendo validado. O restore do Qdrant já foi testado ao vivo
+  (ver `RESTORE.md`); o do Postgres segue como validação pendente.
 
 ## Limitações de domínio, aceitas por decisão de escopo (não bugs)
 
