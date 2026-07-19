@@ -21,9 +21,10 @@ audit final de produção (`RELEASE_1_3_1_POSTMORTEM.md`) e do backlog de
 
 ## Should Have
 
-4. **Cobertura de teste para `workflows_router`.** Mesma lacuna do item 3,
-   exposição real menor (sem automação n8n ativa configurada hoje).
-   Esforço: 1–2h.
+4. ~~Cobertura de teste para `workflows_router`~~ **Concluído** — junto com
+   o item 3 (Must Have) na mesma sessão de fechamento dos itens de
+   cobertura. `workflows/router.py` e `workflows/service.py`: 100% de
+   cobertura de statement, 13 testes. Ver commit `fa3585e`.
 5. **Timeout por chamada individual a provider LLM** (openai/anthropic/
    gemini/glm/ollama). O timeout global por job (fechado na v1.3.1) cobre
    o caso mais grave (execução duplicada), mas não localiza qual chamada

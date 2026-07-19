@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     # means no fallback — a provider exception propagates, same as before.
     llm_fallback_provider: str = ""
 
+    # Per-call timeout for every LLM provider (openai/anthropic/gemini and
+    # their subclasses glm/ollama). Without this, the openai/anthropic SDKs
+    # default to a 600s read timeout — longer than jobs_execution_timeout_seconds
+    # (240s), so the job-level timeout was the only thing bounding a slow call
+    # in practice, with no way to tell "this LLM call was slow" apart from any
+    # other cause of a job timing out. A tighter, provider-level timeout fails
+    # with a specific, attributable error instead.
+    llm_request_timeout_seconds: float = 60.0
+
     openai_api_key: str = ""
     openai_base_url: str = ""  # override for OpenAI-compatible gateways
     openai_model: str = "gpt-4o-mini"

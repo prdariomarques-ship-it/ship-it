@@ -24,6 +24,7 @@ from providers.whatsapp.evolution.provider import EvolutionProvider
 from providers.whatsapp.factory import get_whatsapp_provider
 from providers.whatsapp.official.provider import OfficialProvider
 from providers.whatsapp.openwa.provider import OpenWAProvider
+from utils.config import get_settings
 
 
 def test_whatsapp_factory_returns_configured_provider():
@@ -290,6 +291,89 @@ async def test_anthropic_chat_reports_token_usage():
         result = await provider.chat([ChatMessage(role="user", content="oi")])
     assert result.usage.prompt_tokens == 15
     assert result.usage.completion_tokens == 6
+
+
+# --- Per-call LLM timeout (v1.4 roadmap item 5) -----------------------------
+# Without an explicit timeout, both SDKs default to a 600s read timeout --
+# longer than jobs_execution_timeout_seconds (240s), so a slow call was only
+# ever bounded by the job-level timeout, with no way to tell "this LLM call
+# was slow" apart from any other cause. Every provider now gets its own,
+# tighter timeout from llm_request_timeout_seconds.
+
+
+def test_openai_client_uses_the_configured_timeout():
+    provider = OpenAIProvider(api_key="test-key")
+    assert provider.client.timeout == get_settings().llm_request_timeout_seconds
+
+
+def test_anthropic_client_uses_the_configured_timeout():
+    provider = AnthropicProvider(api_key="test-key")
+    assert provider.client.timeout == get_settings().llm_request_timeout_seconds
+
+
+def test_glm_inherits_the_configured_timeout():
+    """GLM subclasses OpenAIProvider and reuses its client construction --
+    confirms the timeout isn't lost across that inheritance."""
+    provider = GLMProvider(api_key="test-key")
+    assert provider.client.timeout == get_settings().llm_request_timeout_seconds
+
+
+def test_ollama_inherits_the_configured_timeout():
+    provider = OllamaProvider(base_url="http://localhost:11434/v1")
+    assert provider.client.timeout == get_settings().llm_request_timeout_seconds
+
+
+def test_llm_request_timeout_is_configurable(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_request_timeout_seconds", 12.5)
+    assert OpenAIProvider(api_key="test-key").client.timeout == 12.5
+    assert AnthropicProvider(api_key="test-key").client.timeout == 12.5
+
+
+@pytest.mark.asyncio
+async def test_gemini_chat_uses_the_configured_timeout(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_request_timeout_seconds", 12.5)
+
+    fake_response = MagicMock()
+    fake_response.raise_for_status = MagicMock()
+    fake_response.json = MagicMock(
+        return_value={"candidates": [{"content": {"parts": [{"text": "oi"}]}}]}
+    )
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(return_value=fake_response)
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch(
+        "providers.llm.gemini.provider.httpx.AsyncClient", return_value=fake_client
+    ) as mock_async_client:
+        provider = GeminiProvider(api_key="test-key")
+        await provider.chat([ChatMessage(role="user", content="oi")])
+
+    assert mock_async_client.call_args.kwargs["timeout"] == 12.5
+
+
+@pytest.mark.asyncio
+async def test_gemini_embed_uses_the_configured_timeout(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_request_timeout_seconds", 12.5)
+
+    fake_response = MagicMock()
+    fake_response.raise_for_status = MagicMock()
+    fake_response.json = MagicMock(return_value={"embedding": {"values": [0.1, 0.2]}})
+    fake_client = MagicMock()
+    fake_client.post = AsyncMock(return_value=fake_response)
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch(
+        "providers.llm.gemini.provider.httpx.AsyncClient", return_value=fake_client
+    ) as mock_async_client:
+        provider = GeminiProvider(api_key="test-key")
+        await provider.embed("texto")
+
+    assert mock_async_client.call_args.kwargs["timeout"] == 12.5
 
 
 # --- Multi-LLM: factory selection -------------------------------------------

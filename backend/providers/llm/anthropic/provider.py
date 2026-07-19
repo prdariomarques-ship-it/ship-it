@@ -26,6 +26,7 @@ class AnthropicProvider(LLMProvider):
         self._api_key = api_key if api_key is not None else settings.anthropic_api_key
         self._model = model or settings.anthropic_model
         self._max_tokens = settings.anthropic_max_tokens
+        self._timeout = settings.llm_request_timeout_seconds
         self._client: AsyncAnthropic | None = None
 
     @property
@@ -35,7 +36,7 @@ class AnthropicProvider(LLMProvider):
     @property
     def client(self) -> AsyncAnthropic:
         if self._client is None:
-            self._client = AsyncAnthropic(api_key=self._api_key)
+            self._client = AsyncAnthropic(api_key=self._api_key, timeout=self._timeout)
         return self._client
 
     def _to_anthropic_messages(

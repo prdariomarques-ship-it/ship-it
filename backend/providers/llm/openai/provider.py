@@ -37,6 +37,7 @@ class OpenAIProvider(LLMProvider):
         self._model = model or settings.openai_model
         self._embedding_model = embedding_model or settings.openai_embedding_model
         self._dimensions = settings.embedding_dimensions
+        self._timeout = settings.llm_request_timeout_seconds
         self._client: AsyncOpenAI | None = None
 
     @property
@@ -46,7 +47,11 @@ class OpenAIProvider(LLMProvider):
     @property
     def client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+            self._client = AsyncOpenAI(
+                api_key=self._api_key,
+                base_url=self._base_url,
+                timeout=self._timeout,
+            )
         return self._client
 
     def _to_openai_messages(self, messages: list[ChatMessage]) -> list[dict]:

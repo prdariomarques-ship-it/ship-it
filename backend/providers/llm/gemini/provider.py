@@ -48,6 +48,7 @@ class GeminiProvider(LLMProvider):
         self._base_url = (base_url or settings.gemini_base_url).rstrip("/")
         self._model = model or settings.gemini_model
         self._embedding_model = embedding_model or settings.gemini_embedding_model
+        self._timeout = settings.llm_request_timeout_seconds
 
     @property
     def enabled(self) -> bool:
@@ -125,7 +126,7 @@ class GeminiProvider(LLMProvider):
             ]
 
         url = f"{self._base_url}/models/{self._model}:generateContent"
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(url, params={"key": self._api_key}, json=body)
             response.raise_for_status()
             data = response.json()
@@ -160,7 +161,7 @@ class GeminiProvider(LLMProvider):
             return [0.0] * get_settings().embedding_dimensions
 
         url = f"{self._base_url}/models/{self._embedding_model}:embedContent"
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(
                 url,
                 params={"key": self._api_key},
