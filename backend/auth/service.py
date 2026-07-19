@@ -83,6 +83,28 @@ class AuthService:
         await self.refresh_tokens.revoke(record, now)
         return await self._issue_pair(user)
 
+    async def change_password(
+        self, user: User, current_password: str, new_password: str
+    ) -> None:
+        """Requires the current password — this is a self-service change for
+        an authenticated session, not a "forgot password" recovery flow (that
+        would need email delivery, which isn't configured/decided yet; see
+        BOOTSTRAP_ADMIN.md for the manual DB-write recovery this replaces for
+        the "I still have a session" case)."""
+        valid = await asyncio.to_thread(
+            verify_password, current_password, user.hashed_password
+        )
+        if not valid:
+            raise AuthError("Current password is incorrect")
+        hashed = await asyncio.to_thread(hash_password, new_password)
+        await self.users.update(user, hashed_password=hashed)
+        # Every other refresh token stops working immediately — a leaked or
+        # about-to-be-abandoned password shouldn't keep granting access
+        # through a session opened before the change.
+        await self.refresh_tokens.revoke_all_for_user(
+            user.id, datetime.now(timezone.utc)
+        )
+
     async def logout(self, refresh_token: str) -> None:
         record = await self.refresh_tokens.get_by_hash(
             _hash_refresh_token(refresh_token)

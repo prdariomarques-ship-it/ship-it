@@ -13,6 +13,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from providers.google_http import google_request
 from providers.mail.base import (
     EmailMessage,
     EmailSearchQuery,
@@ -88,9 +89,7 @@ class GmailProvider(MailProvider):
 
     async def _token_request(self, data: dict) -> OAuthTokens:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(self._token_url, data=data)
-                response.raise_for_status()
+            response = await google_request("gmail", "POST", self._token_url, data=data)
         except httpx.HTTPError as exc:
             logger.error("Gmail OAuth token request failed: %s", exc)
             raise MailProviderError(f"Gmail OAuth token request failed: {exc}") from exc
@@ -109,13 +108,13 @@ class GmailProvider(MailProvider):
         self, access_token: str, path: str, params: dict | None = None
     ) -> dict:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.get(
-                    f"{self._api_base_url}{path}",
-                    headers=self._headers(access_token),
-                    params=params,
-                )
-                response.raise_for_status()
+            response = await google_request(
+                "gmail",
+                "GET",
+                f"{self._api_base_url}{path}",
+                headers=self._headers(access_token),
+                params=params,
+            )
         except httpx.HTTPError as exc:
             logger.error("Gmail API request failed (%s): %s", path, exc)
             raise MailProviderError(f"Gmail API request failed: {exc}") from exc

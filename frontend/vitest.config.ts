@@ -17,6 +17,10 @@ export default defineConfig({
       reporter: ["text", "text-summary"],
       include: [
         "components/admin/**/*.{ts,tsx}",
+        "components/calendar/**/*.{ts,tsx}",
+        "components/tasks/**/*.{ts,tsx}",
+        "components/store/**/*.{ts,tsx}",
+        "components/church/**/*.{ts,tsx}",
         "lib/**/*.{ts,tsx}",
         "hooks/**/*.{ts,tsx}",
       ],

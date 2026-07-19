@@ -18,6 +18,7 @@ from providers.contacts.base import (
     NewContact,
     OAuthTokens,
 )
+from providers.google_http import google_request
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -100,9 +101,9 @@ class GoogleContactsProvider(ContactsProvider):
 
     async def _token_request(self, data: dict) -> OAuthTokens:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(self._token_url, data=data)
-                response.raise_for_status()
+            response = await google_request(
+                "google_contacts", "POST", self._token_url, data=data
+            )
         except httpx.HTTPError as exc:
             logger.error("Google Contacts OAuth token request failed: %s", exc)
             raise ContactsProviderError(
@@ -123,14 +124,13 @@ class GoogleContactsProvider(ContactsProvider):
         self, method: str, access_token: str, path: str, **kwargs
     ) -> dict:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.request(
-                    method,
-                    f"{self._api_base_url}{path}",
-                    headers=self._headers(access_token),
-                    **kwargs,
-                )
-                response.raise_for_status()
+            response = await google_request(
+                "google_contacts",
+                method,
+                f"{self._api_base_url}{path}",
+                headers=self._headers(access_token),
+                **kwargs,
+            )
         except httpx.HTTPError as exc:
             logger.error(
                 "Google People API request failed (%s %s): %s", method, path, exc

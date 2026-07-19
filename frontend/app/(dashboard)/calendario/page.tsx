@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
+
 import PageHeader from "@/components/PageHeader";
+import CalendarEventForm from "@/components/calendar/CalendarEventForm";
 import { useApi } from "@/hooks/useApi";
 
 interface CalendarEvent {
@@ -28,7 +31,8 @@ function groupByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
 }
 
 export default function CalendarioPage() {
-  const { data, loading, error } = useApi<CalendarEvent[]>("/calendar?limit=100");
+  const { data, loading, error, reload } = useApi<CalendarEvent[]>("/calendar?limit=100");
+  const [showForm, setShowForm] = useState(false);
 
   const sorted = (data ?? [])
     .slice()
@@ -41,6 +45,25 @@ export default function CalendarioPage() {
         title="Calendário"
         subtitle="Seus eventos organizados por dia."
       />
+
+      <button
+        className="button"
+        type="button"
+        onClick={() => setShowForm((v) => !v)}
+        style={{ marginBottom: "1.25rem" }}
+      >
+        {showForm ? "Cancelar" : "Novo evento"}
+      </button>
+
+      {showForm && (
+        <CalendarEventForm
+          onCreated={() => {
+            setShowForm(false);
+            reload();
+          }}
+        />
+      )}
+
       {loading && <p className="muted">Carregando…</p>}
       {error && <p className="error">Erro: {error}</p>}
       {!loading && !error && groups.size === 0 && (

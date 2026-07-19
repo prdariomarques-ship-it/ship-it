@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import CurrentUser
 from auth.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     RefreshRequest,
     TokenResponse,
@@ -68,3 +69,15 @@ async def logout(payload: RefreshRequest, service: Service) -> None:
 @router.get("/me", response_model=UserRead)
 async def me(current_user: CurrentUser) -> User:
     return current_user
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: ChangePasswordRequest, current_user: CurrentUser, service: Service
+) -> None:
+    try:
+        await service.change_password(
+            current_user, payload.current_password, payload.new_password
+        )
+    except AuthError as exc:
+        raise _http_error(exc) from exc

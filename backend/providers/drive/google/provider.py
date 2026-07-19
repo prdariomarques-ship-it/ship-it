@@ -25,6 +25,7 @@ from providers.drive.base import (
     OAuthTokens,
     UnsupportedDriveFileTypeError,
 )
+from providers.google_http import google_request
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -99,9 +100,9 @@ class GoogleDriveProvider(DriveProvider):
 
     async def _token_request(self, data: dict) -> OAuthTokens:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(self._token_url, data=data)
-                response.raise_for_status()
+            response = await google_request(
+                "google_drive", "POST", self._token_url, data=data
+            )
         except httpx.HTTPError as exc:
             logger.error("Google Drive OAuth token request failed: %s", exc)
             raise DriveProviderError(
@@ -122,13 +123,13 @@ class GoogleDriveProvider(DriveProvider):
         self, access_token: str, path: str, params: dict | None = None
     ) -> dict:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.get(
-                    f"{self._api_base_url}{path}",
-                    headers=self._headers(access_token),
-                    params=params,
-                )
-                response.raise_for_status()
+            response = await google_request(
+                "google_drive",
+                "GET",
+                f"{self._api_base_url}{path}",
+                headers=self._headers(access_token),
+                params=params,
+            )
         except httpx.HTTPError as exc:
             logger.error("Google Drive API request failed (%s): %s", path, exc)
             raise DriveProviderError(f"Google Drive API request failed: {exc}") from exc
@@ -138,13 +139,14 @@ class GoogleDriveProvider(DriveProvider):
         self, access_token: str, path: str, params: dict | None = None
     ) -> bytes:
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.get(
-                    f"{self._api_base_url}{path}",
-                    headers=self._headers(access_token),
-                    params=params,
-                )
-                response.raise_for_status()
+            response = await google_request(
+                "google_drive",
+                "GET",
+                f"{self._api_base_url}{path}",
+                headers=self._headers(access_token),
+                params=params,
+                timeout=60,
+            )
         except httpx.HTTPError as exc:
             logger.error("Google Drive download failed (%s): %s", path, exc)
             raise DriveProviderError(f"Google Drive download failed: {exc}") from exc

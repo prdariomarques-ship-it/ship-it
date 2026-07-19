@@ -125,3 +125,94 @@ async def test_wrong_password_rejected(client):
 async def test_protected_route_requires_token(client):
     assert (await client.get("/api/auth/me")).status_code == 401
     assert (await client.get("/api/tasks")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_then_login_with_new_password(client):
+    await client.post(
+        "/api/auth/register",
+        json={"email": "cp@example.com", "full_name": "CP", "password": "supersecret1"},
+    )
+    login = await client.post(
+        "/api/auth/login", json={"email": "cp@example.com", "password": "supersecret1"}
+    )
+    token = login.json()["access_token"]
+
+    changed = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": "supersecret1", "new_password": "newsecret2"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert changed.status_code == 204
+
+    old_login = await client.post(
+        "/api/auth/login", json={"email": "cp@example.com", "password": "supersecret1"}
+    )
+    assert old_login.status_code == 401
+
+    new_login = await client.post(
+        "/api/auth/login", json={"email": "cp@example.com", "password": "newsecret2"}
+    )
+    assert new_login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_change_password_rejects_wrong_current_password(client):
+    await client.post(
+        "/api/auth/register",
+        json={"email": "cpw@example.com", "full_name": "CPW", "password": "supersecret1"},
+    )
+    login = await client.post(
+        "/api/auth/login", json={"email": "cpw@example.com", "password": "supersecret1"}
+    )
+    token = login.json()["access_token"]
+
+    changed = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": "wrong-password", "new_password": "newsecret2"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert changed.status_code == 401
+
+    # Old password still works — nothing was changed.
+    still_works = await client.post(
+        "/api/auth/login", json={"email": "cpw@example.com", "password": "supersecret1"}
+    )
+    assert still_works.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_change_password_requires_authentication(client):
+    response = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": "x", "new_password": "newsecret2"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_change_password_revokes_other_sessions(client):
+    """A refresh token issued before the change must stop working — a
+    leaked/lost password shouldn't keep granting access through a session
+    opened before it was changed."""
+    await client.post(
+        "/api/auth/register",
+        json={"email": "cprt@example.com", "full_name": "CPRT", "password": "supersecret1"},
+    )
+    login = await client.post(
+        "/api/auth/login", json={"email": "cprt@example.com", "password": "supersecret1"}
+    )
+    token = login.json()["access_token"]
+    old_refresh_token = login.json()["refresh_token"]
+
+    changed = await client.post(
+        "/api/auth/change-password",
+        json={"current_password": "supersecret1", "new_password": "newsecret2"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert changed.status_code == 204
+
+    refreshed = await client.post(
+        "/api/auth/refresh", json={"refresh_token": old_refresh_token}
+    )
+    assert refreshed.status_code == 401

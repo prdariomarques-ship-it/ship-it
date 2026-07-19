@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
+
 import PageHeader from "@/components/PageHeader";
 import ResourceTable from "@/components/ResourceTable";
+import TaskForm from "@/components/tasks/TaskForm";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pendente",
@@ -11,10 +14,33 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function TarefasPage() {
+  const [showForm, setShowForm] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
   return (
     <>
       <PageHeader title="Tarefas" subtitle="Tudo o que precisa ser feito." />
+
+      <button
+        className="button"
+        type="button"
+        onClick={() => setShowForm((v) => !v)}
+        style={{ marginBottom: "1.25rem" }}
+      >
+        {showForm ? "Cancelar" : "Nova tarefa"}
+      </button>
+
+      {showForm && (
+        <TaskForm
+          onCreated={() => {
+            setShowForm(false);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
+
       <ResourceTable
+        key={refreshKey}
         path="/tasks"
         columns={[
           { key: "title", label: "Tarefa" },

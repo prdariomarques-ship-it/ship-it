@@ -44,19 +44,20 @@ def _mock_response(
 
 
 def _patch_get(get_result=None, post_result=None):
+    """OAuth token calls (`post_result`) and API/download calls
+    (`get_result`) both go through `google_http.google_request`, which
+    always calls `client.request(method, url, ...)` — never
+    `client.get`/`.post` directly."""
+    result = get_result if get_result is not None else post_result
     client = MagicMock()
-    if get_result is not None:
-        client.get = AsyncMock(
-            side_effect=get_result
-            if isinstance(get_result, list)
-            else [get_result] * 20
+    if result is not None:
+        client.request = AsyncMock(
+            side_effect=result if isinstance(result, list) else [result] * 20
         )
-    if post_result is not None:
-        client.post = AsyncMock(return_value=post_result)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     return patch(
-        "providers.drive.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ), client
 
 
@@ -107,15 +108,16 @@ async def test_refresh_access_token_preserves_the_original_refresh_token(provide
 
 
 @pytest.mark.asyncio
-async def test_token_request_failure_raises_provider_error(provider):
+async def test_token_request_failure_raises_provider_error(provider, monkeypatch):
     import httpx as httpx_module
 
+    monkeypatch.setattr(get_settings(), "google_request_backoff_seconds", 0)
     client = MagicMock()
-    client.post = AsyncMock(side_effect=httpx_module.ConnectError("down"))
+    client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     with patch(
-        "providers.drive.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ):
         with pytest.raises(DriveProviderError):
             await provider.exchange_code("auth-code")
@@ -150,22 +152,23 @@ async def test_search_files_sends_the_built_query(provider):
         await provider.search_files(
             "access-token", DriveSearchQuery(name="Contrato", folder_id="f-1")
         )
-    sent_params = client.get.call_args.kwargs["params"]
+    sent_params = client.request.call_args.kwargs["params"]
     assert "name contains 'Contrato'" in sent_params["q"]
     assert "'f-1' in parents" in sent_params["q"]
     assert "trashed = false" in sent_params["q"]
 
 
 @pytest.mark.asyncio
-async def test_search_files_api_failure_raises_provider_error(provider):
+async def test_search_files_api_failure_raises_provider_error(provider, monkeypatch):
     import httpx as httpx_module
 
+    monkeypatch.setattr(get_settings(), "google_request_backoff_seconds", 0)
     client = MagicMock()
-    client.get = AsyncMock(side_effect=httpx_module.ConnectError("down"))
+    client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     with patch(
-        "providers.drive.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ):
         with pytest.raises(DriveProviderError):
             await provider.search_files("access-token", DriveSearchQuery())
@@ -230,7 +233,7 @@ async def test_read_file_text_rejects_oversized_files_before_downloading(provide
     with patcher:
         with pytest.raises(DriveFileTooLargeError):
             await provider.read_file_text("access-token", "f1")
-    assert client.get.await_count == 1  # metadata only — never attempted the download
+    assert client.request.await_count == 1  # metadata only — never attempted the download
 
 
 @pytest.mark.asyncio

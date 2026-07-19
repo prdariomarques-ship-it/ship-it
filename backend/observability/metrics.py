@@ -72,6 +72,13 @@ WHATSAPP_SESSION_STATUS = Gauge(
     labelnames=("provider",),
 )
 
+GOOGLE_PROVIDER_REQUESTS = Counter(
+    "darioos_google_provider_requests_total",
+    "Outbound HTTP calls made to a Google API (gmail/google_calendar/"
+    "google_contacts/google_drive)",
+    labelnames=("provider", "status"),  # status: ok | error
+)
+
 PIPELINE_STAGE_DURATION = Histogram(
     "darioos_pipeline_stage_duration_seconds",
     "Duration of each Cognitive Pipeline stage",
@@ -179,6 +186,10 @@ def record_whatsapp_request(provider: str, status: str) -> None:
 
 def record_whatsapp_session_status(provider: str, connected: bool) -> None:
     WHATSAPP_SESSION_STATUS.labels(provider).set(1 if connected else 0)
+
+
+def record_google_request(provider: str, status: str) -> None:
+    GOOGLE_PROVIDER_REQUESTS.labels(provider, status).inc()
 
 
 def record_pipeline_stage(stage: str, duration_seconds: float) -> None:

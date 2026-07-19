@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 
 from models.refresh_token import RefreshToken
 from repositories.base import SQLAlchemyRepository
@@ -14,6 +14,18 @@ class RefreshTokenRepository(SQLAlchemyRepository[RefreshToken]):
 
     async def revoke(self, token: RefreshToken, at: datetime) -> None:
         token.revoked_at = at
+        await self.session.commit()
+
+    async def revoke_all_for_user(self, user_id: int, at: datetime) -> None:
+        """Invalidate every other active session — called on password change,
+        so a leaked/lost password stops granting access the moment it's
+        changed, not just on its own natural expiry."""
+        await self.session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=at)
+            .execution_options(synchronize_session=False)
+        )
         await self.session.commit()
 
     async def purge_expired(self, user_id: int, now: datetime) -> None:

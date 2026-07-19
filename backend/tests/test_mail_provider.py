@@ -25,21 +25,21 @@ def _mock_response(json_body: dict) -> MagicMock:
 
 
 def _patch_client(get_result=None, post_result=None):
-    """`get_result`: a single response (returned every call) or a list of
-    responses (one per successive `client.get` call, in order)."""
+    """`get_result`/`post_result`: a single response (returned every call) or
+    a list of responses (one per successive request, in order). Every call
+    (GET or POST) now goes through `google_http.google_request`, which always
+    calls `client.request(method, url, ...)` — never `client.get`/`.post`
+    directly — so both map onto the same mocked `client.request`."""
+    result = get_result if get_result is not None else post_result
     client = MagicMock()
-    if get_result is not None:
-        client.get = AsyncMock(
-            side_effect=get_result
-            if isinstance(get_result, list)
-            else [get_result] * 20
+    if result is not None:
+        client.request = AsyncMock(
+            side_effect=result if isinstance(result, list) else [result] * 20
         )
-    if post_result is not None:
-        client.post = AsyncMock(return_value=post_result)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     return patch(
-        "providers.mail.gmail.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ), client
 
 
@@ -79,7 +79,7 @@ async def test_exchange_code_returns_tokens(provider):
         tokens = await provider.exchange_code("auth-code")
     assert tokens.access_token == "at1"
     assert tokens.refresh_token == "rt1"
-    client.post.assert_awaited_once()
+    client.request.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -94,14 +94,17 @@ async def test_refresh_access_token_preserves_the_original_refresh_token(provide
 
 
 @pytest.mark.asyncio
-async def test_token_request_http_failure_raises_mail_provider_error(provider):
+async def test_token_request_http_failure_raises_mail_provider_error(
+    provider, monkeypatch
+):
     import httpx as httpx_module
 
+    monkeypatch.setattr(get_settings(), "google_request_backoff_seconds", 0)
     client = MagicMock()
-    client.post = AsyncMock(side_effect=httpx_module.ConnectError("down"))
+    client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.mail.gmail.provider.httpx.AsyncClient", return_value=client):
+    with patch("providers.google_http.httpx.AsyncClient", return_value=client):
         with pytest.raises(MailProviderError):
             await provider.exchange_code("auth-code")
 
@@ -141,14 +144,15 @@ async def test_search_lists_then_fetches_metadata_for_each_message(provider):
 
 
 @pytest.mark.asyncio
-async def test_search_api_failure_raises_mail_provider_error(provider):
+async def test_search_api_failure_raises_mail_provider_error(provider, monkeypatch):
     import httpx as httpx_module
 
+    monkeypatch.setattr(get_settings(), "google_request_backoff_seconds", 0)
     client = MagicMock()
-    client.get = AsyncMock(side_effect=httpx_module.ConnectError("down"))
+    client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    with patch("providers.mail.gmail.provider.httpx.AsyncClient", return_value=client):
+    with patch("providers.google_http.httpx.AsyncClient", return_value=client):
         with pytest.raises(MailProviderError):
             await provider.search("access-token", EmailSearchQuery())
 
@@ -194,7 +198,7 @@ async def test_get_thread_url_encodes_the_thread_id(provider):
     patcher, client = _patch_client(get_result=[_mock_response({"messages": []})])
     with patcher:
         await provider.get_thread("access-token", "abc/../../drafts/xyz")
-    requested_url = client.get.call_args.args[0]
+    requested_url = client.request.call_args.args[1]
     assert "/threads/abc%2F..%2F..%2Fdrafts%2Fxyz" in requested_url
     assert "/threads/abc/../../drafts/xyz" not in requested_url
 

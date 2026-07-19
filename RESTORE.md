@@ -1,50 +1,27 @@
 # Restore — Dario OS
 
-Não existe um script de restore automatizado hoje (`scripts/restore.sh` não existe — ver `ROADMAP_v1.1.md`, item de backlog). Este documento é o procedimento manual atual.
+`scripts/restore.sh` automatiza a restauração de PostgreSQL e Qdrant a partir dos backups que `scripts/backup.sh` gera (ver `BACKUP.md`). Exige digitar uma frase de confirmação antes de sobrescrever qualquer coisa — não tem flag `--yes`/`--force` de propósito. Verificado ao vivo (restauração de uma coleção Qdrant a partir de um snapshot real, ponta a ponta) durante a correção do achado P0 de `PLATFORM_READINESS_REPORT_v1.3.1.md`.
+
+```bash
+scripts/restore.sh --postgres /caminho/para/darioos-YYYYMMDD-HHMMSS.sql.gz
+scripts/restore.sh --qdrant /caminho/para/qdrant-darioos_memory-YYYYMMDD-HHMMSS.snapshot
+scripts/restore.sh --postgres X.sql.gz --qdrant Y.snapshot   # os dois de uma vez
+```
 
 ## Antes de começar
 
-1. Confirme qual backup será restaurado e sua integridade (`gunzip -t arquivo.sql.gz`).
-2. Avise os usuários/operador: o sistema ficará indisponível durante a restauração.
-3. Se possível, faça um backup do estado atual antes de sobrescrever (mesmo que esteja corrompido/desatualizado — evita perder qualquer coisa recuperável).
+1. Confirme a integridade do backup (`gunzip -t arquivo.sql.gz` pro Postgres — o script já faz isso sozinho antes de restaurar).
+2. Avise os usuários/operador: o sistema ficará indisponível durante a restauração do Postgres (o backend é parado e religado pelo script).
+3. Se possível, rode `scripts/backup.sh` uma última vez antes de sobrescrever (mesmo que o estado atual esteja corrompido/desatualizado — evita perder qualquer coisa recuperável).
 
-## Restaurar o PostgreSQL
+## O que o script faz
 
-```bash
-cd docker
+- **PostgreSQL**: para o backend, recria o banco vazio, restaura o dump, sobe o backend de novo (que roda `alembic upgrade head` automaticamente — se o dump for de uma versão de schema mais antiga, as migrações pendentes são aplicadas nesse momento).
+- **Qdrant**: copia o arquivo de snapshot pra dentro do container (`docker cp` — a porta do Qdrant não é publicada pro host) e chama a própria API de recuperação de snapshot do Qdrant (`PUT /collections/{coleção}/snapshots/recover`), que reconstrói a coleção inteira a partir dele. O nome da coleção é extraído do próprio nome do arquivo (`qdrant-<coleção>-<timestamp>.snapshot` — o formato que `backup.sh` já usa).
 
-# Parar o backend para não haver escrita concorrente durante o restore
-docker compose stop backend
+**Sem um backup do Qdrant**: não há como recuperar embeddings/memória semântica perdida — o histórico estruturado (mensagens, contatos) no Postgres continua intacto, mas a busca semântica e o contexto de longo prazo dos agentes ficam vazios a partir desse ponto. O sistema continua funcionando (a busca semântica falha graciosamente — ver `docs/architecture.md`), só sem o contexto acumulado.
 
-# Recriar o banco vazio (CUIDADO: apaga os dados atuais do Postgres)
-docker compose exec -T postgres psql -U "${POSTGRES_USER:-dario}" -c \
-  "DROP DATABASE IF EXISTS ${POSTGRES_DB:-darioos}; CREATE DATABASE ${POSTGRES_DB:-darioos};"
-
-# Restaurar o dump
-gunzip -c /caminho/para/darioos-YYYYMMDD-HHMMSS.sql.gz | \
-  docker compose exec -T postgres psql -U "${POSTGRES_USER:-dario}" "${POSTGRES_DB:-darioos}"
-
-# Subir o backend de novo — ele roda `alembic upgrade head` automaticamente no start,
-# então se o dump for de uma versão de schema mais antiga, as migrações pendentes
-# são aplicadas nesse momento
-docker compose up -d backend
-```
-
-Depois de subir, confirme com `GET /health/ready` que o Postgres está `ok` e que `alembic upgrade head` não falhou (`docker compose logs backend`).
-
-## Restaurar o Qdrant (memória permanente)
-
-Se você tem um snapshot (ver `BACKUP.md`):
-
-```bash
-cd docker
-docker compose stop qdrant
-docker run --rm -v darioos_qdrant_data:/data -v /caminho/do/backup:/backup alpine \
-  sh -c "rm -rf /data/* && tar xzf /backup/qdrant-snapshot.tar.gz -C /data"
-docker compose start qdrant
-```
-
-**Sem um snapshot**: não há como recuperar embeddings/memória semântica perdida — o histórico estruturado (mensagens, contatos) no Postgres continua intacto, mas a busca semântica e o contexto de longo prazo dos agentes ficam vazios a partir desse ponto. O sistema continua funcionando (a busca semântica falha graciosamente — ver `docs/architecture.md`), só sem o contexto acumulado.
+Depois de restaurar o Postgres, confirme com `GET /health/ready` que está `ok` e que `alembic upgrade head` não falhou (`docker compose logs backend`).
 
 ## Restaurar a sessão do WhatsApp (OpenWA)
 
@@ -84,4 +61,6 @@ Checklist mínimo depois de qualquer restauração:
 
 ## Teste de restore
 
-Este release não incluiu um teste de restore ponta a ponta em ambiente real (ver `PRODUCTION_APPROVAL.md` §9/§11). Recomenda-se validar este procedimento manualmente em um ambiente de staging antes de depender dele em um incidente real.
+**Qdrant**: testado ao vivo ponta a ponta — snapshot real gerado por `scripts/backup.sh`, restaurado pela coleção com `scripts/restore.sh --qdrant`, `points_count` conferido igual antes/depois.
+
+**PostgreSQL**: o script automatiza os mesmos passos manuais já documentados aqui antes (`DROP DATABASE`/restaurar dump/subir backend) — não foi executado de ponta a ponta contra o banco de produção real nesta sessão (isso apagaria o banco atual só pra provar o script, um risco desproporcional ao que estava sendo validado). Recomenda-se validar isso pelo menos uma vez contra um dump real, num ambiente onde apagar o banco não tem custo, antes de depender do script num incidente de verdade.

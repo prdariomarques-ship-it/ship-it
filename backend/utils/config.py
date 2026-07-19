@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     openwa_base_url: str = "http://localhost:8002"
     openwa_api_key: str = ""
 
+    # Google-backed providers (Gmail, Calendar, Contacts, Drive): retry with
+    # exponential backoff for transient HTTP failures, same contract as
+    # whatsapp_request_* above (see providers/google_http.py).
+    google_request_max_attempts: int = 3
+    google_request_backoff_seconds: float = 1.0
+
     evolution_base_url: str = "http://localhost:8080"
     evolution_api_key: str = ""
     evolution_instance: str = "darioos"

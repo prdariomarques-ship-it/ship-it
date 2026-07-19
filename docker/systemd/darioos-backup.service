@@ -1,0 +1,8 @@
+[Unit]
+Description=Dario OS — backup diário (PostgreSQL + Qdrant)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/dario-os
+ExecStart=%h/projects/dario-os/scripts/backup.sh

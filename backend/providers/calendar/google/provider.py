@@ -20,6 +20,7 @@ from providers.calendar.base import (
     NewEvent,
     OAuthTokens,
 )
+from providers.google_http import google_request
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -82,9 +83,9 @@ class GoogleCalendarProvider(CalendarProvider):
 
     async def _token_request(self, data: dict) -> OAuthTokens:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(self._token_url, data=data)
-                response.raise_for_status()
+            response = await google_request(
+                "google_calendar", "POST", self._token_url, data=data
+            )
         except httpx.HTTPError as exc:
             logger.error("Google Calendar OAuth token request failed: %s", exc)
             raise CalendarProviderError(
@@ -105,14 +106,13 @@ class GoogleCalendarProvider(CalendarProvider):
         self, method: str, access_token: str, path: str, **kwargs
     ) -> dict:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.request(
-                    method,
-                    f"{self._api_base_url}{path}",
-                    headers=self._headers(access_token),
-                    **kwargs,
-                )
-                response.raise_for_status()
+            response = await google_request(
+                "google_calendar",
+                method,
+                f"{self._api_base_url}{path}",
+                headers=self._headers(access_token),
+                **kwargs,
+            )
         except httpx.HTTPError as exc:
             logger.error(
                 "Google Calendar API request failed (%s %s): %s", method, path, exc

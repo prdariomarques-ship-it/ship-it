@@ -28,19 +28,19 @@ def _mock_response(json_body: dict, status_code: int = 200) -> MagicMock:
 
 
 def _patch_client(request_result=None, post_result=None):
+    """OAuth token calls (`post_result`) and API calls (`request_result`) both
+    go through `google_http.google_request`, which always calls
+    `client.request(method, url, ...)` — never `client.post` directly."""
+    result = request_result if request_result is not None else post_result
     client = MagicMock()
-    if request_result is not None:
+    if result is not None:
         client.request = AsyncMock(
-            side_effect=request_result
-            if isinstance(request_result, list)
-            else [request_result] * 20
+            side_effect=result if isinstance(result, list) else [result] * 20
         )
-    if post_result is not None:
-        client.post = AsyncMock(return_value=post_result)
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     return patch(
-        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ), client
 
 
@@ -89,15 +89,16 @@ async def test_refresh_access_token_preserves_the_original_refresh_token(provide
 
 
 @pytest.mark.asyncio
-async def test_token_request_http_failure_raises_provider_error(provider):
+async def test_token_request_http_failure_raises_provider_error(provider, monkeypatch):
     import httpx as httpx_module
 
+    monkeypatch.setattr(get_settings(), "google_request_backoff_seconds", 0)
     client = MagicMock()
-    client.post = AsyncMock(side_effect=httpx_module.ConnectError("down"))
+    client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     with patch(
-        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ):
         with pytest.raises(ContactsProviderError):
             await provider.exchange_code("auth-code")
@@ -193,7 +194,7 @@ async def test_get_contact_rejects_a_resource_name_with_a_path_traversal_attempt
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     with patch(
-        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ):
         with pytest.raises(ContactsProviderError):
             await provider.get_contact("access-token", "people/c1/../otherContacts/x")
@@ -207,7 +208,7 @@ async def test_delete_contact_rejects_an_invalid_resource_name(provider):
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     with patch(
-        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ):
         with pytest.raises(ContactsProviderError):
             await provider.delete_contact("access-token", "people/c1?admin=true")
@@ -223,7 +224,7 @@ async def test_update_contact_rejects_an_invalid_resource_name_before_fetching_t
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
     with patch(
-        "providers.contacts.google.provider.httpx.AsyncClient", return_value=client
+        "providers.google_http.httpx.AsyncClient", return_value=client
     ):
         with pytest.raises(ContactsProviderError):
             await provider.update_contact(

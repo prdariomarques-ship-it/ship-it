@@ -2,61 +2,33 @@
 
 ## O que existe hoje
 
-`scripts/backup.sh` faz um dump do **PostgreSQL apenas**:
+`scripts/backup.sh` cobre **PostgreSQL e Qdrant**:
 
-```bash
-docker compose exec -T postgres pg_dump -U "${POSTGRES_USER:-dario}" "${POSTGRES_DB:-darioos}" \
-  | gzip > "$BACKUP_DIR/darioos-$STAMP.sql.gz"
-```
-
-- Formato: `pg_dump` plano, comprimido com `gzip`.
+- **PostgreSQL**: `pg_dump` plano, comprimido com `gzip`.
+- **Qdrant**: um snapshot por coleção (descoberta dinamicamente via `GET /collections`, não hardcoded), via a própria API de snapshot do Qdrant — consistente num ponto no tempo, sem precisar parar o container. O snapshot é criado dentro do volume do Qdrant, copiado para fora com `docker cp` (o Qdrant não publica sua porta pro host, e sua imagem não tem `curl`/`wget` — as chamadas HTTP à API do Qdrant passam pelo container do `backend`, que já está na mesma rede) e apagado de dentro do container logo em seguida, pra não acumular snapshot sobre snapshot no próprio volume.
 - Destino padrão: `$HOME/darioos-backups` (configurável via `BACKUP_DIR`).
-- Retenção: mantém os 14 dumps mais recentes (configurável via `RETENTION`), os mais antigos são apagados automaticamente pelo próprio script.
-- Agendamento: **não é automático** — precisa ser registrado manualmente no cron do host (o comentário no topo do script já sugere `0 3 * * *`, mas isso não está configurado em nenhum lugar do repositório).
+- Retenção: mantém os 14 mais recentes de cada tipo (configurável via `RETENTION`), aplicada por coleção no caso do Qdrant.
+- **Agendamento: automático.** `scripts/install-backup-timer.sh` instala e ativa um `systemd --user` timer (`docker/systemd/darioos-backup.{service,timer}`) rodando todo dia às 03:00 (com `Persistent=true` — se a máquina estiver desligada/suspensa nesse horário, roda assim que ligar de novo). Confirme que está ativo com `systemctl --user list-timers darioos-backup.timer`.
 
-## O que NÃO é coberto pelo backup automático
+## O que NÃO é coberto pelo backup automático (decisão, não lacuna)
 
-Isto é importante e não estava documentado antes deste release: `backup.sh` cobre apenas o Postgres. Os demais volumes nomeados do Docker Compose (`docker/docker-compose.yml`) não têm backup automatizado:
-
-| Volume | Conteúdo | Impacto se perdido |
+| Volume | Conteúdo | Por que não é coberto |
 | --- | --- | --- |
-| `qdrant_data` | **Memória permanente semântica** (embeddings de conversas, conhecimento) | Perda de toda a memória de longo prazo dos contatos — o histórico estruturado no Postgres continua, mas a busca semântica e o contexto acumulado somem |
-| `openwa_data` | Sessão autenticada do WhatsApp (provider padrão) | Necessário re-parear o dispositivo (escanear o QR code novamente) — o número de WhatsApp fica offline até isso ser feito manualmente |
-| `n8n_data` | Workflows e credenciais configuradas no n8n | Perda de todas as automações externas configuradas (só relevante para quem usa `workflow.trigger`) |
-| `redis_data` | Cache e janelas de rate limit | Sem impacto de dados permanentes — é projetado para ser efêmero (o sistema já degrada graciosamente sem Redis, ver `docs/architecture.md`) |
-| `caddy_data` / `caddy_config` | Certificados TLS emitidos pelo Let's Encrypt | Recuperável automaticamente (Caddy reemite na próxima subida), só custa uma pequena janela sem HTTPS válido |
-
-## Procedimento de backup completo recomendado (manual, até um script existir)
-
-Além de `scripts/backup.sh`, faça um snapshot dos volumes críticos periodicamente:
-
-```bash
-cd docker
-
-# Qdrant (memória permanente) — snapshot da API do próprio Qdrant
-curl -X POST http://localhost:6333/collections/darioos_memory/snapshots
-# O snapshot fica dentro do volume qdrant_data; copie-o para fora do host também.
-
-# OpenWA (sessão do WhatsApp) — parar o container antes de copiar para evitar
-# corrupção de arquivos de sessão em uso
-docker compose stop openwa
-docker run --rm -v darioos_openwa_data:/data -v "$BACKUP_DIR":/backup alpine \
-  tar czf /backup/openwa-session-$(date +%Y%m%d).tar.gz -C /data .
-docker compose start openwa
-
-# n8n (workflows)
-docker run --rm -v darioos_n8n_data:/data -v "$BACKUP_DIR":/backup alpine \
-  tar czf /backup/n8n-data-$(date +%Y%m%d).tar.gz -C /data .
-```
-
-(Nomes exatos dos volumes podem variar conforme o nome do projeto Compose — confirme com `docker volume ls`.)
+| `redis_data` | Cache e janelas de rate limit | Puramente efêmero por design — `cache_service` já degrada para um fallback em memória quando o Redis está fora do ar (ver `docs/architecture.md`). Nada durável vive ali. |
+| `openwa_data` | Perfil do Chromium usado pela sessão do WhatsApp | O próprio diretório é prefixado `_IGNORE_session` pela biblioteca (confirmado dentro do container em execução) — ela mesma sinaliza que é cache/perfil descartável. Não há mecanismo de exportação de sessão configurado neste deployment. Perdê-lo significa re-parear o WhatsApp (escanear o QR de novo), não perder dado — as mensagens já estão no Postgres. |
+| `n8n_data` | Workflows configurados no n8n | Sem automação real configurada lá neste ambiente até agora (o Cognitive Pipeline nativo não depende do n8n). Se isso mudar, adicionar ao `backup.sh` é direto — mesmo padrão de `docker cp` de um volume. |
+| `caddy_data` / `caddy_config` | Certificados TLS | Recuperável automaticamente (Caddy reemite na próxima subida). |
 
 ## Verificação de backup
 
-Nenhuma verificação automática de integridade existe hoje. Recomendação mínima até isso ser automatizado: após cada backup, confirmar que o arquivo não está vazio e que `gunzip -t` não reporta erro:
+Depois de qualquer execução, confirme que os arquivos não estão vazios e que o dump do Postgres é íntegro:
 
 ```bash
-gunzip -t "$BACKUP_DIR"/darioos-*.sql.gz && echo "backup íntegro"
+gunzip -t "$BACKUP_DIR"/darioos-*.sql.gz && echo "Postgres íntegro"
 ```
 
-O procedimento de restauração completo (com teste de restore) está em `RESTORE.md`. Este release **não** incluiu um teste de restore ponta a ponta — ver `PRODUCTION_APPROVAL.md` §11 e `ROADMAP_v1.1.md`.
+Não há verificação automática de checksum do snapshot do Qdrant além do que a própria API do Qdrant já reporta na criação (`checksum` no retorno de `POST .../snapshots`).
+
+## Restauração
+
+Ver `RESTORE.md` — `scripts/restore.sh` automatiza a restauração de ambos (Postgres e Qdrant), com confirmação obrigatória antes de sobrescrever dados atuais.
