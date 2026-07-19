@@ -25,15 +25,17 @@ audit final de produção (`RELEASE_1_3_1_POSTMORTEM.md`) e do backlog de
    o item 3 (Must Have) na mesma sessão de fechamento dos itens de
    cobertura. `workflows/router.py` e `workflows/service.py`: 100% de
    cobertura de statement, 13 testes. Ver commit `fa3585e`.
-5. **Timeout por chamada individual a provider LLM** (openai/anthropic/
-   gemini/glm/ollama). O timeout global por job (fechado na v1.3.1) cobre
-   o caso mais grave (execução duplicada), mas não localiza qual chamada
-   específica ficou lenta. Esforço: 3–4h.
-6. **Decidir o destino de `backend/business/models.py`.** Schema CRM
-   completo (5 tabelas, migrations, FKs), zero referência em qualquer
-   router/service/tool. Remover (se não há plano de usar) ou conectar como
-   feature real — qualquer uma das duas resolve a inconsistência atual.
-   Esforço: ~30min (remover) / bem mais (conectar).
+5. ~~Timeout por chamada individual a provider LLM~~ **Concluído** —
+   `llm_request_timeout_seconds` aplicado a openai/anthropic/gemini
+   (glm/ollama herdam via `OpenAIProvider`). Ver commit `cc13b9f`.
+6. ~~Decidir o destino de `backend/business/models.py`~~ **Concluído** —
+   removido (pacote inteiro: `models.py`, `schemas.py`, `__init__.py`).
+   Nenhum plano existia pra construir a feature CRM; conectá-la seria
+   escopo novo, fora da regra deste ciclo de limpeza. As migrations
+   (`MIG-001`–`MIG-005`) e as tabelas num banco real não foram tocadas —
+   já estavam desconectadas do `Base.metadata`/autogenerate antes disso
+   (`alembic/env.py` só importa `models`, nunca importou `business`), sem
+   risco adicional em deixá-las como estão. Ver `TECHNICAL_DEBT.md`.
 7. **CSP no Caddyfile.** HSTS já presente; falta `Content-Security-Policy`.
    Precisa de um domínio real com HTTPS pra testar com segurança — não dá
    pra validar contra `DOMAIN=localhost`. Esforço: 2–4h incluindo teste.

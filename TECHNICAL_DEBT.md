@@ -37,12 +37,21 @@ execução duplicada de job) já foram corrigidos e fecham a v1.3.1.
   reduzido depois do fechamento do registro público (só admin cria contas
   agora), mas a lacuna de granularidade permanece caso o modelo de
   confiança mude.
-- **`backend/business/models.py`**: schema CRM completo (`Client`, `Deal`,
-  `Followup`, `Project`, `KPI` — 5 tabelas, índices, FKs, 5 migrations),
-  zero referência em qualquer router/service/tool do resto do backend.
-  Decisão pendente: conectar como feature real ou remover as migrations.
-- **Sem timeout por chamada individual a provider LLM** — o timeout global
-  por job (fechado nesta release, ver P0-2 no postmortem) bound o tempo
+- ~~`backend/business/models.py`~~ **Resolvido no v1.4** — removido
+  (`models.py`, `schemas.py`, `__init__.py`, pacote inteiro). Decisão:
+  nenhum plano existia em lugar nenhum pra construir essa feature CRM;
+  conectá-la seria uma feature nova, fora do escopo de limpeza do v1.4.
+  Confirmado zero referência fora do próprio pacote antes de remover.
+  As 5 migrations (`MIG-001` a `MIG-005`) e as tabelas já existentes num
+  banco real **não foram tocadas** — `alembic/env.py` só importa `models`
+  (não `business`), então essas tabelas nunca fizeram parte do
+  `Base.metadata` pra autogenerate; removê-las do banco de verdade, se
+  algum dia for necessário, é uma migration nova e separada, não coberta
+  aqui (sem risco adicional — já estavam desconectadas do ORM antes disso).
+- ~~Sem timeout por chamada individual a provider LLM~~ **Resolvido no
+  v1.4** — `llm_request_timeout_seconds`, aplicado a openai/anthropic/
+  gemini (glm/ollama herdam via `OpenAIProvider`). O timeout global
+  por job (fechado na v1.3.1, ver P0-2 no postmortem) bound o tempo
   total de execução, mas não localiza qual chamada específica ficou lenta.
 - **Sem fluxo de "esqueci minha senha"** — só existe troca de senha
   autenticada (`POST /auth/change-password`); já causou intervenção manual
