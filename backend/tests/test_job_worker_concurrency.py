@@ -230,6 +230,11 @@ async def test_semaphore_respects_configuration():
     with patch("jobs.worker.get_settings") as mock_settings:
         mock_settings.return_value.jobs_max_concurrent_workers = 3
         mock_settings.return_value.jobs_poll_interval_seconds = 2.0
+        # JobWorker.__init__ asserts this ordering (see jobs/worker.py); a
+        # bare MagicMock would otherwise fail the comparison with a TypeError
+        # rather than a meaningful assertion.
+        mock_settings.return_value.jobs_execution_timeout_seconds = 240
+        mock_settings.return_value.jobs_stale_after_seconds = 300
 
         worker = JobWorker()
         assert worker._semaphore._value == 3

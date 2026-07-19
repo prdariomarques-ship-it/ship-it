@@ -8,7 +8,15 @@ Concurrency-safe by design:
 - A handler failure rolls the session back before recording the retry, so a
   half-written transaction can never be committed by the bookkeeping.
 - Jobs stuck in RUNNING (worker crashed mid-flight) are recovered on each tick:
-  requeued while attempts remain, failed otherwise.
+  requeued while attempts remain, failed otherwise. That recovery only tells
+  "still RUNNING after a while" from "worker actually died" by elapsed time —
+  it can't otherwise know the difference. So every handler execution is
+  itself bounded by `jobs_execution_timeout_seconds` (see `_execute`), kept
+  below `jobs_stale_after_seconds`: a live worker always resolves a job's
+  status (success, retry, or failure) well before the stale-recovery
+  threshold, so that threshold only ever fires for a genuinely dead worker —
+  never for one that's merely still running — closing the window where the
+  same job could otherwise be picked up and executed twice concurrently.
 """
 
 import asyncio
@@ -32,6 +40,14 @@ logger = get_logger(__name__)
 class JobWorker:
     def __init__(self) -> None:
         self._settings = get_settings()
+        assert (
+            self._settings.jobs_execution_timeout_seconds
+            < self._settings.jobs_stale_after_seconds
+        ), (
+            "jobs_execution_timeout_seconds must stay below jobs_stale_after_seconds "
+            "or a slow-but-alive job can be reclaimed and executed twice — see this "
+            "module's docstring"
+        )
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
         self._semaphore = asyncio.Semaphore(self._settings.jobs_max_concurrent_workers)
@@ -148,8 +164,28 @@ class JobWorker:
 
         try:
             handler = resolve_handler(job.name)
-            await handler(session, dict(job.payload or {}))
+            await asyncio.wait_for(
+                handler(session, dict(job.payload or {})),
+                timeout=self._settings.jobs_execution_timeout_seconds,
+            )
         except Exception as exc:  # noqa: BLE001 - handler failures feed the retry logic
+            # Same handling for every failure, including asyncio.wait_for's
+            # TimeoutError above (a plain builtin Exception subclass) — a
+            # handler that runs past jobs_execution_timeout_seconds is
+            # cancelled and fails through this exact path, so it always
+            # leaves RUNNING under its own power before jobs_stale_after_seconds
+            # would otherwise reclaim (and re-execute) it. See module docstring.
+            if isinstance(exc, TimeoutError):
+                # wait_for's TimeoutError has an empty message by default; a
+                # specific one makes a global timeout clearly distinguishable
+                # from any other handler/provider failure in the job's
+                # persisted log (jobs/events.py) and from stale-job recovery
+                # (_recover_stale, above — a different code path entirely,
+                # logged as "Recovering stale job", never through here).
+                exc = TimeoutError(
+                    f"Handler exceeded {self._settings.jobs_execution_timeout_seconds}s "
+                    "execution limit"
+                )
             # Discard whatever the failed handler left in the session before
             # recording the retry, or half-written changes would be committed.
             await session.rollback()

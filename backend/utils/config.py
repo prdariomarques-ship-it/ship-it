@@ -137,6 +137,12 @@ class Settings(BaseSettings):
     jobs_default_max_attempts: int = 3
     jobs_retry_backoff_seconds: int = 30  # base for exponential backoff
     jobs_stale_after_seconds: int = 300  # running longer than this = crashed worker
+    # Must stay below jobs_stale_after_seconds: a handler that runs past this
+    # is cancelled and fails cleanly through the normal retry path, so it
+    # always leaves RUNNING on its own — the stale-job recovery below never
+    # gets a chance to also reclaim it and run it a second time concurrently
+    # (see JobWorker.__init__'s assertion of this invariant).
+    jobs_execution_timeout_seconds: int = 240
     jobs_max_concurrent_workers: int = 5  # max jobs executing concurrently per worker
 
     # Event Bus (best-effort Redis fan-out; in-process delivery never depends on it)

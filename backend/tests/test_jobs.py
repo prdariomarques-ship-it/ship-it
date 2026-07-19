@@ -1,5 +1,6 @@
 """Durable job queue: enqueue, execution, retry with backoff, terminal failure."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -219,6 +220,85 @@ async def test_worker_loop_survives_a_failing_tick(worker, monkeypatch):
     await asyncio.wait_for(worker._run(), timeout=5)
 
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_handler_exceeding_execution_timeout_is_retried_not_left_hanging(
+    session_factory, worker, monkeypatch
+):
+    """Root cause of the duplicate-execution bug this guards against: with
+    no per-job execution ceiling, a handler slower than
+    jobs_stale_after_seconds could be reclaimed by stale-job recovery and
+    executed a second time concurrently while the first attempt was still
+    genuinely running (e.g. a hung LLM/HTTP call). This proves the handler
+    is cut off well before that point: run_once() must return promptly —
+    bounded by the short timeout configured below, not by the handler's
+    full sleep — and the job must come back QUEUED for retry with clear
+    evidence of why, exactly like any other handler failure."""
+    monkeypatch.setattr(worker._settings, "jobs_execution_timeout_seconds", 0.05)
+
+    ran_to_completion = []
+
+    @job_handler("test.hangs")
+    async def _hangs(db, payload):
+        await asyncio.sleep(10)  # far longer than the configured timeout
+        ran_to_completion.append(True)  # must never be reached
+
+    async with session_factory() as session:
+        job = await JobService(session).enqueue("test.hangs", max_attempts=2)
+
+    # A second, independent guard: if the timeout somehow didn't cut the
+    # handler off, this would hang for ~10s instead of returning quickly.
+    await asyncio.wait_for(worker.run_once(), timeout=5)
+
+    assert ran_to_completion == []
+    async with session_factory() as session:
+        refreshed = await session.get(type(job), job.id)
+        assert refreshed.status == JobStatus.QUEUED
+        assert refreshed.attempts == 1
+        assert "TimeoutError" in refreshed.last_error
+        assert "execution limit" in refreshed.last_error
+
+    # The persisted job-event log (jobs/events.py, queried via /admin/logs in
+    # production) must make a global timeout distinguishable at a glance from
+    # a stale-job recovery -- same "retry_scheduled" event, but a different
+    # detail: an exception message here, versus the literal "stale job" that
+    # _recover_stale always writes.
+    from sqlalchemy import select
+
+    from models.log import LogEntry
+
+    async with session_factory() as session:
+        entries = (
+            (
+                await session.execute(
+                    select(LogEntry).where(LogEntry.source == "job:test.hangs")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    details = [entry.payload.get("detail", "") for entry in entries]
+    assert any("execution limit" in detail for detail in details)
+    assert not any(detail == "stale job" for detail in details)
+
+
+@pytest.mark.asyncio
+async def test_execution_timeout_must_stay_below_stale_threshold(monkeypatch):
+    """The fix depends entirely on this ordering — jobs_execution_timeout_seconds
+    must always resolve a job's status before jobs_stale_after_seconds could
+    otherwise reclaim it. A misconfiguration that violates this would
+    silently reopen the exact race this fix closes, so it fails fast at
+    construction instead."""
+    from utils.config import Settings
+
+    bad_settings = Settings()
+    bad_settings.jobs_execution_timeout_seconds = 300
+    bad_settings.jobs_stale_after_seconds = 300
+    monkeypatch.setattr("jobs.worker.get_settings", lambda: bad_settings)
+
+    with pytest.raises(AssertionError):
+        JobWorker()
 
 
 @pytest.mark.asyncio
