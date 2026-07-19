@@ -187,8 +187,8 @@ Prepared 2026-07-18, ao final da fase de Homologação Funcional (UAT). Análise
 
 ### Frontend
 - **Estado atual**: Next.js 14.2.35, TypeScript, React Query. **Dois sistemas de design coexistindo** sem convergência — o grupo "dashboard" (mais antigo, CSS simples) e `/admin/*` (mais novo, Tailwind + shadcn-style) — confirmado extensivamente na homologação (estados vazios diferentes, comportamento de scroll mobile que precisou ser corrigido nos dois separadamente).
-- **Estabilidade**: alta; 241 testes passando.
-- **Cobertura de testes**: 241 testes, 32 arquivos, boa cobertura de componente.
+- **Estabilidade**: alta; 268 testes passando (era 241 no fechamento anterior desta homologação).
+- **Cobertura de testes**: 268 testes, 36 arquivos. **Atualizado nesta rodada**: os 4 componentes de criação novos desta homologação (`CalendarEventForm`, `TaskForm`, `StoreCustomerForm`, `ChurchMemberForm`) tinham 0% de cobertura ao serem entregues — achado registrado e corrigido na mesma sessão, com 27 novos testes (render, validação de campo obrigatório, submissão com sucesso/falha, estado de carregamento, reset de formulário) e o `vitest.config.ts` atualizado para incluir `components/{calendar,tasks,store,church}` no relatório de cobertura (antes escopado só a `components/admin`, `lib`, `hooks`). Cobertura resultante: `CalendarEventForm` 92,85% statements, `TaskForm` 96,29%, `StoreCustomerForm` 100%, `ChurchMemberForm` 100%.
 - **Homologação funcional**: sim, as 17 rotas pedidas, desktop e mobile.
 - **UX**: 3 rodadas de correção nesta fase (labels, navegação, tabelas, cabeçalho mobile) — o produto reagiu bem a cada uma, mas a causa raiz (dois sistemas de design) não foi endereçada, só sintomas.
 - **Pendências restantes**: unificação dos dois sistemas de design (grande, não tentada); CVEs conhecidas em dependências (`next@14.2.35`, correção exige upgrade major pra `16.x`); Lighthouse nunca rodado.
@@ -268,7 +268,7 @@ Prepared 2026-07-18, ao final da fase de Homologação Funcional (UAT). Análise
 | Observabilidade | 🟡 Beta | 65% | Infra saudável; conteúdo dos dashboards não confirmado |
 | API | 🟡 Beta | 78% | 875 testes; sem retry Google, Issue #2 aberta |
 | Banco de Dados | 🟡 Beta | 65% | Estável em operação; backup/restore incompletos (P0) |
-| Frontend | 🟡 Beta | 72% | 241 testes; dois sistemas de design não convergidos |
+| Frontend | 🟡 Beta | 72% | 268 testes (era 241); dois sistemas de design não convergidos |
 | Infraestrutura | 🟡 Beta | 68% | Estável; healthchecks parciais, CSP ausente, backup incompleto |
 
 ---
