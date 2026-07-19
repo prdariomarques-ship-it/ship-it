@@ -154,3 +154,15 @@ async def test_max_attempts_override_skips_retry(monkeypatch):
             )
 
     assert client.request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_max_attempts_zero_raises_a_clear_error_not_a_bare_none():
+    """max_attempts<=0 means the loop never runs, so the retry-tracking
+    variable never gets set — previously this fell through to `raise None`,
+    a confusing TypeError instead of a message pointing at the actual
+    misconfiguration."""
+    with pytest.raises(ValueError, match="max_attempts=0"):
+        await google_request(
+            "gmail", "GET", "https://example.test/x", max_attempts=0
+        )

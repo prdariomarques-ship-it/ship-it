@@ -74,6 +74,13 @@ async def google_request(
             await asyncio.sleep(backoff)
 
     record_google_request(provider, "error")
+    if last_exc is None:
+        # Only reachable if max_attempts <= 0 (the loop never ran, so the
+        # except branch that sets last_exc never did either) — not a normal
+        # retry exhaustion, a misconfiguration.
+        raise ValueError(
+            f"google_request called with max_attempts={max_attempts}; must be >= 1"
+        )
     raise last_exc
 
 
