@@ -7,7 +7,7 @@ services:
     environment:
       ENVIRONMENT: production
       LOG_JSON: "true"
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:-dario}@postgres:5432/${POSTGRES_DB:-darioos}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-darioos}
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       N8N_BASE_URL: http://n8n:5678
@@ -82,7 +82,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dario}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dario}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-darioos}
     volumes:
       - postgres_data:/var/lib/postgresql/data
