@@ -23,6 +23,9 @@
 	handle /health {
 		reverse_proxy backend:8000
 	}
+	handle /health/ready {
+		reverse_proxy backend:8000
+	}
 
 	# n8n editor and webhooks
 	handle_path /n8n/* {
