@@ -16,6 +16,17 @@ class GoalRepository(SQLAlchemyRepository[Goal]):
         )
         return list((await self.session.execute(statement)).scalars().all())
 
+    async def dependencies(self, goal_id: int) -> list[Goal]:
+        """Full Goal rows `goal_id` depends on -- same edges as
+        `dependency_ids`, joined through to the goal itself so callers (the
+        API) can show a title/status, not just a bare id."""
+        statement = (
+            select(Goal)
+            .join(GoalDependency, GoalDependency.depends_on_id == Goal.id)
+            .where(GoalDependency.goal_id == goal_id)
+        )
+        return list((await self.session.execute(statement)).scalars().all())
+
     async def is_blocked(self, goal_id: int) -> bool:
         """A goal is blocked while at least one of its dependencies isn't COMPLETED."""
         dep_ids = await self.dependency_ids(goal_id)

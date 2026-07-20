@@ -78,4 +78,58 @@ describe("GoalForm", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.recurrence_interval_days).toBeNull();
   });
+
+  describe("edit mode", () => {
+    const goal = {
+      id: 7,
+      title: "Meta existente",
+      description: "Descrição existente",
+      priority: "medium",
+      deadline: "2026-12-31T00:00:00Z",
+    };
+
+    it("prefills fields from the goal prop", () => {
+      stubFetch({ ok: true, json: async () => ({}) });
+      render(<GoalForm goal={goal} onCreated={vi.fn()} />);
+
+      expect(screen.getByPlaceholderText("Título da meta")).toHaveValue("Meta existente");
+      expect(screen.getByPlaceholderText("Descrição (opcional)")).toHaveValue(
+        "Descrição existente"
+      );
+      expect(screen.getByRole("form", { name: "Editar meta" })).toBeInTheDocument();
+    });
+
+    it("hides recurrence and approval fields", () => {
+      stubFetch({ ok: true, json: async () => ({}) });
+      render(<GoalForm goal={goal} onCreated={vi.fn()} />);
+
+      expect(
+        screen.queryByPlaceholderText("Repetir a cada N dias (opcional)")
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Exigir aprovação de um admin antes de começar")
+      ).not.toBeInTheDocument();
+    });
+
+    it("PATCHes the goal endpoint with the edited fields on submit", async () => {
+      stubFetch({ ok: true, json: async () => ({}) });
+      const onCreated = vi.fn();
+      render(<GoalForm goal={goal} onCreated={onCreated} />);
+
+      const titleInput = screen.getByPlaceholderText("Título da meta");
+      await userEvent.clear(titleInput);
+      await userEvent.type(titleInput, "Meta editada");
+      await userEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      expect(onCreated).toHaveBeenCalledTimes(1);
+      const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toContain("/goals/7");
+      expect(options.method).toBe("PATCH");
+      const body = JSON.parse(options.body);
+      expect(body.title).toBe("Meta editada");
+      expect(body.recurrence_interval_days).toBeUndefined();
+      expect(body.requires_approval).toBeUndefined();
+    });
+  });
 });

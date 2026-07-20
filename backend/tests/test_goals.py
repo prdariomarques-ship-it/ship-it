@@ -278,6 +278,51 @@ async def test_update_progress_clamps_to_0_100(session_factory, user):
     assert under.progress_percent == 0
 
 
+# --- Editing details (title/description/priority/deadline) -----------------------
+@pytest.mark.asyncio
+async def test_update_details_only_touches_provided_fields(session_factory, user):
+    async with session_factory() as session:
+        goal = await GoalService(session).create_goal(
+            user.id, "Original", description="Descrição original"
+        )
+
+    async with session_factory() as session:
+        fresh = await GoalRepository(session).get(goal.id)
+        updated = await GoalService(session).update_details(fresh, title="Novo título")
+    assert updated.title == "Novo título"
+    assert updated.description == "Descrição original"
+
+
+@pytest.mark.asyncio
+async def test_update_details_can_clear_a_nullable_field(session_factory, user):
+    async with session_factory() as session:
+        goal = await GoalService(session).create_goal(
+            user.id, "X", description="Vai ser apagada"
+        )
+
+    async with session_factory() as session:
+        fresh = await GoalRepository(session).get(goal.id)
+        updated = await GoalService(session).update_details(fresh, description=None)
+    assert updated.description is None
+
+
+@pytest.mark.asyncio
+async def test_update_details_allowed_while_awaiting_approval(session_factory, user):
+    """Unlike update_status, editing descriptive fields is never gated by the
+    approval workflow."""
+    async with session_factory() as session:
+        goal = await GoalService(session).create_goal(
+            user.id, "X", requires_approval=True
+        )
+    assert goal.status == GoalStatus.AWAITING_APPROVAL
+
+    async with session_factory() as session:
+        fresh = await GoalRepository(session).get(goal.id)
+        updated = await GoalService(session).update_details(fresh, title="Editada")
+    assert updated.title == "Editada"
+    assert updated.status == GoalStatus.AWAITING_APPROVAL
+
+
 # --- Resume after restart (state survives; stale IN_PROGRESS is discoverable) ---
 @pytest.mark.asyncio
 async def test_goal_state_survives_a_fresh_session(session_factory, user):
@@ -711,5 +756,128 @@ async def test_api_history_is_owner_scoped(client, auth_headers, other_auth_head
 
     response = await client.get(
         f"/api/goals/{goal_id}/history", headers=other_auth_headers
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_update_goal_edits_only_sent_fields(client, auth_headers):
+    created = await client.post(
+        "/api/goals",
+        json={"title": "Original", "description": "Descrição original"},
+        headers=auth_headers,
+    )
+    goal_id = created.json()["id"]
+
+    response = await client.patch(
+        f"/api/goals/{goal_id}", json={"title": "Editada"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "Editada"
+    assert body["description"] == "Descrição original"
+
+
+@pytest.mark.asyncio
+async def test_api_update_goal_can_clear_deadline(client, auth_headers):
+    created = await client.post(
+        "/api/goals",
+        json={"title": "X", "deadline": "2026-12-31T00:00:00Z"},
+        headers=auth_headers,
+    )
+    goal_id = created.json()["id"]
+    assert created.json()["deadline"] is not None
+
+    response = await client.patch(
+        f"/api/goals/{goal_id}", json={"deadline": None}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["deadline"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_update_goal_cross_user_isolation_returns_404(
+    client, auth_headers, other_auth_headers
+):
+    created = await client.post(
+        "/api/goals", json={"title": "Mine"}, headers=auth_headers
+    )
+    goal_id = created.json()["id"]
+
+    response = await client.patch(
+        f"/api/goals/{goal_id}",
+        json={"title": "Hijacked"},
+        headers=other_auth_headers,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_api_update_goal_allowed_while_awaiting_approval(client, auth_headers):
+    created = await client.post(
+        "/api/goals",
+        json={"title": "X", "requires_approval": True},
+        headers=auth_headers,
+    )
+    goal_id = created.json()["id"]
+    assert created.json()["status"] == "awaiting_approval"
+
+    response = await client.patch(
+        f"/api/goals/{goal_id}", json={"title": "Editada"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["title"] == "Editada"
+    assert response.json()["status"] == "awaiting_approval"
+
+
+@pytest.mark.asyncio
+async def test_api_list_dependencies_returns_full_goal_objects(client, auth_headers):
+    a = (
+        await client.post("/api/goals", json={"title": "A"}, headers=auth_headers)
+    ).json()
+    b = (
+        await client.post("/api/goals", json={"title": "B"}, headers=auth_headers)
+    ).json()
+    await client.post(
+        f"/api/goals/{b['id']}/dependencies",
+        json={"depends_on_id": a["id"]},
+        headers=auth_headers,
+    )
+
+    response = await client.get(
+        f"/api/goals/{b['id']}/dependencies", headers=auth_headers
+    )
+    assert response.status_code == 200
+    deps = response.json()
+    assert len(deps) == 1
+    assert deps[0]["id"] == a["id"]
+    assert deps[0]["title"] == "A"
+
+
+@pytest.mark.asyncio
+async def test_api_list_dependencies_empty_when_none(client, auth_headers):
+    created = await client.post(
+        "/api/goals", json={"title": "Standalone"}, headers=auth_headers
+    )
+    goal_id = created.json()["id"]
+
+    response = await client.get(
+        f"/api/goals/{goal_id}/dependencies", headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_api_list_dependencies_cross_user_isolation_returns_404(
+    client, auth_headers, other_auth_headers
+):
+    created = await client.post(
+        "/api/goals", json={"title": "Mine"}, headers=auth_headers
+    )
+    goal_id = created.json()["id"]
+
+    response = await client.get(
+        f"/api/goals/{goal_id}/dependencies", headers=other_auth_headers
     )
     assert response.status_code == 404

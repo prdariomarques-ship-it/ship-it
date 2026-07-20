@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import PageHeader from "@/components/PageHeader";
 import GoalForm from "@/components/goals/GoalForm";
+import GoalDetails from "@/components/goals/GoalDetails";
 import { apiFetch, useApi } from "@/hooks/useApi";
 
 interface Goal {
   id: number;
   title: string;
+  description: string | null;
   status: string;
   priority: string;
   deadline: string | null;
@@ -42,6 +44,9 @@ export default function MetasPage() {
   const [showForm, setShowForm] = useState(false);
   const [approvingId, setApprovingId] = useState<number | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<{ id: number; mode: "edit" | "details" } | null>(
+    null
+  );
 
   async function handleApprove(goalId: number) {
     setApprovingId(goalId);
@@ -54,6 +59,12 @@ export default function MetasPage() {
     } finally {
       setApprovingId(null);
     }
+  }
+
+  function toggleExpanded(id: number, mode: "edit" | "details") {
+    setExpanded((current) =>
+      current && current.id === id && current.mode === mode ? null : { id, mode }
+    );
   }
 
   return (
@@ -99,29 +110,73 @@ export default function MetasPage() {
             </thead>
             <tbody>
               {goals.map((goal) => (
-                <tr key={goal.id}>
-                  <td>{goal.title}</td>
-                  <td>
-                    <span className="badge">{STATUS_LABELS[goal.status] ?? goal.status}</span>
-                  </td>
-                  <td>{PRIORITY_LABELS[goal.priority] ?? goal.priority}</td>
-                  <td>{goal.deadline ?? "—"}</td>
-                  <td>{goal.progress_percent}%</td>
-                  <td>
-                    {isAdmin && goal.status === "awaiting_approval" ? (
+                <Fragment key={goal.id}>
+                  <tr>
+                    <td>{goal.title}</td>
+                    <td>
+                      <span className="badge">{STATUS_LABELS[goal.status] ?? goal.status}</span>
+                    </td>
+                    <td>{PRIORITY_LABELS[goal.priority] ?? goal.priority}</td>
+                    <td>{goal.deadline ?? "—"}</td>
+                    <td>{goal.progress_percent}%</td>
+                    <td style={{ display: "flex", gap: "0.5rem" }}>
+                      {isAdmin && goal.status === "awaiting_approval" && (
+                        <button
+                          className="button"
+                          type="button"
+                          disabled={approvingId === goal.id}
+                          onClick={() => handleApprove(goal.id)}
+                        >
+                          {approvingId === goal.id ? "Aprovando…" : "Aprovar"}
+                        </button>
+                      )}
                       <button
                         className="button"
                         type="button"
-                        disabled={approvingId === goal.id}
-                        onClick={() => handleApprove(goal.id)}
+                        onClick={() => toggleExpanded(goal.id, "edit")}
                       >
-                        {approvingId === goal.id ? "Aprovando…" : "Aprovar"}
+                        {expanded?.id === goal.id && expanded.mode === "edit"
+                          ? "Fechar"
+                          : "Editar"}
                       </button>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={() => toggleExpanded(goal.id, "details")}
+                      >
+                        {expanded?.id === goal.id && expanded.mode === "details"
+                          ? "Fechar"
+                          : "Detalhes"}
+                      </button>
+                    </td>
+                  </tr>
+                  {expanded?.id === goal.id && expanded.mode === "edit" && (
+                    <tr>
+                      <td colSpan={6}>
+                        <GoalForm
+                          goal={goal}
+                          onCreated={() => {
+                            setExpanded(null);
+                            reload();
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  {expanded?.id === goal.id && expanded.mode === "details" && (
+                    <tr>
+                      <td colSpan={6}>
+                        <GoalDetails
+                          goal={goal}
+                          otherGoals={goals}
+                          onChanged={() => {
+                            reload();
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

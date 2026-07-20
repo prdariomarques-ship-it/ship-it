@@ -90,4 +90,42 @@ describe("MetasPage", () => {
       )
     );
   });
+
+  it("clicking 'Editar' opens the edit form prefilled with the goal", async () => {
+    mockFetchByPath({ "/goals": [GOAL], "/auth/me": { role: "user" } });
+    render(<MetasPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Editar" }));
+
+    expect(screen.getByRole("form", { name: "Editar meta" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Título da meta")).toHaveValue("Aprender violão");
+  });
+
+  it("clicking 'Detalhes' shows progress/dependencies/history for the goal", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/dependencies")) return { ok: true, status: 200, json: async () => [] };
+      if (url.includes("/history")) return { ok: true, status: 200, json: async () => [] };
+      if (url.includes("/auth/me")) return { ok: true, status: 200, json: async () => ({ role: "user" }) };
+      if (url.includes("/goals")) return { ok: true, status: 200, json: async () => [GOAL] };
+      throw new Error(`Unexpected fetch to ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MetasPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Detalhes" }));
+
+    expect(await screen.findByLabelText("Progresso")).toBeInTheDocument();
+  });
+
+  it("only one row can be expanded at a time", async () => {
+    mockFetchByPath({ "/goals": [GOAL], "/auth/me": { role: "user" } });
+    render(<MetasPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Editar" }));
+    expect(screen.getByRole("form", { name: "Editar meta" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    expect(screen.queryByRole("form", { name: "Editar meta" })).not.toBeInTheDocument();
+  });
 });

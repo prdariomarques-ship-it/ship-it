@@ -51,6 +51,13 @@ class GoalCreate(BaseModel):
     requires_approval: bool = False
 
 
+class GoalUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    priority: GoalPriority | None = None
+    deadline: datetime | None = None
+
+
 class GoalStatusUpdate(BaseModel):
     status: GoalStatus
 
@@ -174,6 +181,20 @@ async def approve_goal(goal_id: int, db: DbSession, current_user: CurrentUser) -
         ) from exc
 
 
+@router.patch("/{goal_id}", response_model=GoalRead)
+async def update_goal(
+    goal_id: int, payload: GoalUpdate, db: DbSession, current_user: CurrentUser
+) -> Goal:
+    """Edit title/description/priority/deadline. Unlike `/status`, not gated
+    by the approval workflow -- only fields actually sent in the request
+    body are touched (`exclude_unset`), so a nullable field like `deadline`
+    can be explicitly cleared without also resetting the others."""
+    repository = GoalRepository(db)
+    goal = await _get_owned_goal_or_404(repository, goal_id, current_user.id)
+    fields = payload.model_dump(exclude_unset=True)
+    return await GoalService(db).update_details(goal, **fields)
+
+
 @router.patch("/{goal_id}/status", response_model=GoalRead)
 async def update_goal_status(
     goal_id: int, payload: GoalStatusUpdate, db: DbSession, current_user: CurrentUser
@@ -195,6 +216,17 @@ async def update_goal_progress(
     repository = GoalRepository(db)
     goal = await _get_owned_goal_or_404(repository, goal_id, current_user.id)
     return await GoalService(db).update_progress(goal, payload.progress_percent)
+
+
+@router.get("/{goal_id}/dependencies", response_model=list[GoalRead])
+async def list_dependencies(
+    goal_id: int, db: DbSession, current_user: CurrentUser
+) -> list[Goal]:
+    """Full goal rows this goal depends on (not just ids), so the caller can
+    show a title/status instead of a bare id."""
+    repository = GoalRepository(db)
+    await _get_owned_goal_or_404(repository, goal_id, current_user.id)
+    return await repository.dependencies(goal_id)
 
 
 @router.post("/{goal_id}/dependencies", status_code=status.HTTP_201_CREATED)

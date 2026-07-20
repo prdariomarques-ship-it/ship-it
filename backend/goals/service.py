@@ -147,6 +147,19 @@ class GoalService:
         await goal_event_publisher.publish(self.session, updated, "progress_updated")
         return updated
 
+    async def update_details(self, goal: Goal, **fields: object) -> Goal:
+        """Edit the descriptive fields of a goal -- title/description/priority/
+        deadline. Deliberately separate from `update_status`/`update_progress`:
+        none of these fields are gated by the approval workflow, so editing them
+        is allowed regardless of the goal's current status (including
+        AWAITING_APPROVAL or CANCELLED). Caller (the router, via
+        `GoalUpdate.model_dump(exclude_unset=True)`) decides which fields were
+        actually sent -- `description`/`deadline` are nullable, so `None` here
+        means "clear it", not "field absent"."""
+        updated = await self.goals.update(goal, **fields)
+        await goal_event_publisher.publish(self.session, updated, "updated")
+        return updated
+
     async def _remember_completion(self, goal: Goal) -> None:
         """Best-effort: record the completion as a memory so agents can recall
         past goals in conversation. Never blocks or fails goal completion --
