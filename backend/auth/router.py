@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.dependencies import CurrentUser
 from auth.schemas import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     RefreshRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserCreate,
     UserRead,
@@ -84,5 +86,20 @@ async def change_password(
         await service.change_password(
             current_user, payload.current_password, payload.new_password
         )
+    except AuthError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
+async def forgot_password(payload: ForgotPasswordRequest, service: Service) -> None:
+    """Always 204, whether or not the email matches an account -- prevents
+    using this endpoint to enumerate registered emails."""
+    await service.request_password_reset(payload.email)
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(payload: ResetPasswordRequest, service: Service) -> None:
+    try:
+        await service.reset_password(payload.token, payload.new_password)
     except AuthError as exc:
         raise _http_error(exc) from exc

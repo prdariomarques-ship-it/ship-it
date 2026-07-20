@@ -10,9 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.jwt import create_access_token
 from auth.password import hash_password, verify_password
 from models.user import User, UserRole
+from repositories.password_reset_token import PasswordResetTokenRepository
 from repositories.refresh_token import RefreshTokenRepository
 from repositories.user import UserRepository
 from utils.config import get_settings
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class AuthError(Exception):
@@ -26,7 +30,9 @@ class AuthError(Exception):
         self.forbidden = forbidden
 
 
-def _hash_refresh_token(token: str) -> str:
+def _hash_token(token: str) -> str:
+    """SHA-256 hex digest -- shared by refresh tokens and password-reset
+    tokens; only the hash is ever persisted, never the token itself."""
     return hashlib.sha256(token.encode()).hexdigest()
 
 
@@ -39,6 +45,7 @@ class AuthService:
     def __init__(self, session: AsyncSession) -> None:
         self.users = UserRepository(session)
         self.refresh_tokens = RefreshTokenRepository(session)
+        self.password_reset_tokens = PasswordResetTokenRepository(session)
         self.settings = get_settings()
 
     async def register(self, email: str, full_name: str, password: str) -> User:
@@ -103,7 +110,7 @@ class AuthService:
     async def refresh(self, refresh_token: str) -> tuple[str, str]:
         """Rotate the refresh token: validate, revoke the old one, issue a new pair."""
         record = await self.refresh_tokens.get_by_hash(
-            _hash_refresh_token(refresh_token)
+            _hash_token(refresh_token)
         )
         now = datetime.now(timezone.utc)
         if record is None or record.revoked_at is not None:
@@ -125,10 +132,8 @@ class AuthService:
         self, user: User, current_password: str, new_password: str
     ) -> None:
         """Requires the current password — this is a self-service change for
-        an authenticated session, not a "forgot password" recovery flow (that
-        would need email delivery, which isn't configured/decided yet; see
-        BOOTSTRAP_ADMIN.md for the manual DB-write recovery this replaces for
-        the "I still have a session" case)."""
+        an authenticated session. For the "I have no session and no password"
+        case, see `request_password_reset`/`reset_password`."""
         valid = await asyncio.to_thread(
             verify_password, current_password, user.hashed_password
         )
@@ -143,9 +148,65 @@ class AuthService:
             user.id, datetime.now(timezone.utc)
         )
 
+    async def request_password_reset(self, email: str) -> None:
+        """"Forgot password" recovery. No email/SMS delivery is configured
+        for this project (no SMTP, no phone linked to User) -- the token is
+        logged via the standard application logger instead, so recovery only
+        needs server/log access (`docker compose logs backend`), not an
+        already-authenticated session or a third-party delivery channel.
+
+        Always succeeds from the caller's point of view regardless of
+        whether the email matches an account -- same enumeration defense as
+        `login`'s constant-time dummy hash, applied at the response level
+        instead (there's no meaningful "timing" here since nothing is
+        verified, only looked up)."""
+        user = await self.users.get_by_email(email)
+        if user is None:
+            return
+        token = secrets.token_urlsafe(32)
+        await self.password_reset_tokens.purge_expired(
+            user.id, datetime.now(timezone.utc)
+        )
+        await self.password_reset_tokens.create(
+            user_id=user.id,
+            token_hash=_hash_token(token),
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(minutes=self.settings.password_reset_token_expire_minutes),
+        )
+        logger.warning(
+            "Password reset requested for user %s (%s). Reset token: %s "
+            "(expires in %s minutes)",
+            user.id,
+            user.email,
+            token,
+            self.settings.password_reset_token_expire_minutes,
+        )
+
+    async def reset_password(self, token: str, new_password: str) -> None:
+        record = await self.password_reset_tokens.get_by_hash(_hash_token(token))
+        now = datetime.now(timezone.utc)
+        if record is None or record.used_at is not None:
+            raise AuthError("Invalid or expired reset token")
+        expires_at = record.expires_at
+        if expires_at.tzinfo is None:  # SQLite loses tzinfo
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= now:
+            raise AuthError("Invalid or expired reset token")
+
+        user = await self.users.get(record.user_id)
+        if user is None:
+            raise AuthError("Invalid or expired reset token")
+
+        hashed = await asyncio.to_thread(hash_password, new_password)
+        await self.users.update(user, hashed_password=hashed)
+        await self.password_reset_tokens.mark_used(record, now)
+        # Same as change_password: a password reset invalidates every
+        # existing session, not just the one (if any) doing the resetting.
+        await self.refresh_tokens.revoke_all_for_user(user.id, now)
+
     async def logout(self, refresh_token: str) -> None:
         record = await self.refresh_tokens.get_by_hash(
-            _hash_refresh_token(refresh_token)
+            _hash_token(refresh_token)
         )
         if record is not None and record.revoked_at is None:
             await self.refresh_tokens.revoke(record, datetime.now(timezone.utc))
@@ -157,7 +218,7 @@ class AuthService:
         await self.refresh_tokens.purge_expired(user.id, datetime.now(timezone.utc))
         await self.refresh_tokens.create(
             user_id=user.id,
-            token_hash=_hash_refresh_token(refresh_token),
+            token_hash=_hash_token(refresh_token),
             expires_at=datetime.now(timezone.utc)
             + timedelta(days=self.settings.refresh_token_expire_days),
         )

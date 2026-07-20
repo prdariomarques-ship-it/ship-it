@@ -1,4 +1,18 @@
+import hashlib
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from auth.service import AuthError, AuthService
+from repositories.password_reset_token import PasswordResetTokenRepository
+from repositories.user import UserRepository
+
+
+@pytest.fixture
+async def session_factory(db_engine):
+    return async_sessionmaker(db_engine, expire_on_commit=False)
 
 
 @pytest.mark.asyncio
@@ -321,3 +335,139 @@ async def test_change_password_revokes_other_sessions(client):
         "/api/auth/refresh", json={"refresh_token": old_refresh_token}
     )
     assert refreshed.status_code == 401
+
+
+# --- Forgot password / reset password -----------------------------------------
+@pytest.mark.asyncio
+async def test_forgot_password_returns_204_for_an_existing_email(client):
+    await client.post(
+        "/api/auth/register",
+        json={"email": "fp@example.com", "full_name": "FP", "password": "supersecret1"},
+    )
+    response = await client.post(
+        "/api/auth/forgot-password", json={"email": "fp@example.com"}
+    )
+    assert response.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_returns_204_for_a_nonexistent_email(client):
+    """Same status code whether or not the email matches an account --
+    otherwise the endpoint itself would leak which emails have accounts."""
+    response = await client.post(
+        "/api/auth/forgot-password", json={"email": "nobody@example.com"}
+    )
+    assert response.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_logs_a_usable_reset_token(session_factory):
+    async with session_factory() as session:
+        user = await UserRepository(session).create(
+            email="logtoken@example.com",
+            full_name="Log Token",
+            hashed_password="x",
+        )
+
+    with patch("auth.service.logger") as mock_logger:
+        async with session_factory() as session:
+            await AuthService(session).request_password_reset("logtoken@example.com")
+        assert mock_logger.warning.called
+        logged_token = mock_logger.warning.call_args[0][3]
+
+    async with session_factory() as session:
+        await AuthService(session).reset_password(logged_token, "brandnewpass1")
+
+    async with session_factory() as session:
+        refreshed = await UserRepository(session).get(user.id)
+    from auth.password import verify_password
+
+    assert verify_password("brandnewpass1", refreshed.hashed_password)
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_does_not_log_for_a_nonexistent_email(session_factory):
+    with patch("auth.service.logger") as mock_logger:
+        async with session_factory() as session:
+            await AuthService(session).request_password_reset("nobody@example.com")
+        assert not mock_logger.warning.called
+
+
+@pytest.mark.asyncio
+async def test_reset_password_with_bogus_token_is_rejected(client):
+    response = await client.post(
+        "/api/auth/reset-password",
+        json={"token": "not-a-real-token", "new_password": "brandnewpass1"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_reset_password_token_cannot_be_reused(session_factory):
+    async with session_factory() as session:
+        await UserRepository(session).create(
+            email="reuse@example.com", full_name="Reuse", hashed_password="x"
+        )
+
+    with patch("auth.service.logger") as mock_logger:
+        async with session_factory() as session:
+            await AuthService(session).request_password_reset("reuse@example.com")
+        token = mock_logger.warning.call_args[0][3]
+
+    async with session_factory() as session:
+        await AuthService(session).reset_password(token, "firstnewpass1")
+
+    async with session_factory() as session:
+        with pytest.raises(AuthError):
+            await AuthService(session).reset_password(token, "secondnewpass1")
+
+
+@pytest.mark.asyncio
+async def test_reset_password_with_expired_token_is_rejected(session_factory):
+    async with session_factory() as session:
+        user = await UserRepository(session).create(
+            email="expired@example.com", full_name="Expired", hashed_password="x"
+        )
+        expired_record = await PasswordResetTokenRepository(session).create(
+            user_id=user.id,
+            token_hash=hashlib.sha256(b"expired-token").hexdigest(),
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+
+    async with session_factory() as session:
+        with pytest.raises(AuthError):
+            await AuthService(session).reset_password("expired-token", "brandnewpass1")
+    assert expired_record.id is not None  # sanity: the row was actually created
+
+
+@pytest.mark.asyncio
+async def test_reset_password_revokes_other_sessions(client, session_factory):
+    await client.post(
+        "/api/auth/register",
+        json={"email": "rprt@example.com", "full_name": "RPRT", "password": "supersecret1"},
+    )
+    login = await client.post(
+        "/api/auth/login", json={"email": "rprt@example.com", "password": "supersecret1"}
+    )
+    old_refresh_token = login.json()["refresh_token"]
+
+    with patch("auth.service.logger") as mock_logger:
+        async with session_factory() as session:
+            await AuthService(session).request_password_reset("rprt@example.com")
+        token = mock_logger.warning.call_args[0][3]
+
+    reset = await client.post(
+        "/api/auth/reset-password",
+        json={"token": token, "new_password": "brandnewpass1"},
+    )
+    assert reset.status_code == 204
+
+    refreshed = await client.post(
+        "/api/auth/refresh", json={"refresh_token": old_refresh_token}
+    )
+    assert refreshed.status_code == 401
+
+    new_login = await client.post(
+        "/api/auth/login", json={"email": "rprt@example.com", "password": "brandnewpass1"}
+    )
+    assert new_login.status_code == 200
