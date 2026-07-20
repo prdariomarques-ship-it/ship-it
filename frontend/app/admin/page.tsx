@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -111,13 +111,27 @@ export default function AdminDashboardPage() {
       });
   }, [tasks.data]);
 
+  // Date.now() must not be called during render (components/hooks must be
+  // pure) -- captured in an effect instead, re-read whenever calendar.data
+  // changes, since that's the only thing that would make the "upcoming"
+  // cutoff worth recomputing anyway.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    // Plain resync, not a subscription -- there's no genuine async/callback
+    // shape to restructure this into (unlike hooks/useApi.ts's fetch, which
+    // has a real await). Wrapping this single line in a fake async function
+    // just to dodge the rule would be less honest than disabling it here,
+    // scoped to exactly this line.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNow(Date.now());
+  }, [calendar.data]);
+
   const upcomingEvents = useMemo(() => {
-    const now = Date.now();
     return (calendar.data ?? [])
       .filter((event) => new Date(event.starts_at).getTime() >= now)
       .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime())
       .slice(0, 8);
-  }, [calendar.data]);
+  }, [calendar.data, now]);
 
   const pendingJobs = useMemo(
     () => [...(queuedJobs.data ?? []), ...(runningJobs.data ?? [])],

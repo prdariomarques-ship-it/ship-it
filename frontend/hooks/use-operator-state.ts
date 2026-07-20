@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 // Dismiss/snooze/complete are per-browser preferences about an ephemeral,
 // recomputed-every-poll recommendation — not a durable business record, so
@@ -46,11 +46,12 @@ export interface OperatorInsightState {
 }
 
 export function useOperatorInsightState(): OperatorInsightState {
-  const [state, setState] = useState<StoredState>({});
-
-  useEffect(() => {
-    setState(readStorage());
-  }, []);
+  // Read once, as the lazy initial state (runs during the initial render,
+  // not as a setState call inside an effect) -- readStorage() already
+  // guards for SSR (typeof window check), and this hook is only ever
+  // consumed behind the AI Operator Center's own client-side data loading,
+  // so there's no server-rendered content depending on this value.
+  const [state, setState] = useState<StoredState>(readStorage);
 
   const update = useCallback((id: string, entry: StoredEntry | null) => {
     setState((current) => {

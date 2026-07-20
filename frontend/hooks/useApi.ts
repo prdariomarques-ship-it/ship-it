@@ -101,20 +101,23 @@ export function useApi<T>(path: string): ApiState<T> {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    apiFetch<T>(path)
-      .then((result) => {
+
+    async function run() {
+      setLoading(true);
+      try {
+        const result = await apiFetch<T>(path);
         if (active) {
           setData(result);
           setError(null);
         }
-      })
-      .catch((err: Error) => {
-        if (active) setError(err.message);
-      })
-      .finally(() => {
+      } catch (err) {
+        if (active) setError((err as Error).message);
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    }
+
+    run();
     return () => {
       active = false;
     };
