@@ -16,6 +16,7 @@ import type {
   GoogleWorkspaceStatus,
   JobRead,
   JobStatus,
+  MemorySearchResult,
   MemoryStats,
   MessageRead,
   MetricsSnapshot,
@@ -126,6 +127,21 @@ export function useAdminMemory() {
     queryKey: ["admin", "memory"],
     queryFn: () => apiFetch<MemoryStats>("/admin/memory"),
     refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+// Not an /admin/* endpoint -- /memory/search is the general memory router
+// (no admin gate on the backend), only surfaced on this admin-only page.
+// `enabled` gates on a non-empty query so this never fires until the user
+// actually submits a search.
+export function useMemorySearch(query: string, contactId?: number) {
+  return useQuery({
+    queryKey: ["memory", "search", query, contactId],
+    queryFn: () =>
+      apiFetch<MemorySearchResult[]>(
+        `/memory/search${buildQuery({ q: query, contact_id: contactId })}`
+      ),
+    enabled: query.trim().length > 0,
   });
 }
 

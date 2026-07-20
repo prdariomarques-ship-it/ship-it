@@ -14,6 +14,7 @@ import {
   useAdminIndex,
   useAdminLogs,
   useAdminMemory,
+  useMemorySearch,
   useAdminMetrics,
   useAdminStatus,
   useAdminSystem,
@@ -105,6 +106,29 @@ describe("lib/admin-api hooks", () => {
     mockedApiFetch.mockResolvedValue({});
     renderHook(() => useAdminMemory(), { wrapper });
     await waitFor(() => expect(mockedApiFetch).toHaveBeenCalledWith("/admin/memory"));
+  });
+
+  it("useMemorySearch calls /memory/search with the query when non-empty", async () => {
+    mockedApiFetch.mockResolvedValue([]);
+    renderHook(() => useMemorySearch("orçamento"), { wrapper });
+    await waitFor(() =>
+      expect(mockedApiFetch).toHaveBeenCalledWith("/memory/search?q=or%C3%A7amento")
+    );
+  });
+
+  it("useMemorySearch includes contact_id only when provided", async () => {
+    mockedApiFetch.mockResolvedValue([]);
+    renderHook(() => useMemorySearch("x", 42), { wrapper });
+    await waitFor(() =>
+      expect(mockedApiFetch).toHaveBeenCalledWith("/memory/search?q=x&contact_id=42")
+    );
+  });
+
+  it("useMemorySearch does not fetch when the query is empty", async () => {
+    const callsBefore = mockedApiFetch.mock.calls.length;
+    renderHook(() => useMemorySearch(""), { wrapper });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mockedApiFetch.mock.calls.length).toBe(callsBefore);
   });
 
   it("useAdminMetrics calls /admin/metrics", async () => {

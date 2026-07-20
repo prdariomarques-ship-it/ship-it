@@ -8,7 +8,7 @@ const GOAL = { id: 1, title: "Meta principal", status: "pending", progress_perce
 const OTHER_GOAL = { id: 2, title: "Outra meta", status: "pending" };
 
 function mockFetchByPath(byPath: Record<string, unknown>) {
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
     const match = Object.keys(byPath).find((path) => url.includes(path));
     if (!match) throw new Error(`Unexpected fetch to ${url}`);

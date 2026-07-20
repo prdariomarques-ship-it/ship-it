@@ -125,6 +125,13 @@ export interface MemoryStats {
   cache_backend: string;
 }
 
+export interface MemorySearchResult {
+  content: string;
+  source: string;
+  contact_id: number | null;
+  score: number;
+}
+
 export interface ExecutionEntry {
   kind: "job" | "log";
   id: number;
