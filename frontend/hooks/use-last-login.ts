@@ -11,12 +11,23 @@ import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "darioos_last_login_at";
 
+function readPreviousLogin(): Date | null {
+  if (typeof window === "undefined") return null;
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  return stored ? new Date(stored) : null;
+}
+
 export function useLastLogin(): Date | null {
-  const [previousLogin, setPreviousLogin] = useState<Date | null>(null);
+  // Read once, as the lazy initial state (runs during the initial render,
+  // not as a setState call inside an effect) -- this hook is only ever
+  // consumed behind useAdminGuard's client-side loading gate (see
+  // AdminShell), so there's no server-rendered content depending on this
+  // value to hydration-match against.
+  const [previousLogin] = useState<Date | null>(readPreviousLogin);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored) setPreviousLogin(new Date(stored));
+    // The write is the actual side effect (recording *this* visit for next
+    // time) -- distinct from the read above, which only initializes state.
     window.localStorage.setItem(STORAGE_KEY, new Date().toISOString());
   }, []);
 

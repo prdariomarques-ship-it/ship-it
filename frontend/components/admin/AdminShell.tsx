@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 
 import { AdminHeader } from "@/components/admin/AdminHeader";
@@ -28,9 +29,9 @@ function GuardScreen({ children }: { children: React.ReactNode }) {
         <p className="max-w-sm text-sm text-muted-foreground">
           O Dashboard Administrativo é exclusivo para usuários com papel ADMIN.
         </p>
-        <a href="/" className="mt-2 text-sm text-primary hover:underline">
+        <Link href="/" className="mt-2 text-sm text-primary hover:underline">
           Voltar ao app
-        </a>
+        </Link>
       </div>
     );
   }
