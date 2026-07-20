@@ -54,12 +54,16 @@ async def test_job_succeeds(session_factory, worker):
 
 @pytest.mark.asyncio
 async def test_job_retries_then_fails(session_factory, worker):
+    from observability.metrics import JOB_TIMEOUTS
+
     @job_handler("test.boom")
     async def _boom(db, payload):
         raise RuntimeError("explode")
 
     async with session_factory() as session:
         job = await JobService(session).enqueue("test.boom", max_attempts=2)
+
+    timeouts_before = JOB_TIMEOUTS.labels("test.boom")._value.get()
 
     # Attempt 1: fails, rescheduled with backoff.
     await worker.run_once()
@@ -79,6 +83,10 @@ async def test_job_retries_then_fails(session_factory, worker):
         refreshed = await session.get(type(job), job.id)
         assert refreshed.status == JobStatus.FAILED
         assert refreshed.attempts == 2
+
+    # A regular handler failure (RuntimeError) must never be counted as a
+    # timeout -- proves the metric is genuinely timeout-specific.
+    assert JOB_TIMEOUTS.labels("test.boom")._value.get() == timeouts_before
 
 
 @pytest.mark.asyncio
@@ -237,6 +245,8 @@ async def test_handler_exceeding_execution_timeout_is_retried_not_left_hanging(
     evidence of why, exactly like any other handler failure."""
     monkeypatch.setattr(worker._settings, "jobs_execution_timeout_seconds", 0.05)
 
+    from observability.metrics import JOB_TIMEOUTS
+
     ran_to_completion = []
 
     @job_handler("test.hangs")
@@ -247,9 +257,13 @@ async def test_handler_exceeding_execution_timeout_is_retried_not_left_hanging(
     async with session_factory() as session:
         job = await JobService(session).enqueue("test.hangs", max_attempts=2)
 
+    timeouts_before = JOB_TIMEOUTS.labels("test.hangs")._value.get()
+
     # A second, independent guard: if the timeout somehow didn't cut the
     # handler off, this would hang for ~10s instead of returning quickly.
     await asyncio.wait_for(worker.run_once(), timeout=5)
+
+    assert JOB_TIMEOUTS.labels("test.hangs")._value.get() == timeouts_before + 1
 
     assert ran_to_completion == []
     async with session_factory() as session:

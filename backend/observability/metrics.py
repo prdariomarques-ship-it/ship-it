@@ -59,6 +59,15 @@ JOB_DURATION = Histogram(
     labelnames=("name",),
 )
 
+JOB_TIMEOUTS = Counter(
+    "darioos_job_timeouts_total",
+    "Jobs that hit jobs_execution_timeout_seconds (the global per-job "
+    "execution ceiling), per job name — distinct from any other handler "
+    "failure; previously only visible by grepping the persisted job log "
+    "for 'execution limit' (see jobs/worker.py)",
+    labelnames=("name",),
+)
+
 WHATSAPP_PROVIDER_REQUESTS = Counter(
     "darioos_whatsapp_provider_requests_total",
     "Outbound HTTP calls made to a WhatsApp provider gateway",
@@ -178,6 +187,10 @@ def record_tool_call(tool_name: str, status: str = "ok") -> None:
 
 def record_job_duration(name: str, duration_seconds: float) -> None:
     JOB_DURATION.labels(name).observe(duration_seconds)
+
+
+def record_job_timeout(name: str) -> None:
+    JOB_TIMEOUTS.labels(name).inc()
 
 
 def record_whatsapp_request(provider: str, status: str) -> None:

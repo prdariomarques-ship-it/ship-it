@@ -74,11 +74,12 @@ execução duplicada de job) já foram corrigidos e fecham a v1.3.1.
   Contacts são domínios *read-through* (consultam a API a cada chamada,
   não indexam) — não há dado real de "último sync" para esses três. Ver
   `docs/DASHBOARD.md`.
-- **Sem métrica Prometheus dedicada para "job atingiu o timeout global de
-  execução"** (introduzido no fechamento da v1.3.1, `jobs_execution_timeout_seconds`).
-  Hoje só é visível procurando `"execution limit"` no log persistido
-  (`jobs/events.py`) — uma métrica dedicada (contador por nome de job)
-  tornaria isso monitorável de verdade em produção.
+- ~~Sem métrica Prometheus dedicada para "job atingiu o timeout global de
+  execução"~~ **Resolvido no v1.4** — `darioos_job_timeouts_total`
+  (contador, label `name`), incrementado no mesmo ponto que já
+  distinguia um timeout de qualquer outra falha (`jobs/worker.py`).
+  Testes confirmam que incrementa só num timeout de verdade, nunca numa
+  falha comum (`RuntimeError`).
 - **GitHub Issue #2** (`getConnectionState()` lança `TypeError`) segue
   aberta — não bloqueia (fallback via `isConnected()` funciona), causa raiz
   já identificada (mudança de formato interno do WhatsApp Web).

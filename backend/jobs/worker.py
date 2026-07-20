@@ -29,7 +29,7 @@ from database.session import async_session_factory
 from jobs.events import job_event_publisher
 from jobs.registry import resolve_handler
 from models.job import Job, JobStatus
-from observability.metrics import record_job_duration
+from observability.metrics import record_job_duration, record_job_timeout
 from repositories.job import JobRepository
 from utils.config import get_settings
 from utils.logging import get_logger
@@ -186,6 +186,7 @@ class JobWorker:
                     f"Handler exceeded {self._settings.jobs_execution_timeout_seconds}s "
                     "execution limit"
                 )
+                record_job_timeout(job_name)
             # Discard whatever the failed handler left in the session before
             # recording the retry, or half-written changes would be committed.
             await session.rollback()

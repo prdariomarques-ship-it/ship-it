@@ -46,8 +46,11 @@ audit final de produção (`RELEASE_1_3_1_POSTMORTEM.md`) e do backlog de
 
 ## Nice to Have
 
-9. Métrica Prometheus dedicada pra "job atingiu o timeout global de
-   execução" (hoje só visível via grep no log persistido).
+9. ~~Métrica Prometheus dedicada pra "job atingiu o timeout global de
+   execução"~~ **Concluído** — `darioos_job_timeouts_total`, incrementado
+   exatamente onde o timeout já era distinguido de qualquer outra falha
+   (`jobs/worker.py`). Testes confirmam que não incrementa numa falha
+   comum, só num timeout de verdade.
 10. ~~Completar healthcheck do Docker~~ **Concluído** — `backend` (achado
     fora da lista original, também não tinha), `frontend`, `openwa`,
     `redis`, `qdrant`, `caddy`, `n8n`, `jaeger`. Cada comando verificado
