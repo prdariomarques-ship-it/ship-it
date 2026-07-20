@@ -67,6 +67,17 @@ services:
       jaeger:
         condition: service_started
     networks: [darioos]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   frontend:
     build:
@@ -76,6 +87,16 @@ services:
     restart: unless-stopped
     depends_on: [backend]
     networks: [darioos]
+    healthcheck:
+      # Next.js's standalone server binds to $HOSTNAME (Docker sets this to
+      # the container's own hostname, resolving to its network IP), not to
+      # 127.0.0.1/localhost -- confirmed live, a plain `wget localhost` here
+      # gets connection refused even though the app is up and Caddy reaches
+      # it fine externally (via the container's Docker-network alias).
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://$$(hostname):3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:16-alpine
@@ -99,6 +120,11 @@ services:
     volumes:
       - redis_data:/data
     networks: [darioos]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -106,6 +132,16 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     networks: [darioos]
+    healthcheck:
+      # Qdrant's image (Debian-based) has neither wget nor curl (confirmed
+      # live -- same reason scripts/backup.sh routes its own HTTP calls to
+      # Qdrant through the backend container instead); bash's /dev/tcp is
+      # the only dependency-free way to check the port is accepting
+      # connections here.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -119,6 +155,11 @@ services:
     volumes:
       - jaeger_data:/badger
     networks: [darioos]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:16686/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   n8n:
     image: n8nio/n8n:latest
@@ -131,6 +172,11 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
     networks: [darioos]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5678/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   openwa:
     build: ./openwa
@@ -146,6 +192,16 @@ services:
     volumes:
       - openwa_data:/sessions
     networks: [darioos]
+    healthcheck:
+      # Reachability only (any HTTP response, even a 404 -- confirmed live
+      # that GET / does return one -- proves the server is up); real
+      # session/business-logic health is what OpenWAProvider.health_check()
+      # already checks at the application level via /health/ready.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8002/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   prometheus:
     image: prom/prometheus:v2.45.0
@@ -224,6 +280,11 @@ services:
       - caddy_config:/config
     depends_on: [backend, frontend]
     networks: [darioos]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
