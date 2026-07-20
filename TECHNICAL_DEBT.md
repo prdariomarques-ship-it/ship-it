@@ -5,6 +5,59 @@ não uma lista aspiracional. Cada item aponta a fonte onde foi originalmente
 registrado. Para o que é uma limitação de comportamento observável pelo
 usuário (não debt de código), ver `KNOWN_LIMITATIONS.md`.
 
+## Prioridade consolidada (fechamento do ciclo v1.4 / release Next.js 16, 2026-07-20)
+
+Todo item aberto neste arquivo, reclassificado numa escala única. Itens
+resolvidos (`~~riscado~~`) permanecem nas seções abaixo apenas como
+histórico e não entram nesta lista.
+
+**Alta prioridade**
+
+1. Restore do Postgres nunca testado ponta a ponta contra dado real
+   (seção "Backup / disaster recovery") — maior risco real: se o restore
+   falhar no momento em que for de fato necessário, a lacuna só será
+   descoberta tarde demais.
+2. Sem circuit breaker/bulkhead em nenhum provider externo (Google, LLM,
+   WhatsApp) — sistema depende fortemente de APIs de terceiros sem
+   isolamento de falha.
+3. CSP ausente no Caddyfile — bloqueado por fator externo (precisa de
+   domínio real com HTTPS), mas é a única lacuna de segurança em aberto
+   com HSTS/demais headers já presentes.
+4. RBAC: `contacts`/`church`/`store` não são `user_scoped` — risco reduzido
+   após o fechamento do registro público, mas a lacuna de granularidade
+   permanece caso o modelo de confiança mude.
+5. Validação funcional autenticada (login/logout com sessão real) pendente
+   desde a migração do Next.js 16 — não é falha de código, mas é a
+   validação mais próxima de virar ação concreta (só depende de
+   credenciais válidas).
+
+**Média prioridade**
+
+6. Sem fluxo de "esqueci minha senha" — já causou intervenção manual direta
+   no banco antes (ver `BOOTSTRAP_ADMIN.md`).
+7. Sem tabela de auditoria de execução por agente/tool — contadores
+   Prometheus são cumulativos, sem histórico consultável.
+8. Semântica de cancelamento sob Postgres/asyncpg real não testada (o
+   timeout global de job foi testado só contra SQLite).
+9. Google OAuth nunca validado ponta a ponta contra credenciais reais —
+   bloqueado por ação externa (setup no Google Cloud Console do Dário).
+10. GitHub Issue #2 (`getConnectionState()` `TypeError`) — não bloqueia
+    (fallback via `isConnected()` funciona), causa raiz já identificada.
+11. `VERSION.json` do backend desatualizado (commit `2a9d643`, anterior a
+    todo o ciclo v1.4) — higiene de release, não afeta funcionamento.
+
+**Baixa prioridade**
+
+12. QR Code do WhatsApp não exposto no Dashboard Administrativo.
+13. "Última sincronização" só existe para o Google Drive (Gmail/Calendar/
+    Contacts são *read-through*, sem dado de sync para expor).
+14. Lighthouse nunca medido contra build de produção real.
+15. Ambiente de sandbox isolado (CI ou local, fora da máquina de produção)
+    nunca rodou o stack completo — bloqueado pela política de rede de
+    cada sandbox.
+16. `@next/bundle-analyzer` não validado contra Turbopack desde o upgrade
+    do Next.js 16 (ferramenta opt-in, sem uso no caminho crítico).
+
 ## Achados do audit final de fechamento da Release 1.3.1 (2026-07-19)
 
 Consolidado do audit de produção final antes de fechar a v1.3.1
@@ -94,13 +147,11 @@ execução duplicada de job) já foram corrigidos e fecham a v1.3.1.
   com HTTPS e os domínios de asset reais de produção — testar uma CSP às
   cegas contra isso arrisca quebrar o frontend silenciosamente em produção.
   Ver `SECURITY_AUDIT.md`.
-- **CVEs em dependências do frontend** (`next@14.2.35` — patch mais recente
-  na série 14.x, atualizado nesta sessão a partir de `14.2.21`; `postcss`
-  transitivo): 1 moderada + 4 altas remanescentes (`npm audit`), todas só
-  corrigíveis com upgrade major (breaking) para `next@16.2.10` — fora do
-  escopo de "alteração mínima e justificada" de qualquer sprint que não
-  seja dedicada a esse upgrade (exigiria suíte E2E cobrindo a mudança). Ver
-  `SECURITY_AUDIT.md`.
+- ~~CVEs em dependências do frontend (`next@14.2.35`)~~ **Resolvido —
+  upgrade para `next@16.2.10` concluído e em produção.** Branch isolada,
+  PR #4, merge `1ea265b`, suíte de regressão completa (lint/typecheck/268
+  testes/build) e deploy validado com smoke test. Ver
+  `RELEASE_REPORT_NEXTJS16.md`.
 
 ## Confiabilidade de integrações externas
 

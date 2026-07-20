@@ -6,18 +6,15 @@ audit final de produção (`RELEASE_1_3_1_POSTMORTEM.md`) e do backlog de
 
 ## Must Have
 
-1. **Corrigir `docker-compose.yml`: `POSTGRES_PASSWORD` sem fallback fraco.**
-   Mesmo padrão de bug que acabou de ser corrigido no Grafana
-   (`GF_SECURITY_ADMIN_PASSWORD:?...`), ainda não aplicado ao Postgres —
-   trocar `${POSTGRES_PASSWORD:-dario}` por
-   `${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}`. Achado nesta
-   mesma sessão, P1. Esforço: ~15min.
-2. **Corrigir roteamento do Caddy pra `/health/ready`.** Ver
-   `docs/issues/caddy-health-ready-routing.md` — problema, causa raiz e
-   correção sugerida já documentados. P1. Esforço: ~30min + teste de
-   regressão.
-3. **Cobertura de teste para `chat_router`.** Zero teste hoje num endpoint
-   central (IA conversacional), montado e acessível. P1. Esforço: 3–5h.
+1. ~~Corrigir `docker-compose.yml`: `POSTGRES_PASSWORD` sem fallback fraco.~~
+   **Concluído** — `${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}`
+   aplicado tanto no `DATABASE_URL` do backend quanto no próprio serviço
+   `postgres`. Ver commit `8dfb6db`.
+2. ~~Corrigir roteamento do Caddy pra `/health/ready`.~~ **Concluído** —
+   `handle /health/ready { reverse_proxy backend:8000 }` adicionado ao
+   Caddyfile. Ver commit `cbdd068`.
+3. ~~Cobertura de teste para `chat_router`.~~ **Concluído** — junto com o
+   item 4 (Should Have) na mesma sessão. Ver commit `fa3585e`.
 
 ## Should Have
 
@@ -39,10 +36,12 @@ audit final de produção (`RELEASE_1_3_1_POSTMORTEM.md`) e do backlog de
 7. **CSP no Caddyfile.** HSTS já presente; falta `Content-Security-Policy`.
    Precisa de um domínio real com HTTPS pra testar com segurança — não dá
    pra validar contra `DOMAIN=localhost`. Esforço: 2–4h incluindo teste.
-8. **Upgrade do Next.js (14→16)** pra resolver as CVEs remanescentes (`npm
-   audit`: 1 moderada + 4 altas). Breaking change — merece branch isolada e
-   suíte de regressão completa antes de mesclar, não deve ser feito junto
-   com outra coisa. Esforço: 1–2 dias.
+   **Ainda pendente** — único item Should Have não concluído neste ciclo.
+8. ~~Upgrade do Next.js (14→16)~~ **Concluído e em produção.** Feito em
+   branch isolada (`chore/nextjs-16-upgrade`), PR #4, merge `1ea265b`,
+   deploy em produção validado (healthcheck, smoke test funcional, zero
+   regressão de performance/memória). Ver `RELEASE_REPORT_NEXTJS16.md`
+   para o relatório completo da migração.
 
 ## Nice to Have
 
@@ -76,20 +75,21 @@ audit final de produção (`RELEASE_1_3_1_POSTMORTEM.md`) e do backlog de
 
 ## Dependências entre itens
 
-- Item 2 (Caddy) é independente de tudo — pode ser feito a qualquer momento.
-- Item 1 (Postgres fallback) é independente — só editar o compose file,
-  sem precisar rotacionar credencial de novo (o valor real já está correto
-  em `.env`).
-- Itens 3 e 4 (cobertura de teste) são independentes entre si e do resto.
-- Item 5 (timeout por provider) continua tematicamente o timeout global já
-  implementado, mas não depende dele tecnicamente.
 - Item 7 (CSP) depende de ter um domínio real com HTTPS — não pode ser
-  feito com segurança contra `DOMAIN=localhost`.
-- Item 8 (Next.js) deve ficar isolado numa branch própria — não combinar
-  com nenhum outro item desta lista.
+  feito com segurança contra `DOMAIN=localhost`. Único item restante desta
+  lista, e único bloqueado por fator externo (não é falta de trabalho).
 
 ## Paralelizável
 
-Itens 1, 2, 3, 4, 6 e 9–16 podem todos rodar em paralelo entre si — nenhum
-tem dependência real nos outros. Item 8 (Next.js) deve ficar isolado por
-causa do risco de regressão, não por dependência técnica.
+Todos os itens Must Have e quase todos os Should/Nice to Have deste roadmap
+foram concluídos neste ciclo (v1.4). Resta apenas o item 7 (CSP), bloqueado
+por fator externo, e os itens 11–16 (Nice to Have, não iniciados — ver
+seção acima para status individual de cada um).
+
+## Status ao final do ciclo v1.4
+
+- **Must Have:** 3/3 concluídos.
+- **Should Have:** 4/5 concluídos (falta apenas CSP, item 7, bloqueado por
+  fator externo).
+- **Nice to Have:** 2/8 concluídos (itens 9 e 10); itens 11–16 seguem no
+  backlog, nenhum é bloqueante para o próximo ciclo (v1.5).
