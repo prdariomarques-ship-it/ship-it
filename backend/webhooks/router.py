@@ -16,7 +16,7 @@ import hmac
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -156,6 +156,35 @@ def _verify_webhook_security(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature"
         )
+
+
+@router.get(
+    "/whatsapp",
+    summary="WhatsApp Cloud API webhook verification handshake",
+    description=(
+        "Meta requires this GET handshake before it will save a webhook "
+        "subscription in the App Dashboard: it calls back with "
+        "hub.mode=subscribe, hub.verify_token and hub.challenge, and expects "
+        "hub.challenge echoed back verbatim (as plain text) when the token "
+        "matches OFFICIAL_WEBHOOK_VERIFY_TOKEN. Irrelevant to gateways other "
+        "than the Cloud API (official), but harmless to expose regardless of "
+        "the active WHATSAPP_PROVIDER."
+    ),
+)
+async def whatsapp_webhook_verify(request: Request) -> Response:
+    settings = get_settings()
+    mode = request.query_params.get("hub.mode", "")
+    token = request.query_params.get("hub.verify_token", "")
+    challenge = request.query_params.get("hub.challenge", "")
+    if (
+        mode == "subscribe"
+        and settings.official_webhook_verify_token
+        and hmac.compare_digest(token, settings.official_webhook_verify_token)
+    ):
+        return Response(content=challenge, media_type="text/plain")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN, detail="Webhook verification failed"
+    )
 
 
 @router.post(

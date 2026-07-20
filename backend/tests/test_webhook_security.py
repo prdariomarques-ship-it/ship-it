@@ -116,6 +116,64 @@ async def test_webhook_enforces_official_signature_when_configured(client, monke
         wa_factory.get_whatsapp_provider.cache_clear()
 
 
+# --- GET webhook verification handshake (Meta Cloud API subscribe step) -----
+@pytest.mark.asyncio
+async def test_webhook_verify_handshake_succeeds_with_correct_token(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "official_webhook_verify_token", "verify-me")
+    response = await client.get(
+        "/api/webhooks/whatsapp",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "verify-me",
+            "hub.challenge": "12345",
+        },
+    )
+    assert response.status_code == 200
+    assert response.text == "12345"
+
+
+@pytest.mark.asyncio
+async def test_webhook_verify_handshake_rejects_wrong_token(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "official_webhook_verify_token", "verify-me")
+    response = await client.get(
+        "/api/webhooks/whatsapp",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "wrong",
+            "hub.challenge": "12345",
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_webhook_verify_handshake_rejects_wrong_mode(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "official_webhook_verify_token", "verify-me")
+    response = await client.get(
+        "/api/webhooks/whatsapp",
+        params={
+            "hub.mode": "unsubscribe",
+            "hub.verify_token": "verify-me",
+            "hub.challenge": "12345",
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_webhook_verify_handshake_rejects_when_not_configured(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "official_webhook_verify_token", "")
+    response = await client.get(
+        "/api/webhooks/whatsapp",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "anything",
+            "hub.challenge": "12345",
+        },
+    )
+    assert response.status_code == 403
+
+
 @pytest.mark.asyncio
 async def test_webhook_rejects_malformed_json_body(client):
     response = await client.post(

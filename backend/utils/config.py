@@ -120,12 +120,17 @@ class Settings(BaseSettings):
     baileys_api_key: str = ""
     baileys_session: str = "darioos"
 
-    official_api_base_url: str = "https://graph.facebook.com/v21.0"
+    official_api_base_url: str = "https://graph.facebook.com/v22.0"
     official_access_token: str = ""
     official_phone_number_id: str = ""
     official_app_secret: str = (
         ""  # signs webhooks (X-Hub-Signature-256); optional but recommended
     )
+    # Echoed back by GET /webhooks/whatsapp during Meta's webhook subscription
+    # handshake (hub.mode=subscribe&hub.verify_token=...&hub.challenge=...).
+    # Set to any secret string of your choosing and enter the same value in
+    # the Meta App Dashboard's webhook config.
+    official_webhook_verify_token: str = ""
 
     # n8n
     n8n_base_url: str = "http://localhost:5678"
