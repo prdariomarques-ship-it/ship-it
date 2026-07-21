@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import CurrentUser
@@ -17,8 +17,24 @@ from auth.schemas import (
 from auth.service import AuthError, AuthService
 from database.session import get_db
 from models.user import User
+from services.rate_limit import rate_limiter
+from utils.config import get_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+async def _enforce_rate_limit(
+    identifier: str, limit: int, window_seconds: int
+) -> None:
+    if not await rate_limiter.is_allowed(identifier, limit, window_seconds):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests, try again later",
+        )
 
 
 def get_auth_service(db: Annotated[AsyncSession, Depends(get_db)]) -> AuthService:
@@ -91,14 +107,33 @@ async def change_password(
 
 
 @router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
-async def forgot_password(payload: ForgotPasswordRequest, service: Service) -> None:
+async def forgot_password(
+    payload: ForgotPasswordRequest, service: Service
+) -> None:
     """Always 204, whether or not the email matches an account -- prevents
-    using this endpoint to enumerate registered emails."""
+    using this endpoint to enumerate registered emails. Rate-limited per
+    email (not IP) so throttling can't be sidestepped by rotating IPs."""
+    settings = get_settings()
+    await _enforce_rate_limit(
+        f"password-reset-request:{payload.email}",
+        settings.password_reset_request_limit,
+        settings.password_reset_request_window_seconds,
+    )
     await service.request_password_reset(payload.email)
 
 
 @router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_password(payload: ResetPasswordRequest, service: Service) -> None:
+async def reset_password(
+    payload: ResetPasswordRequest, request: Request, service: Service
+) -> None:
+    """Rate-limited per IP (not email/token, since a token-guessing attempt
+    carries no email) to slow down brute-forcing the token value itself."""
+    settings = get_settings()
+    await _enforce_rate_limit(
+        f"password-reset-confirm:{_client_ip(request)}",
+        settings.password_reset_confirm_limit,
+        settings.password_reset_confirm_window_seconds,
+    )
     try:
         await service.reset_password(payload.token, payload.new_password)
     except AuthError as exc:

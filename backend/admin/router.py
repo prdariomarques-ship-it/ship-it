@@ -491,6 +491,27 @@ async def create_user(
     )
 
 
+@router.post(
+    "/users/{user_id}/password-reset-token",
+    response_model=schemas.PasswordResetTokenRead,
+)
+async def generate_password_reset_token(
+    user_id: int, db: DbSession
+) -> schemas.PasswordResetTokenRead:
+    """Issues a fresh "forgot password" token for `user_id`, invalidating
+    any token already pending for them. The raw value is returned exactly
+    once, here — the database only ever stores its hash, and it is never
+    logged. The calling admin is responsible for relaying it to the user
+    (WhatsApp, verbally, etc.) outside of this system, since no SMTP/SMS
+    delivery is configured for this project. Gated by `require_admin` at
+    the router level, same as every other endpoint in this file."""
+    try:
+        token = await AuthService(db).admin_generate_reset_token(user_id)
+    except AuthError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return schemas.PasswordResetTokenRead(token=token)
+
+
 @router.get("/metrics")
 async def admin_metrics() -> dict:
     """Raw Prometheus counter/histogram snapshot, timestamped. These are

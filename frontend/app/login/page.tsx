@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { apiFetch, setTokens } from "@/hooks/useApi";
 
 export default function LoginPage() {
@@ -60,6 +61,9 @@ export default function LoginPage() {
         <button className="button" type="submit" disabled={submitting}>
           {submitting ? "Entrando…" : "Entrar"}
         </button>
+        <Link href="/esqueci-senha" className="muted" style={{ display: "block", marginTop: "0.9rem", textAlign: "center" }}>
+          Esqueci minha senha
+        </Link>
       </form>
     </div>
   );

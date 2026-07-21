@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,10 +14,8 @@ from models.user import User, UserRole
 from repositories.password_reset_token import PasswordResetTokenRepository
 from repositories.refresh_token import RefreshTokenRepository
 from repositories.user import UserRepository
+from services.audit import record_log
 from utils.config import get_settings
-from utils.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 class AuthError(Exception):
@@ -39,6 +38,14 @@ def _hash_token(token: str) -> str:
 # Verified when the email doesn't exist, so a failed login costs the same time
 # whether the user exists or not (prevents account enumeration by timing).
 _DUMMY_HASH = hash_password("timing-equalizer")
+
+# request_password_reset has no password hash to equalize against (see
+# _DUMMY_HASH above) -- the "found" branch does a couple of extra writes, the
+# "not found" branch returns immediately. Same 100ms floor PBKDF2 already
+# costs elsewhere in this module, so a timing side-channel here can't
+# distinguish "email exists" from "email doesn't" any more finely than a
+# failed login already resists.
+_PASSWORD_RESET_REQUEST_MIN_SECONDS = 0.1
 
 
 class AuthService:
@@ -150,37 +157,66 @@ class AuthService:
 
     async def request_password_reset(self, email: str) -> None:
         """"Forgot password" recovery. No email/SMS delivery is configured
-        for this project (no SMTP, no phone linked to User) -- the token is
-        logged via the standard application logger instead, so recovery only
-        needs server/log access (`docker compose logs backend`), not an
-        already-authenticated session or a third-party delivery channel.
+        for this project (no SMTP, no phone linked to `User`), so there is no
+        automated out-of-band channel this project can deliver a token
+        through yet.
+
+        The token itself is deliberately never surfaced by this method (not
+        logged, not returned) -- only `admin_generate_reset_token` (below)
+        ever hands back a raw token, to an already-authenticated admin, who
+        relays it to the requester manually (WhatsApp, verbally, etc.,
+        outside this system). This method's job is only to (a) invalidate
+        any stale pending token and (b) leave an audit trail an admin can
+        notice, never to hand out a usable credential itself.
 
         Always succeeds from the caller's point of view regardless of
-        whether the email matches an account -- same enumeration defense as
-        `login`'s constant-time dummy hash, applied at the response level
-        instead (there's no meaningful "timing" here since nothing is
-        verified, only looked up)."""
+        whether the email matches an account, both in response shape (always
+        returns normally) and in timing (a floor keeps the "not found" branch
+        from returning measurably faster than the "found" one -- see
+        `_PASSWORD_RESET_REQUEST_MIN_SECONDS`)."""
+        start = time.monotonic()
         user = await self.users.get_by_email(email)
+        if user is not None:
+            now = datetime.now(timezone.utc)
+            await self.password_reset_tokens.invalidate_unused_for_user(user.id, now)
+            await self.password_reset_tokens.purge_expired(user.id, now)
+            await record_log(
+                self.users.session,
+                source=f"auth:password_reset:{user.id}",
+                message=f"Password reset requested for user {user.id}",
+                level="warning",
+            )
+        elapsed = time.monotonic() - start
+        if elapsed < _PASSWORD_RESET_REQUEST_MIN_SECONDS:
+            await asyncio.sleep(_PASSWORD_RESET_REQUEST_MIN_SECONDS - elapsed)
+
+    async def admin_generate_reset_token(self, user_id: int) -> str:
+        """Admin-only (callers must enforce `require_admin`, same convention
+        as `create_user_as_admin`). Issues a fresh reset token for `user_id`,
+        invalidating any token already pending for that user, and returns the
+        raw value exactly once -- it is never persisted or logged in plain
+        text, only its hash is. The admin is expected to relay it to the user
+        through whatever channel they judge appropriate."""
+        user = await self.users.get(user_id)
         if user is None:
-            return
+            raise AuthError("User not found")
+        now = datetime.now(timezone.utc)
+        await self.password_reset_tokens.invalidate_unused_for_user(user.id, now)
+        await self.password_reset_tokens.purge_expired(user.id, now)
         token = secrets.token_urlsafe(32)
-        await self.password_reset_tokens.purge_expired(
-            user.id, datetime.now(timezone.utc)
-        )
         await self.password_reset_tokens.create(
             user_id=user.id,
             token_hash=_hash_token(token),
-            expires_at=datetime.now(timezone.utc)
+            expires_at=now
             + timedelta(minutes=self.settings.password_reset_token_expire_minutes),
         )
-        logger.warning(
-            "Password reset requested for user %s (%s). Reset token: %s "
-            "(expires in %s minutes)",
-            user.id,
-            user.email,
-            token,
-            self.settings.password_reset_token_expire_minutes,
+        await record_log(
+            self.users.session,
+            source=f"auth:password_reset:{user.id}",
+            message=f"Admin generated a password reset token for user {user.id}",
+            level="warning",
         )
+        return token
 
     async def reset_password(self, token: str, new_password: str) -> None:
         record = await self.password_reset_tokens.get_by_hash(_hash_token(token))
@@ -203,6 +239,12 @@ class AuthService:
         # Same as change_password: a password reset invalidates every
         # existing session, not just the one (if any) doing the resetting.
         await self.refresh_tokens.revoke_all_for_user(user.id, now)
+        await record_log(
+            self.users.session,
+            source=f"auth:password_reset:{user.id}",
+            message=f"Password reset completed for user {user.id}",
+            level="warning",
+        )
 
     async def logout(self, refresh_token: str) -> None:
         record = await self.refresh_tokens.get_by_hash(

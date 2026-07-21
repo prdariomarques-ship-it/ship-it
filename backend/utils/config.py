@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30
     password_reset_token_expire_minutes: int = 30
+    # Tighter than the global HTTP rate limit (rate_limit_requests below) --
+    # these two are keyed by email/IP specifically for the reset flow, not
+    # the generic per-client-IP window every other route already gets.
+    password_reset_request_limit: int = 5
+    password_reset_request_window_seconds: int = 3600
+    password_reset_confirm_limit: int = 10
+    password_reset_confirm_window_seconds: int = 3600
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

@@ -152,6 +152,14 @@ class UserAdminCreate(BaseModel):
     role: UserRole = UserRole.USER
 
 
+class PasswordResetTokenRead(BaseModel):
+    """The raw token is only ever returned here, once, to the admin who
+    just generated it — never persisted or logged in plain text (only its
+    hash is). See `AuthService.admin_generate_reset_token`."""
+
+    token: str
+
+
 class WhatsAppStatus(BaseModel):
     provider: str
     connected: bool

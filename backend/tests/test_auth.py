@@ -1,6 +1,6 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -338,6 +338,13 @@ async def test_change_password_revokes_other_sessions(client):
 
 
 # --- Forgot password / reset password -----------------------------------------
+# Delivery model: /auth/forgot-password never reveals or logs a token -- it
+# only invalidates any pending token and leaves an audit trail. The only
+# path that ever produces a usable raw token is the admin-only
+# AuthService.admin_generate_reset_token (POST /admin/users/{id}/password-
+# reset-token), which returns it exactly once. See auth/service.py.
+# Reuses _bootstrap_admin (defined above) rather than a second copy of the
+# same helper.
 @pytest.mark.asyncio
 async def test_forgot_password_returns_204_for_an_existing_email(client):
     await client.post(
@@ -361,36 +368,95 @@ async def test_forgot_password_returns_204_for_a_nonexistent_email(client):
 
 
 @pytest.mark.asyncio
-async def test_forgot_password_logs_a_usable_reset_token(session_factory):
+async def test_request_password_reset_enforces_a_minimum_response_time(
+    session_factory,
+):
+    """The "email not found" branch used to return almost instantly while
+    the "found" branch did a couple of extra writes -- a timing floor keeps
+    that difference from being observable."""
+    import time
+
+    from auth.service import _PASSWORD_RESET_REQUEST_MIN_SECONDS
+
     async with session_factory() as session:
-        user = await UserRepository(session).create(
-            email="logtoken@example.com",
-            full_name="Log Token",
-            hashed_password="x",
+        start = time.monotonic()
+        await AuthService(session).request_password_reset(
+            "nobody-timing@example.com"
         )
-
-    with patch("auth.service.logger") as mock_logger:
-        async with session_factory() as session:
-            await AuthService(session).request_password_reset("logtoken@example.com")
-        assert mock_logger.warning.called
-        logged_token = mock_logger.warning.call_args[0][3]
-
-    async with session_factory() as session:
-        await AuthService(session).reset_password(logged_token, "brandnewpass1")
-
-    async with session_factory() as session:
-        refreshed = await UserRepository(session).get(user.id)
-    from auth.password import verify_password
-
-    assert verify_password("brandnewpass1", refreshed.hashed_password)
+        elapsed = time.monotonic() - start
+    assert elapsed >= _PASSWORD_RESET_REQUEST_MIN_SECONDS
 
 
 @pytest.mark.asyncio
-async def test_forgot_password_does_not_log_for_a_nonexistent_email(session_factory):
-    with patch("auth.service.logger") as mock_logger:
-        async with session_factory() as session:
-            await AuthService(session).request_password_reset("nobody@example.com")
-        assert not mock_logger.warning.called
+async def test_forgot_password_never_creates_a_usable_token(session_factory):
+    """Confirms the delivery model directly: requesting a reset by itself
+    never leaves anything an attacker (or the requester) could use to
+    actually reset the password -- only the admin-generate path does."""
+    async with session_factory() as session:
+        await UserRepository(session).create(
+            email="noleak@example.com", full_name="No Leak", hashed_password="x"
+        )
+    async with session_factory() as session:
+        await AuthService(session).request_password_reset("noleak@example.com")
+
+    async with session_factory() as session:
+        with pytest.raises(AuthError):
+            # There is no real token to guess; any value must be rejected.
+            await AuthService(session).reset_password("anything", "brandnewpass1")
+
+
+@pytest.mark.asyncio
+async def test_admin_generate_reset_token_produces_a_usable_token(client):
+    admin_headers = await _bootstrap_admin(client)
+    created = await client.post(
+        "/api/admin/users",
+        json={"email": "target@example.com", "full_name": "Target", "password": "supersecret1"},
+        headers=admin_headers,
+    )
+    user_id = created.json()["id"]
+
+    generated = await client.post(
+        f"/api/admin/users/{user_id}/password-reset-token", headers=admin_headers
+    )
+    assert generated.status_code == 200
+    token = generated.json()["token"]
+    assert token  # a real, non-empty value was returned exactly once
+
+    reset = await client.post(
+        "/api/auth/reset-password",
+        json={"token": token, "new_password": "brandnewpass1"},
+    )
+    assert reset.status_code == 204
+
+    new_login = await client.post(
+        "/api/auth/login", json={"email": "target@example.com", "password": "brandnewpass1"}
+    )
+    assert new_login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_admin_generate_reset_token_requires_admin(client):
+    # The first account via public /auth/register always becomes admin (see
+    # test_bootstrap_registration_allowed_and_becomes_admin) -- a genuine
+    # non-admin only exists via the admin-created path, same as
+    # test_non_admin_cannot_create_user.
+    admin_headers = await _bootstrap_admin(client)
+    created = await client.post(
+        "/api/admin/users",
+        json={"email": "notadmin@example.com", "full_name": "X", "password": "supersecret1"},
+        headers=admin_headers,
+    )
+    user_id = created.json()["id"]
+
+    login = await client.post(
+        "/api/auth/login", json={"email": "notadmin@example.com", "password": "supersecret1"}
+    )
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    response = await client.post(
+        f"/api/admin/users/{user_id}/password-reset-token", headers=headers
+    )
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -405,14 +471,11 @@ async def test_reset_password_with_bogus_token_is_rejected(client):
 @pytest.mark.asyncio
 async def test_reset_password_token_cannot_be_reused(session_factory):
     async with session_factory() as session:
-        await UserRepository(session).create(
+        user = await UserRepository(session).create(
             email="reuse@example.com", full_name="Reuse", hashed_password="x"
         )
-
-    with patch("auth.service.logger") as mock_logger:
-        async with session_factory() as session:
-            await AuthService(session).request_password_reset("reuse@example.com")
-        token = mock_logger.warning.call_args[0][3]
+    async with session_factory() as session:
+        token = await AuthService(session).admin_generate_reset_token(user.id)
 
     async with session_factory() as session:
         await AuthService(session).reset_password(token, "firstnewpass1")
@@ -441,20 +504,45 @@ async def test_reset_password_with_expired_token_is_rejected(session_factory):
 
 
 @pytest.mark.asyncio
-async def test_reset_password_revokes_other_sessions(client, session_factory):
-    await client.post(
-        "/api/auth/register",
+async def test_multiple_reset_requests_invalidate_older_tokens(session_factory):
+    """The 2nd admin-generated token supersedes the 1st -- only the latest
+    is ever valid, even though neither was ever redeemed."""
+    async with session_factory() as session:
+        user = await UserRepository(session).create(
+            email="multi@example.com", full_name="Multi", hashed_password="x"
+        )
+    async with session_factory() as session:
+        first_token = await AuthService(session).admin_generate_reset_token(user.id)
+    async with session_factory() as session:
+        second_token = await AuthService(session).admin_generate_reset_token(user.id)
+
+    async with session_factory() as session:
+        with pytest.raises(AuthError):
+            await AuthService(session).reset_password(first_token, "brandnewpass1")
+
+    async with session_factory() as session:
+        await AuthService(session).reset_password(second_token, "brandnewpass1")
+
+
+@pytest.mark.asyncio
+async def test_reset_password_revokes_other_sessions(client):
+    admin_headers = await _bootstrap_admin(client)
+    created = await client.post(
+        "/api/admin/users",
         json={"email": "rprt@example.com", "full_name": "RPRT", "password": "supersecret1"},
+        headers=admin_headers,
     )
+    user_id = created.json()["id"]
+
     login = await client.post(
         "/api/auth/login", json={"email": "rprt@example.com", "password": "supersecret1"}
     )
     old_refresh_token = login.json()["refresh_token"]
 
-    with patch("auth.service.logger") as mock_logger:
-        async with session_factory() as session:
-            await AuthService(session).request_password_reset("rprt@example.com")
-        token = mock_logger.warning.call_args[0][3]
+    generated = await client.post(
+        f"/api/admin/users/{user_id}/password-reset-token", headers=admin_headers
+    )
+    token = generated.json()["token"]
 
     reset = await client.post(
         "/api/auth/reset-password",
@@ -471,3 +559,39 @@ async def test_reset_password_revokes_other_sessions(client, session_factory):
         "/api/auth/login", json={"email": "rprt@example.com", "password": "brandnewpass1"}
     )
     assert new_login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_reset_password_rejects_weak_password(client):
+    response = await client.post(
+        "/api/auth/reset-password",
+        json={"token": "whatever", "new_password": "short"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_is_rate_limited(client, monkeypatch):
+    from services.rate_limit import rate_limiter
+
+    monkeypatch.setattr(
+        rate_limiter, "is_allowed", AsyncMock(return_value=False)
+    )
+    response = await client.post(
+        "/api/auth/forgot-password", json={"email": "anyone@example.com"}
+    )
+    assert response.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_reset_password_confirm_is_rate_limited(client, monkeypatch):
+    from services.rate_limit import rate_limiter
+
+    monkeypatch.setattr(
+        rate_limiter, "is_allowed", AsyncMock(return_value=False)
+    )
+    response = await client.post(
+        "/api/auth/reset-password",
+        json={"token": "whatever", "new_password": "brandnewpass1"},
+    )
+    assert response.status_code == 429
