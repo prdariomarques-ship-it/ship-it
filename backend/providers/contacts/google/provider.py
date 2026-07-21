@@ -29,9 +29,15 @@ logger = get_logger(__name__)
 GOOGLE_CONTACTS_SCOPES = "https://www.googleapis.com/auth/contacts"
 
 _PERSON_FIELDS = "names,emailAddresses,phoneNumbers"
-# People API list pagination is not implemented — a personal instance's
-# address book fits comfortably in one page at this size; see docs/CONTACTS.md.
+# 1000 is the People API's own hard per-page maximum -- `search_contacts`
+# follows `nextPageToken` across as many pages as it takes to list the
+# whole address book, not just this first one. See docs/CONTACTS.md.
 _MAX_LIST_PAGE_SIZE = 1000
+# Safety cap on the pagination loop, not a real product limit -- a
+# personal Google account is nowhere near 50k contacts (Google's own
+# accounts cap out around 25k); this only guards against `nextPageToken`
+# somehow never going empty.
+_MAX_LIST_PAGES = 50
 
 # `resource_name` legitimately contains a literal "/" (People API resource
 # names are "people/<id>", not an opaque single-segment id like Gmail's
@@ -145,13 +151,22 @@ class GoogleContactsProvider(ContactsProvider):
     async def search_contacts(
         self, access_token: str, query: ContactSearchQuery
     ) -> list[Contact]:
-        result = await self._request(
-            "GET",
-            access_token,
-            "/people/me/connections",
-            params={"personFields": _PERSON_FIELDS, "pageSize": _MAX_LIST_PAGE_SIZE},
-        )
-        contacts = [_parse_person(raw) for raw in result.get("connections", [])]
+        contacts: list[Contact] = []
+        page_token: str | None = None
+        for _ in range(_MAX_LIST_PAGES):
+            params: dict = {
+                "personFields": _PERSON_FIELDS,
+                "pageSize": _MAX_LIST_PAGE_SIZE,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            result = await self._request(
+                "GET", access_token, "/people/me/connections", params=params
+            )
+            contacts.extend(_parse_person(raw) for raw in result.get("connections", []))
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
         if query.query:
             needle = query.query.strip().lower()
             contacts = [c for c in contacts if _matches(c, needle)]

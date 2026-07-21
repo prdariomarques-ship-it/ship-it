@@ -58,7 +58,7 @@ Mesmo padrão já usado pelo `search_emails` do Gmail: uma única tool com um pa
 
 ### Por que buscar + filtrar em vez do endpoint de busca da People API
 
-A People API tem um endpoint dedicado (`people:searchContacts`), mas ele depende de um índice de busca com consistência eventual (precisa de um "aquecimento" prévio via `connections.list`, e pode devolver resultados desatualizados/incompletos logo após uma mudança). Para uma instância pessoal, com uma agenda de contatos de porte limitado, `GoogleContactsProvider.search_contacts` sempre lista a agenda inteira (`people.connections.list`, até 1000 contatos numa única página) e filtra no lado do servidor Dario OS — resultado imediato e previsível, sem a complexidade extra de paginação completa nem a fragilidade do índice de busca assíncrono. Ver `docs/CONTACTS.md#limitações-desta-sprint`.
+A People API tem um endpoint dedicado (`people:searchContacts`), mas ele depende de um índice de busca com consistência eventual (precisa de um "aquecimento" prévio via `connections.list`, e pode devolver resultados desatualizados/incompletos logo após uma mudança). `GoogleContactsProvider.search_contacts` sempre lista a agenda **inteira** (`people.connections.list`, seguindo `nextPageToken` por quantas páginas de 1000 forem necessárias — não só a primeira) e filtra no lado do servidor Dario OS — resultado imediato e previsível, sem a fragilidade do índice de busca assíncrono. Ver `docs/CONTACTS.md#limitações-desta-sprint`.
 
 ## Fluxo de autorização (OAuth 2.0)
 
@@ -118,14 +118,14 @@ Reaproveite o mesmo projeto/app OAuth do Gmail/Calendar:
 
 - Um único provider de contatos (Google); a interface `ContactsProvider` já é o ponto de extensão para outros sem mudar nenhum chamador.
 - Uma conta Google Contacts conectada por usuário (`UNIQUE(user_id, provider)`).
-- `search_google_contacts` lista até 1000 contatos por chamada, sem paginação além disso — adequado para uma agenda de porte pessoal; uma agenda maior exigiria implementar a paginação completa da People API, fora do escopo desta sprint.
+- `search_google_contacts` pagina a agenda inteira antes de filtrar (sem limite artificial de 1000) — uma agenda muito maior que o uso pessoal típico paga o custo de mais chamadas HTTP sequenciais (uma por página de 1000), mas nenhum contato fica invisível pra busca. Teto de segurança de 50 páginas (50 mil contatos) só como proteção contra `nextPageToken` nunca esvaziar, não um limite de produto (a própria conta Google já limita bem abaixo disso).
 - Atualização de contato busca o registro atual antes de aplicar a mudança (necessário para o `etag` exigido pela People API) — uma chamada HTTP extra por edição, aceitável dado o volume de uso.
 
 ## Testes
 
 | Arquivo | Cobertura |
 | --- | --- |
-| `tests/test_gcontacts_provider.py` | `GoogleContactsProvider` (OAuth, listar/buscar/criar/editar/excluir contatos, fluxo de etag na edição, filtro client-side por nome/telefone/e-mail), factory |
+| `tests/test_gcontacts_provider.py` | `GoogleContactsProvider` (OAuth, listar/buscar/criar/editar/excluir contatos, fluxo de etag na edição, filtro client-side por nome/telefone/e-mail, **paginação**: segue `nextPageToken` através de várias páginas, filtro/limite aplicados sobre o resultado paginado completo, teto de segurança de páginas), factory |
 | `tests/test_gcontacts_router.py` | `/connect`, `/oauth/callback` (sucesso, reconexão, corrida de concorrência, sem refresh token, sem chave de cifra, erro do Google, state inválido/errado propósito/de outro domínio, XSS refletido escapado), `/status`, `/disconnect`, admin-only |
 | `tests/test_gcontacts_tools.py` | As 4 tools: rejeição sem conta conectada, refresh token revogado, sucesso, mapeamento de erro do provider, **isolamento entre dois usuários conectados** (inclusive tentativa de editar o `resource_name` de outro usuário) |
 

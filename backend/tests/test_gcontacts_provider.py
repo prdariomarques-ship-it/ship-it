@@ -169,6 +169,72 @@ async def test_search_contacts_filters_by_phone_or_email_substring(provider):
 
 
 @pytest.mark.asyncio
+async def test_search_contacts_follows_next_page_token_across_multiple_pages(
+    provider,
+):
+    page1 = {
+        "connections": [_person("people/c1", "Ana")],
+        "nextPageToken": "page-2",
+    }
+    page2 = {
+        "connections": [_person("people/c2", "Beto")],
+        "nextPageToken": "page-3",
+    }
+    page3 = {"connections": [_person("people/c3", "Caio")]}  # no nextPageToken: last page
+    patcher, client = _patch_client(
+        request_result=[_mock_response(page1), _mock_response(page2), _mock_response(page3)]
+    )
+    with patcher:
+        contacts = await provider.search_contacts("access-token", ContactSearchQuery())
+    assert [c.given_name for c in contacts] == ["Ana", "Beto", "Caio"]
+    assert client.request.call_count == 3
+    # Second and third requests carry the pageToken from the previous response.
+    assert client.request.call_args_list[1].kwargs["params"]["pageToken"] == "page-2"
+    assert client.request.call_args_list[2].kwargs["params"]["pageToken"] == "page-3"
+    # First request has no pageToken at all.
+    assert "pageToken" not in client.request.call_args_list[0].kwargs["params"]
+
+
+@pytest.mark.asyncio
+async def test_search_contacts_filters_and_limits_across_paginated_results(provider):
+    page1 = {
+        "connections": [_person("people/c1", "Ana", emails=["ana@example.com"])],
+        "nextPageToken": "page-2",
+    }
+    page2 = {"connections": [_person("people/c2", "Ana Segunda")]}
+    patcher, _ = _patch_client(
+        request_result=[_mock_response(page1), _mock_response(page2)]
+    )
+    with patcher:
+        contacts = await provider.search_contacts(
+            "access-token", ContactSearchQuery(query="ana", limit=1)
+        )
+    # Both pages matched "ana", but the whole address book is fetched
+    # first (across both pages) before the limit is applied.
+    assert len(contacts) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_contacts_stops_at_the_page_cap(provider, monkeypatch):
+    """Defensive-only: a `nextPageToken` that (pathologically) never runs out
+    must not loop forever."""
+    import providers.contacts.google.provider as provider_module
+
+    monkeypatch.setattr(provider_module, "_MAX_LIST_PAGES", 3)
+    endless_page = {
+        "connections": [_person("people/c1", "Ana")],
+        "nextPageToken": "always-more",
+    }
+    patcher, client = _patch_client(
+        request_result=[_mock_response(endless_page)] * 20
+    )
+    with patcher:
+        contacts = await provider.search_contacts("access-token", ContactSearchQuery())
+    assert client.request.call_count == 3
+    assert len(contacts) == 3
+
+
+@pytest.mark.asyncio
 async def test_get_contact_returns_etag_needed_for_updates(provider):
     patcher, _ = _patch_client(
         request_result=[_mock_response(_person("people/c1", "Ana", etag="etag-xyz"))]

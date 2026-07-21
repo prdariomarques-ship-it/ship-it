@@ -49,9 +49,7 @@ Todos os itens abaixo foram concluídos — ver `RELEASE_1_4.md` e
    /admin/settings`), com efeito imediato e persistência através de
    restarts (tabela nova `app_settings`). `jobs_enabled`/providers
    continuam somente leitura, por decisão de escopo explícita (ver
-   `docs/DASHBOARD.md`). **Implementado e validado na certificação final
-   (`RELEASE_1_4_POSTMORTEM.md`); aguardando commit/push explícito do
-   fundador.**
+   `docs/DASHBOARD.md`). Commit `28d1e0d`.
 
 ## Nice to Have
 
@@ -62,10 +60,11 @@ Todos os itens abaixo foram concluídos — ver `RELEASE_1_4.md` e
    risco: mostrar "consultado pela última vez às HH:MM" (timestamp da
    última chamada bem-sucedida à API), não um "sync" de verdade. Esforço:
    meio dia.
-8. **Google Contacts: paginação completa além de 1000 contatos.** Hoje
-   `search_google_contacts` lista até 1000 por chamada. Só relevante para
-   quem tem agenda muito maior que isso — baixo impacto pro uso pessoal
-   atual. Esforço: meio dia.
+8. ~~**Google Contacts: paginação completa além de 1000 contatos.**~~
+   **Concluído** — `search_contacts` segue `nextPageToken` através de
+   quantas páginas de 1000 forem necessárias antes de filtrar/limitar,
+   com um teto de segurança (50 páginas) só contra a API nunca esvaziar o
+   token, não um limite de produto. Ver `docs/CONTACTS.md`.
 9. **Google Drive: suporte a Google Docs/Sheets/Slides nativos.** Hoje só
    PDF/DOCX/TXT/Markdown/CSV são indexados; Docs/Sheets/Slides são
    recusados explicitamente. Ampliar exigiria a API de export do Google
@@ -105,15 +104,19 @@ escopo e limites definidos antes de estimar esforço.
 
 Itens 7-10 (Nice to Have) são paralelizáveis entre si.
 
-## Status ao final do ciclo (Release 1.4, 2026-07-21)
+## Status na tag Release 1.4 (v1.4.0, 2026-07-21)
 
 - **Must Have:** 2/2 concluídos.
 - **Should Have:** 4/4 concluídos.
-- **Nice to Have:** 0/4 iniciados (itens 7-10 seguem no backlog, nenhum é
-  bloqueante).
+- **Nice to Have:** 0/4 iniciados.
 - Mais 3 itens entregues fora deste roadmap original: busca semântica de
   memória, módulo de Notas dedicado, busca em Contacts/Church.
 - Ver `RELEASE_1_4.md`/`RELEASE_1_4_POSTMORTEM.md` para o relatório
-  completo de certificação, e `ROADMAP_v1_4.md` (itens 27-29) para o
-  débito técnico aceito ao fechar a edição de série recorrente do Google
-  Calendar.
+  completo de certificação.
+
+## Progresso desde a tag v1.4.0 (ciclo v1.5 em andamento)
+
+- Item 27 do `ROADMAP_v1_4.md` ("este evento e os seguintes" no Google
+  Calendar) concluído — commit `6774f08`.
+- **Nice to Have:** 1/4 concluído (item 8, paginação do Google Contacts).
+  Itens 7, 9, 10 seguem no backlog, nenhum é bloqueante.
