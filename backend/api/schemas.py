@@ -129,26 +129,6 @@ class CalendarEventRead(_Read):
     reminder_minutes: int | None
 
 
-# --- Notes ------------------------------------------------------------------
-class NoteCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
-    content: str = ""
-    tags: list[str] = []
-
-
-class NoteUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=255)
-    content: str | None = None
-    tags: list[str] | None = None
-
-
-class NoteRead(_Read):
-    user_id: int
-    title: str
-    content: str
-    tags: list
-
-
 # --- Church -----------------------------------------------------------------
 class ChurchMemberCreate(_PhoneValidated, BaseModel):
     name: str = Field(min_length=1, max_length=255)

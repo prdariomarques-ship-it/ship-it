@@ -55,16 +55,6 @@ calendar_router = create_crud_router(
     user_scoped=True,
 )
 
-notes_router = create_crud_router(
-    model=Note,
-    prefix="/notes",
-    tag="notes",
-    create_schema=schemas.NoteCreate,
-    update_schema=schemas.NoteUpdate,
-    read_schema=schemas.NoteRead,
-    user_scoped=True,
-)
-
 church_router = create_crud_router(
     model=ChurchMember,
     prefix="/church/members",

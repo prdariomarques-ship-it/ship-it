@@ -23,7 +23,6 @@ from api.routes import (
     dashboard_router,
     logs_router,
     messages_router,
-    notes_router,
     store_router,
     tasks_router,
 )
@@ -38,6 +37,7 @@ from jobs.router import router as jobs_router
 from jobs.worker import job_worker
 from mail.router import router as mail_router
 from memory.router import router as memory_router
+from notes.router import router as notes_router
 from middleware.error_sanitization import ErrorSanitizationMiddleware
 from middleware.request_size_limit import RequestSizeLimitMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware

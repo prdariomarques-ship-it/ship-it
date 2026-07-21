@@ -73,6 +73,29 @@ audit final de produção (`RELEASE_1_3_1_POSTMORTEM.md`) e do backlog de
 16. Circuit breaker / bulkhead para os providers externos (Google, LLM,
     WhatsApp).
 
+## Módulo de Notas — melhorias futuras (não fazem parte da v1.4)
+
+Registradas explicitamente como débito técnico aceito ao fechar o módulo de
+Notas (dedicado, com busca, `pinned`/`archived`/`contact_id` reservado —
+ver `docs/NOTES.md`). Nenhuma delas bloqueia a integração da v1.4.
+
+17. Busca full-text / semântica para Notas (hoje é substring case-insensitive
+    em Python — ver `docs/NOTES.md` para o caminho de evolução via
+    `MemoryManager`, já usado por Goals).
+18. Paginação e infinite scroll no frontend (backend já suporta
+    `limit`/`offset`; a UI sempre busca as primeiras 50).
+19. UI para vincular Nota ↔ Contato (`contact_id` já existe no modelo,
+    reservado, sem endpoint/tela usando ainda).
+20. Vínculo Nota ↔ Conversa.
+21. Resumo de notas via IA.
+22. Embeddings vetoriais para recuperação semântica (explicitamente não
+    implementado nesta release — só a arquitetura foi preparada).
+23. Editor de texto rico (opcional).
+24. Filtros dedicados de Fixada/Favorita (hoje `pinned` só ordena a nota no
+    topo da lista, sem uma visão filtrada separada).
+25. Operações em lote (arquivar/apagar várias notas de uma vez).
+26. Exportar/importar notas.
+
 ## Dependências entre itens
 
 - Item 7 (CSP) depende de ter um domínio real com HTTPS — não pode ser
