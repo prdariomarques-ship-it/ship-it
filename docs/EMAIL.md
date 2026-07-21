@@ -1,17 +1,18 @@
-# E-mail (Gmail) — Sprint 1
+# E-mail (Gmail)
 
-Domínio novo, isolado do resto do Dario OS: leitura de e-mail via Gmail. Somente leitura nesta sprint — buscar, ler, resumir e detectar pendências. Enviar, responder, mover, excluir ou re-rotular mensagens estão **fora do escopo** e não existem em nenhum ponto do código.
+Domínio isolado do resto do Dario OS para leitura e resposta de e-mail via Gmail: buscar, ler, resumir, detectar pendências e **responder** (dentro de uma conversa já existente). Compor um e-mail novo para um endereço arbitrário, mover, excluir ou re-rotular mensagens continuam **fora do escopo** e não existem em nenhum ponto do código.
 
 ## Objetivo e escopo
 
-| Funcionalidade | Sprint 1 |
+| Funcionalidade | Status |
 | --- | --- |
 | Buscar e-mails (remetente, assunto, período, palavras-chave, etiqueta) | ✅ |
 | Ler o conteúdo completo de uma conversa (thread) | ✅ |
 | Resumir uma conversa longa | ✅ (via LLM) |
 | Detectar pendências (responder, enviar proposta, agendar reunião) | ✅ (via function calling) |
 | Criar tarefa/evento a partir de um e-mail | ✅ — mas só quando o dono pede na conversa; reaproveita `create_task`/`create_calendar_event` já existentes, este domínio nunca os chama sozinho |
-| Enviar, responder, mover, excluir, re-rotular | ❌ fora do escopo |
+| Responder a uma conversa existente (`reply_to_email_thread`) | ✅ — destinatário sempre resolvido do remetente da última mensagem da própria thread, nunca informado pelo modelo (mesmo princípio do PROD-005) |
+| Compor e-mail novo para endereço arbitrário, mover, excluir, re-rotular | ❌ fora do escopo |
 
 ## Gateway único: o agente `assistant`
 
@@ -44,7 +45,7 @@ flowchart LR
 ```
 providers/mail/
   base.py            MailProvider (Strategy) — authorization_url, exchange_code,
-                      refresh_access_token, search, get_thread
+                      refresh_access_token, search, get_thread, send_reply
                       + EmailMessage, EmailThread, EmailSearchQuery, OAuthTokens
   factory.py          get_mail_provider() — seleciona por MAIL_PROVIDER (hoje só "gmail")
   gmail/provider.py   GmailProvider — REST via httpx puro (mesma escolha já feita
@@ -62,7 +63,11 @@ repositories/email_account.py   EmailAccountRepository.get_by_user(user_id, prov
 services/token_crypto.py   encrypt_token/decrypt_token (Fernet) — refresh token
                             nunca é persistido em texto puro
 
-agents/tools/mail.py        as 4 tools — registradas só em assistant_agent.py
+jobs/handlers.py            mail.send_reply — job durável que efetivamente envia a
+                            resposta (retry/backoff em falha transitória do Gmail,
+                            mesmo padrão do whatsapp.send_text)
+
+agents/tools/mail.py        as 5 tools — registradas só em assistant_agent.py
 ```
 
 Um Provider só traduz e transporta (mesmo princípio já documentado para WhatsApp em `docs/architecture.md#providers`): `GmailProvider` nunca acessa o banco, nunca chama o LLM, nunca decide autorização — ele converte a forma da API REST do Gmail para os três tipos neutros (`EmailMessage`, `EmailThread`, `OAuthTokens`) e nada mais. Autorização, criptografia e chamadas ao LLM ficam em `mail/router.py` e `agents/tools/mail.py`.
@@ -97,7 +102,7 @@ sequenceDiagram
     API->>API: cria state assinado (JWT, propósito=gmail_oauth_state, 10min)
     API-->>Admin: authorization_url (com state)
     Admin->>Google: navegador redireciona para a URL de consentimento
-    Google-->>Admin: tela de consentimento (escopo gmail.readonly)
+    Google-->>Admin: tela de consentimento (escopos gmail.readonly + gmail.send)
     Admin->>Google: aprova
     Google->>API: GET /api/mail/oauth/callback?code=...&state=...
     API->>API: valida state (assinatura + propósito + expiração)
@@ -117,7 +122,8 @@ O mesmo princípio técnico do PROD-005 (isolamento de contato do WhatsApp) se a
 - **`_get_access_token(context)`** (`agents/tools/mail.py`) é o único lugar em todo o domínio onde um mailbox é escolhido — sempre a partir de `context.user.id`, que é preenchido pela aplicação (`BaseAgent.run`), nunca pelo LLM. Nenhuma das quatro tools tem um parâmetro de usuário/mailbox no seu JSON Schema — não existe argumento que um modelo manipulado possa fornecer para alcançar a caixa de entrada de outra pessoa.
 - Se o usuário atual não tiver uma conta conectada, `MailNotConnectedError` vira o mesmo envelope de erro estruturado de qualquer outra falha de tool (`{"error": "..."}"`) — nunca uma exceção não tratada, nunca um fallback silencioso para a conta de outro usuário.
 - **Credenciais nunca em texto puro**: o refresh token é cifrado em repouso com Fernet (AES-128-CBC + HMAC autenticado) usando `EMAIL_TOKEN_ENCRYPTION_KEY`, uma chave que só existe em configuração, nunca no banco. Sem a chave configurada, `encrypt_token`/`decrypt_token` recusam operar (`TokenEncryptionNotConfigured`) em vez de cair para um caminho inseguro.
-- **Escopo mínimo**: a integração pede exatamente `https://www.googleapis.com/auth/gmail.readonly` — nada de escrita é sequer solicitado ao Google, então mesmo um bug futuro na aplicação não teria como enviar ou apagar e-mail com este token.
+- **Escopo mínimo**: a integração pede exatamente `gmail.readonly` + `gmail.send` — nunca `gmail.modify`/`gmail.compose`, que também dariam apagar/re-rotular/rascunhar qualquer coisa. Contas conectadas antes do escopo `gmail.send` existir precisam reconectar (botão "Reconnect" em `/admin/google`) antes que `reply_to_email_thread` funcione — `_get_access_token(context, require_send_scope=True)` verifica `gmail.send` em `EmailAccount.scopes` (persistido no connect, já que a resposta do refresh grant do Google não repete `scope`) e recusa explicitamente com uma mensagem acionável antes de sequer tentar enviar.
+- **Sem "compor e-mail novo"**: nenhuma tool aceita um endereço de destino arbitrário. `reply_to_email_thread` resolve o destinatário sempre do remetente da última mensagem da própria thread (`agents/tools/mail.py::_reply_to_email_thread`) — o mesmo princípio do PROD-005 aplicado ao WhatsApp. O envio em si é enfileirado (`mail.send_reply`, job durável) em vez de síncrono, para sobreviver a uma instabilidade transitória do Gmail.
 - **`/connect`, `/status`, `/disconnect` são admin-only** — conectar/desconectar uma conta de Gmail é uma decisão de configuração do dono da instância, não algo que qualquer usuário autenticado possa disparar.
 - Testes de isolamento entre usuários (`backend/tests/test_mail_tools.py`) provam isso na prática, não só na leitura do código: dois usuários conectados a mailboxes diferentes, mesma chamada de tool, tokens de acesso resolvidos nunca se cruzam — inclusive o caso em que o modelo tenta usar o `thread_id` de um usuário na conversa de outro (rejeitado, porque a Gmail API já escopa threads pelo access_token — o comportamento é idêntico a um 404 real do Gmail).
 
@@ -129,6 +135,7 @@ O mesmo princípio técnico do PROD-005 (isolamento de contato do WhatsApp) se a
 | `read_email_thread` | `thread_id` | Lê todas as mensagens de uma conversa |
 | `summarize_email_thread` | `thread_id` | Resume uma conversa longa em até 6 frases (LLM) |
 | `detect_pending_email_actions` | `since_days?, limit?` | Identifica pendências nos e-mails recentes via function calling (`report_pending_actions`) |
+| `reply_to_email_thread` | `thread_id, body` | Responde à conversa; destinatário é sempre o remetente da última mensagem da própria thread — não existe parâmetro de endereço. Envio enfileirado via `mail.send_reply` (job durável), não síncrono |
 
 Registradas exclusivamente em `agents/assistant_agent.py` — ver `docs/TOOLS.md` para o contrato geral de `Tool`/`ToolContext`.
 
@@ -155,7 +162,7 @@ Sem essas variáveis configuradas, o backend sobe normalmente — o domínio de 
 3. **Configure a tela de consentimento OAuth** (*APIs e serviços → Tela de consentimento OAuth*):
    - Tipo de usuário: **Externo** (a menos que você tenha um Google Workspace e prefira **Interno**).
    - Preencha nome do app, e-mail de suporte e e-mail de contato do desenvolvedor.
-   - Em **Escopos**, adicione `https://www.googleapis.com/auth/gmail.readonly`.
+   - Em **Escopos**, adicione `https://www.googleapis.com/auth/gmail.readonly` e `https://www.googleapis.com/auth/gmail.send`.
    - Em **Usuários de teste** (enquanto o app estiver em modo de teste), adicione a conta Gmail que será conectada ao Dario OS.
 4. **Crie as credenciais OAuth** (*APIs e serviços → Credenciais → Criar credenciais → ID do cliente OAuth*):
    - Tipo de aplicativo: **Aplicativo da Web**.
@@ -175,21 +182,22 @@ Sem essas variáveis configuradas, o backend sobe normalmente — o domínio de 
 
 Enquanto o app OAuth estiver em modo de teste no Google Cloud (comum para uso pessoal — não é necessário publicar o app), apenas as contas listadas em "Usuários de teste" conseguem concluir o consentimento; isso é uma limitação do Google, não do Dario OS.
 
-## Limitações desta sprint
+## Limitações
 
-- Somente leitura — sem enviar, responder, mover, excluir ou re-rotular.
+- Responder é a única operação de escrita — sem compor e-mail novo para endereço arbitrário, mover, excluir ou re-rotular.
 - Um único provider de e-mail (Gmail); a interface `MailProvider` já é o ponto de extensão para um segundo provider (Outlook/Microsoft Graph, IMAP genérico) no futuro, seguindo exatamente o mesmo padrão Strategy + Factory já usado para LLM e WhatsApp — sem mudar nenhum chamador.
-- Um mailbox conectado por usuário (`UNIQUE(user_id, provider)`); múltiplas contas Gmail simultâneas para o mesmo usuário não são suportadas nesta sprint.
+- Um mailbox conectado por usuário (`UNIQUE(user_id, provider)`); múltiplas contas Gmail simultâneas para o mesmo usuário não são suportadas.
 - `search`/`get_thread` corta o corpo da mensagem em `_MAX_BODY_CHARS` (3000 caracteres) antes de devolver ao modelo — protege o contexto da conversa de uma thread desproporcionalmente longa.
+- Contas conectadas antes do escopo `gmail.send` existir precisam reconectar (botão "Reconnect" em `/admin/google`) antes que `reply_to_email_thread` funcione — sem isso, a tool recusa explicitamente em vez de tentar enviar sem permissão.
 
 ## Testes
 
 | Arquivo | Cobertura |
 | --- | --- |
-| `tests/test_mail_provider.py` | `GmailProvider` (OAuth, busca, thread, extração de corpo MIME, query builder), factory |
+| `tests/test_mail_provider.py` | `GmailProvider` (OAuth, busca, thread, **`send_reply`**, **`_build_mime_reply`** — prefixo `Re:` sem duplicar, `In-Reply-To`/`References`, falha de API, extração de corpo MIME, query builder), factory |
 | `tests/test_token_crypto.py` | Cifra/decifra Fernet, chave ausente/inválida, chave trocada |
 | `tests/test_mail_router.py` | `/connect`, `/oauth/callback` (sucesso, reconexão, sem refresh token, sem chave de cifra, erro do Google, state inválido/errado propósito, **XSS refletido no parâmetro `error` escapado**, **corrida de duas conexões concorrentes recuperada sem duplicar/derrubar**), `/status`, `/disconnect`, admin-only |
-| `tests/test_mail_tools.py` | As 4 tools: rejeição sem conta conectada, sucesso, mapeamento de erro do provider, **refresh token revogado tratado como "não conectado"** (mensagem acionável, não um erro cru), parsing de data (`_parse_date`), **isolamento entre dois usuários conectados** (nunca vaza mailbox de outro usuário, inclusive por `thread_id` de outro usuário) |
+| `tests/test_mail_tools.py` | As 5 tools: rejeição sem conta conectada, sucesso, mapeamento de erro do provider, **refresh token revogado tratado como "não conectado"** (mensagem acionável, não um erro cru), parsing de data (`_parse_date`), **isolamento entre dois usuários conectados** (nunca vaza mailbox de outro usuário, inclusive por `thread_id` de outro usuário) — `reply_to_email_thread`: exige `gmail.send` (recusa acionável sem o escopo), enfileira `mail.send_reply` com o destinatário resolvido da própria thread (nada enviado de forma síncrona), rejeita `thread_id` de outro usuário, rejeita thread vazia |
 
 ## O que ainda depende do fundador
 

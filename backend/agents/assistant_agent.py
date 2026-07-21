@@ -46,6 +46,7 @@ from agents.tools.goals import (
 from agents.tools.mail import (
     detect_pending_email_actions_tool,
     read_email_thread_tool,
+    reply_to_email_thread_tool,
     search_emails_tool,
     summarize_email_thread_tool,
 )
@@ -112,6 +113,7 @@ class AssistantAgent(BaseAgent):
             read_email_thread_tool,
             summarize_email_thread_tool,
             detect_pending_email_actions_tool,
+            reply_to_email_thread_tool,
             list_google_calendars_tool,
             search_google_calendar_events_tool,
             create_google_calendar_event_tool,

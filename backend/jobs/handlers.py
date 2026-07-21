@@ -7,11 +7,16 @@ from events.bus import Event, event_bus
 from jobs.registry import job_handler
 from jobs.service import JobService
 from memory.contact_memory import contact_memory_service
+from providers.mail.base import MailProviderError
+from providers.mail.factory import get_mail_provider
 from providers.whatsapp.factory import get_whatsapp_provider
 from repositories.contact import ContactRepository
+from repositories.email_account import EmailAccountRepository
 from repositories.message import MessageRepository
 from repositories.user import UserRepository
+from services.audit import record_log
 from services.messaging import persist_outbound_message
+from services.token_crypto import decrypt_token
 from utils.logging import get_logger
 from workflows.service import workflow_service
 
@@ -49,6 +54,45 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     content = str(payload["content"])
     await get_whatsapp_provider().send_text(to, content)
     await persist_outbound_message(db, to, content)
+
+
+@job_handler("mail.send_reply")
+async def send_mail_reply(db: AsyncSession, payload: dict) -> None:
+    """Reply within an existing Gmail thread (queue retry covers a
+    transient Gmail outage, same reasoning as whatsapp.send_text). Access
+    token isn't cached anywhere -- refreshed fresh from the stored
+    (encrypted) refresh token every time, same as agents/tools/mail.py's
+    own _get_access_token."""
+    user_id = int(payload["user_id"])
+    thread_id = str(payload["thread_id"])
+
+    provider = get_mail_provider()
+    account = await EmailAccountRepository(db).get_by_user(user_id, provider.name)
+    if account is None:
+        logger.error("mail.send_reply: no email account for user %s", user_id)
+        return
+    refresh_token = decrypt_token(account.encrypted_refresh_token)
+    tokens = await provider.refresh_access_token(refresh_token)
+
+    try:
+        message_id = await provider.send_reply(
+            tokens.access_token,
+            thread_id=thread_id,
+            to=list(payload["to"]),
+            subject=str(payload["subject"]),
+            body=str(payload["body"]),
+            in_reply_to_message_id=payload.get("in_reply_to_message_id"),
+        )
+    except MailProviderError:
+        raise  # let the job queue's own retry/backoff handle a transient failure
+
+    await record_log(
+        db,
+        source=f"mail:reply:{user_id}",
+        message=f"Email reply sent in thread {thread_id}",
+        level="info",
+        payload={"thread_id": thread_id, "message_id": message_id},
+    )
 
 
 @job_handler("workflow.trigger")

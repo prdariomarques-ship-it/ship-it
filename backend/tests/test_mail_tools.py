@@ -17,11 +17,13 @@ from cryptography.fernet import Fernet
 
 from agents.tools.base import ToolContext
 from agents.tools.mail import (
+    GMAIL_SEND_SCOPE,
     MailNotConnectedError,
     _get_access_token,
     _parse_date,
     detect_pending_email_actions_tool,
     read_email_thread_tool,
+    reply_to_email_thread_tool,
     search_emails_tool,
     summarize_email_thread_tool,
 )
@@ -75,7 +77,11 @@ async def user_b(session_factory) -> User:
 
 
 async def _connect(
-    session_factory, user: User, refresh_token: str, email_address: str
+    session_factory,
+    user: User,
+    refresh_token: str,
+    email_address: str,
+    scopes: list[str] | None = None,
 ) -> EmailAccount:
     async with session_factory() as session:
         account = await EmailAccountRepository(session).create(
@@ -83,7 +89,7 @@ async def _connect(
             provider="gmail",
             email_address=email_address,
             encrypted_refresh_token=encrypt_token(refresh_token),
-            scopes=["gmail.readonly"],
+            scopes=scopes if scopes is not None else ["gmail.readonly"],
             connected_at=datetime.now(timezone.utc),
         )
         return account
@@ -101,6 +107,7 @@ class FakeMailProvider(MailProvider):
         self.mailboxes = mailboxes or {}
         self.search_calls: list[str] = []
         self.thread_calls: list[str] = []
+        self.send_calls: list[dict] = []
 
     def authorization_url(self, state: str) -> str:
         raise NotImplementedError
@@ -130,6 +137,27 @@ class FakeMailProvider(MailProvider):
         # belonging to a *different* mailbox simply doesn't exist for this
         # access_token, exactly like a real 404 from the Gmail API.
         raise MailProviderError(f"thread {thread_id} not found")
+
+    async def send_reply(
+        self,
+        access_token: str,
+        thread_id: str,
+        to: list[str],
+        subject: str,
+        body: str,
+        in_reply_to_message_id: str | None = None,
+    ) -> str:
+        self.send_calls.append(
+            {
+                "access_token": access_token,
+                "thread_id": thread_id,
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "in_reply_to_message_id": in_reply_to_message_id,
+            }
+        )
+        return "fake-sent-message-id"
 
 
 def _message(mailbox_tag: str) -> EmailMessage:
@@ -511,3 +539,116 @@ async def test_detect_pending_actions_tool_no_messages_skips_the_llm_call(
 
     assert json.loads(result) == {"ok": True, "actions": []}
     assert calls["n"] == 0
+
+
+# --- reply_to_email_thread: send-scope gate, recipient from the thread itself,
+# and the same cross-user isolation guarantee as the read-only tools ------------
+@pytest.mark.asyncio
+async def test_reply_to_email_thread_requires_the_send_scope(
+    session_factory, user_a, monkeypatch
+):
+    """An account connected before gmail.send existed (default `_connect`
+    scope is just gmail.readonly) must be told to reconnect, not silently
+    attempt a send that Google would reject."""
+    await _connect(session_factory, user_a, "rt-a", "a@gmail.com")
+    provider = FakeMailProvider({"access-for-rt-a": [_message("a")]})
+    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
+
+    async with session_factory() as session:
+        result = await reply_to_email_thread_tool.run(
+            ToolContext(db=session, user=user_a), {"thread_id": "t-a", "body": "Oi"}
+        )
+
+    payload = json.loads(result)
+    assert "reconectar" in payload["error"].lower()
+    assert provider.send_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reply_to_email_thread_enqueues_a_job_with_recipient_from_the_thread(
+    session_factory, user_a, monkeypatch
+):
+    from repositories.job import JobRepository
+
+    await _connect(
+        session_factory, user_a, "rt-a", "a@gmail.com",
+        scopes=["gmail.readonly", GMAIL_SEND_SCOPE],
+    )
+    provider = FakeMailProvider({"access-for-rt-a": [_message("a")]})
+    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
+
+    async with session_factory() as session:
+        result = await reply_to_email_thread_tool.run(
+            ToolContext(db=session, user=user_a),
+            {"thread_id": "t-a", "body": "Confirmado, obrigado!"},
+        )
+    payload = json.loads(result)
+    assert payload["ok"] is True
+    assert payload["to"] == "someone@a.example.com"
+    # Nothing was sent synchronously -- send_reply runs later, in the job
+    # worker, exactly like send_whatsapp_message.
+    assert provider.send_calls == []
+
+    async with session_factory() as session:
+        job = await JobRepository(session).get(payload["job_id"])
+    assert job is not None
+    assert job.name == "mail.send_reply"
+    assert job.payload["thread_id"] == "t-a"
+    assert job.payload["to"] == ["someone@a.example.com"]
+    assert job.payload["body"] == "Confirmado, obrigado!"
+    assert job.payload["user_id"] == user_a.id
+
+
+@pytest.mark.asyncio
+async def test_reply_to_email_thread_cannot_be_pointed_at_another_users_thread(
+    session_factory, user_a, user_b, monkeypatch
+):
+    await _connect(
+        session_factory, user_a, "rt-a", "a@gmail.com",
+        scopes=["gmail.readonly", GMAIL_SEND_SCOPE],
+    )
+    await _connect(
+        session_factory, user_b, "rt-b", "b@gmail.com",
+        scopes=["gmail.readonly", GMAIL_SEND_SCOPE],
+    )
+    provider = FakeMailProvider(
+        {"access-for-rt-a": [_message("a")], "access-for-rt-b": [_message("b")]}
+    )
+    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
+
+    async with session_factory() as session:
+        result = await reply_to_email_thread_tool.run(
+            # user_a's own thread id is "t-a" -- "t-b" belongs to user_b's mailbox.
+            ToolContext(db=session, user=user_a), {"thread_id": "t-b", "body": "Oi"}
+        )
+
+    payload = json.loads(result)
+    assert "error" in payload
+    assert provider.send_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reply_to_email_thread_rejects_an_empty_thread(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(
+        session_factory, user_a, "rt-a", "a@gmail.com",
+        scopes=["gmail.readonly", GMAIL_SEND_SCOPE],
+    )
+
+    class _EmptyThreadProvider(FakeMailProvider):
+        async def get_thread(self, access_token, thread_id):
+            from providers.mail.base import EmailThread
+
+            return EmailThread(id=thread_id, subject="", messages=[])
+
+    provider = _EmptyThreadProvider({"access-for-rt-a": [_message("a")]})
+    monkeypatch.setattr("agents.tools.mail.get_mail_provider", lambda: provider)
+
+    async with session_factory() as session:
+        result = await reply_to_email_thread_tool.run(
+            ToolContext(db=session, user=user_a), {"thread_id": "t-a", "body": "Oi"}
+        )
+
+    payload = json.loads(result)
+    assert "error" in payload

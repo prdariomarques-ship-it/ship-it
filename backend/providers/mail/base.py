@@ -86,3 +86,21 @@ class MailProvider(ABC):
     @abstractmethod
     async def get_thread(self, access_token: str, thread_id: str) -> EmailThread:
         """Fetch a full thread (all messages), oldest first."""
+
+    @abstractmethod
+    async def send_reply(
+        self,
+        access_token: str,
+        thread_id: str,
+        to: list[str],
+        subject: str,
+        body: str,
+        in_reply_to_message_id: str | None = None,
+    ) -> str:
+        """Send a reply within an existing thread. `to` is supplied by the
+        caller (derived from the thread's own participants -- see
+        agents/tools/mail.py's reply_to_email_thread), never invented by
+        this method. Returns the id of the sent message.
+
+        Deliberately no "compose a brand-new email to an arbitrary address"
+        method exists anywhere in this interface -- see docs/EMAIL.md."""

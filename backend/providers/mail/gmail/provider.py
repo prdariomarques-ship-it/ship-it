@@ -27,11 +27,18 @@ from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Read-only by design (Sprint 1 scope: read, search, summarize, detect —
-# never send/reply/delete/modify labels). Requesting a narrower scope than
-# the app could technically use is itself a security control, not just a
-# convenience — Google won't grant what wasn't asked for.
-GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly"
+# gmail.readonly (read/search/summarize/detect) + gmail.send (reply only --
+# see agents/tools/mail.py's reply_to_email_thread, which can never compose
+# to an arbitrary address). Deliberately not gmail.modify/gmail.compose,
+# which would also grant delete/re-label/draft-anything -- requesting a
+# narrower scope than the app could technically use is itself a security
+# control, not just a convenience. An account connected before this scope
+# was added must reconnect (via the existing "Reconnect" button in
+# /admin/google) before send_reply's send scope check passes.
+GMAIL_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.readonly "
+    "https://www.googleapis.com/auth/gmail.send"
+)
 
 _METADATA_HEADERS = ["Subject", "From", "To", "Date"]
 
@@ -149,6 +156,50 @@ class GmailProvider(MailProvider):
         ]
         subject = messages[0].subject if messages else ""
         return EmailThread(id=thread_id, subject=subject, messages=messages)
+
+    async def send_reply(
+        self,
+        access_token: str,
+        thread_id: str,
+        to: list[str],
+        subject: str,
+        body: str,
+        in_reply_to_message_id: str | None = None,
+    ) -> str:
+        raw = _build_mime_reply(to, subject, body, in_reply_to_message_id)
+        json_body: dict = {"raw": raw, "threadId": thread_id}
+        try:
+            result = await google_request(
+                "gmail",
+                "POST",
+                f"{self._api_base_url}/gmail/v1/users/me/messages/send",
+                headers=self._headers(access_token),
+                json=json_body,
+            )
+        except httpx.HTTPError as exc:
+            logger.error("Gmail send failed (thread %s): %s", thread_id, exc)
+            raise MailProviderError(f"Gmail send failed: {exc}") from exc
+        return str(result.json()["id"])
+
+
+def _build_mime_reply(
+    to: list[str], subject: str, body: str, in_reply_to_message_id: str | None
+) -> str:
+    """RFC 2822 message, base64url-encoded (Gmail's `raw` field contract).
+    `In-Reply-To`/`References` are set whenever the original message id is
+    known, so mail clients thread the reply correctly -- Gmail's own
+    `threadId` (passed separately in the API call) keeps it grouped even
+    without these headers, but other clients rely on them."""
+    from email.message import EmailMessage as MimeMessage
+
+    message = MimeMessage()
+    message["To"] = ", ".join(to)
+    message["Subject"] = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+    if in_reply_to_message_id:
+        message["In-Reply-To"] = in_reply_to_message_id
+        message["References"] = in_reply_to_message_id
+    message.set_content(body)
+    return base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
 
 
 def _build_search_query(query: EmailSearchQuery) -> str:

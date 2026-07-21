@@ -203,6 +203,79 @@ async def test_get_thread_url_encodes_the_thread_id(provider):
     assert "/threads/abc/../../drafts/xyz" not in requested_url
 
 
+# --- send_reply ------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_send_reply_posts_the_thread_id_and_a_base64url_raw_message(provider):
+    patcher, client = _patch_client(post_result=_mock_response({"id": "sent-1"}))
+    with patcher:
+        message_id = await provider.send_reply(
+            "access-token",
+            thread_id="t1",
+            to=["a@example.com"],
+            subject="Assunto",
+            body="Corpo da resposta",
+            in_reply_to_message_id="m1",
+        )
+    assert message_id == "sent-1"
+    call = client.request.call_args
+    assert call.args[0] == "POST"
+    assert "/messages/send" in call.args[1]
+    sent_json = call.kwargs["json"]
+    assert sent_json["threadId"] == "t1"
+    assert "raw" in sent_json
+
+    import base64
+
+    decoded = base64.urlsafe_b64decode(sent_json["raw"]).decode()
+    assert "To: a@example.com" in decoded
+    assert "Corpo da resposta" in decoded
+
+
+@pytest.mark.asyncio
+async def test_send_reply_api_failure_raises_mail_provider_error(provider, monkeypatch):
+    import httpx as httpx_module
+
+    monkeypatch.setattr(get_settings(), "google_request_backoff_seconds", 0)
+    client = MagicMock()
+    client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch("providers.google_http.httpx.AsyncClient", return_value=client):
+        with pytest.raises(MailProviderError):
+            await provider.send_reply(
+                "access-token",
+                thread_id="t1",
+                to=["a@example.com"],
+                subject="Assunto",
+                body="Corpo",
+            )
+
+
+# --- _build_mime_reply -------------------------------------------------------------
+def test_build_mime_reply_prefixes_subject_with_re_when_missing():
+    import base64
+
+    from providers.mail.gmail.provider import _build_mime_reply
+
+    raw = _build_mime_reply(["a@example.com"], "Assunto", "Corpo", None)
+    decoded = base64.urlsafe_b64decode(raw).decode()
+    assert "Subject: Re: Assunto" in decoded
+    assert "In-Reply-To" not in decoded
+
+
+def test_build_mime_reply_does_not_double_prefix_an_existing_re():
+    import base64
+
+    from providers.mail.gmail.provider import _build_mime_reply
+
+    raw = _build_mime_reply(["a@example.com"], "Re: Assunto", "Corpo", "m1")
+    decoded = base64.urlsafe_b64decode(raw).decode()
+    assert "Subject: Re: Assunto" in decoded
+    assert decoded.count("Re: Re:") == 0
+    assert "In-Reply-To: m1" in decoded
+    assert "References: m1" in decoded
+
+
 def test_extract_body_prefers_text_plain_over_html_fallback():
     import base64
 

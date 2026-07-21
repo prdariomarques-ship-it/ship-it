@@ -29,7 +29,12 @@ class MailNotConnectedError(RuntimeError):
     failure. Never a crash, never a fallback to someone else's mailbox."""
 
 
-async def _get_access_token(context: ToolContext) -> str:
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+
+
+async def _get_access_token(
+    context: ToolContext, require_send_scope: bool = False
+) -> str:
     """The only place a mailbox is chosen — always from `context.user.id`
     (set by the application, never by the model). This is the same
     principle established by PROD-005 for WhatsApp contacts, applied to the
@@ -44,6 +49,16 @@ async def _get_access_token(context: ToolContext) -> str:
     if account is None:
         raise MailNotConnectedError(
             "Nenhuma conta de e-mail conectada. Peça ao administrador para conectar em /api/mail/connect."
+        )
+    if require_send_scope and GMAIL_SEND_SCOPE not in account.scopes:
+        # A refresh grant doesn't repeat `scope` in Google's response, so
+        # the account's stored (connect-time) scopes are the only reliable
+        # source of truth for what was actually granted -- not something to
+        # infer from a successful token refresh.
+        raise MailNotConnectedError(
+            "Esta conta do Gmail foi conectada antes da permissão de envio existir. "
+            "Peça ao administrador para reconectar em /admin/google (botão Reconnect) "
+            "para conceder o novo escopo."
         )
     try:
         refresh_token = decrypt_token(account.encrypted_refresh_token)
@@ -145,6 +160,49 @@ async def _read_email_thread(context: ToolContext, thread_id: str) -> str:
             for message in thread.messages
         ],
     )
+
+
+async def _reply_to_email_thread(context: ToolContext, thread_id: str, body: str) -> str:
+    """Replies within an existing thread only -- the recipient is always the
+    last message's own sender, taken from the thread itself, never supplied
+    by the model. Composing a brand-new email to an arbitrary address has
+    no tool and is out of scope by design (mirrors PROD-005's WhatsApp
+    contact restriction). See docs/EMAIL.md."""
+    access_token = await _get_access_token(context, require_send_scope=True)
+    provider = get_mail_provider()
+    try:
+        thread = await provider.get_thread(access_token, thread_id)
+    except MailProviderError as exc:
+        raise RuntimeError(f"Falha ao ler a conversa: {exc}") from exc
+
+    if not thread.messages:
+        raise RuntimeError("Thread vazia — não é possível responder.")
+    if context.user is None:
+        raise MailNotConnectedError("No authenticated user in context")
+
+    last_message = thread.messages[-1]
+    from jobs.service import JobService
+
+    # Delivered through the job queue so sends survive provider hiccups
+    # (retry) -- same reasoning as send_whatsapp_message.
+    job = await JobService(context.db).enqueue(
+        "mail.send_reply",
+        {
+            "user_id": context.user.id,
+            "thread_id": thread_id,
+            "to": [last_message.sender],
+            "subject": thread.subject,
+            "body": body,
+            # Gmail's own internal message id, not an RFC 2822 Message-ID
+            # header -- EmailMessage (providers/mail/base.py) doesn't carry
+            # that header separately. Harmless: Gmail's `threadId` (passed
+            # to send_reply directly) is what actually groups the reply on
+            # Gmail's side; this only affects In-Reply-To/References, a
+            # best-effort hint for non-Gmail clients reading the thread.
+            "in_reply_to_message_id": last_message.id,
+        },
+    )
+    return ok(queued=True, job_id=job.id, to=last_message.sender)
 
 
 _SUMMARY_PROMPT = (
@@ -323,5 +381,23 @@ detect_pending_email_actions_tool = Tool(
             },
         },
         "required": [],
+    },
+)
+
+reply_to_email_thread_tool = Tool(
+    name="reply_to_email_thread",
+    description=(
+        "Responde a uma conversa de e-mail existente pelo id da thread. O destinatário é "
+        "sempre o remetente da última mensagem da própria thread — não é possível compor um "
+        "e-mail novo para um endereço arbitrário com esta ferramenta."
+    ),
+    handler=_reply_to_email_thread,
+    parameters={
+        "type": "object",
+        "properties": {
+            "thread_id": {"type": "string"},
+            "body": {"type": "string", "description": "Texto da resposta"},
+        },
+        "required": ["thread_id", "body"],
     },
 )
