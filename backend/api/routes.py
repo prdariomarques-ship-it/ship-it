@@ -11,6 +11,8 @@ from api.crud import create_crud_router
 from auth.dependencies import CurrentUser
 from auth.permissions import require_admin
 from database.session import get_db
+from repositories.church import ChurchMemberRepository
+from repositories.contact import ContactRepository
 from services.cache import cache_service
 from models import (
     CalendarEvent,
@@ -33,6 +35,7 @@ contacts_router = create_crud_router(
     create_schema=schemas.ContactCreate,
     update_schema=schemas.ContactUpdate,
     read_schema=schemas.ContactRead,
+    repository_cls=ContactRepository,
 )
 
 tasks_router = create_crud_router(
@@ -62,6 +65,7 @@ church_router = create_crud_router(
     create_schema=schemas.ChurchMemberCreate,
     update_schema=schemas.ChurchMemberUpdate,
     read_schema=schemas.ChurchMemberRead,
+    repository_cls=ChurchMemberRepository,
 )
 
 store_router = create_crud_router(
