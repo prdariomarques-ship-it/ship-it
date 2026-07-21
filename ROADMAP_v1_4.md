@@ -96,6 +96,26 @@ ver `docs/NOTES.md`). Nenhuma delas bloqueia a integração da v1.4.
 25. Operações em lote (arquivar/apagar várias notas de uma vez).
 26. Exportar/importar notas.
 
+## Google Calendar — melhorias futuras (não fazem parte da v1.4)
+
+Registradas explicitamente como débito técnico aceito ao fechar o suporte a
+edição de série recorrente (`scope="this_event"`/`"all_events"` em
+`update_google_calendar_event`/`delete_google_calendar_event` — ver
+`docs/CALENDAR.md`). Nenhuma delas bloqueia a integração da v1.4.
+
+27. Suporte a "este evento e os seguintes" (o terceiro modo que a própria UI
+    do Google Calendar oferece, além de "só esta ocorrência"/"toda a
+    série") — exigiria dividir a RRULE manualmente (terminar a série
+    original com `UNTIL` no ponto de corte + criar uma nova série a partir
+    dali), risco real de bug de fuso/data, propositalmente fora desta
+    release.
+28. Validação local de RRULE antes de chamar o provider (hoje a regra é
+    passada direto pro Google sem parsing/validação própria — um erro de
+    sintaxe só aparece quando o Google já rejeitou a chamada).
+29. UI dedicada para editar eventos recorrentes (hoje só existe via
+    ferramentas do agente/WhatsApp — não há tela própria para o Google
+    Calendar, só o botão Reconnect genérico em `/admin/google`).
+
 ## Dependências entre itens
 
 - Item 7 (CSP) depende de ter um domínio real com HTTPS — não pode ser
