@@ -23,6 +23,12 @@ services:
       WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-openwa}
       OPENWA_BASE_URL: http://openwa:8002
       OPENWA_API_KEY: ${OPENWA_API_KEY:-}
+      # Browser-reachable URL for openwa's QR pairing popup (its own container
+      # port 8002, mapped to the host below) -- deliberately NOT derived from
+      # OPENWA_BASE_URL, which is the backend's internal Docker-network
+      # address and unreachable from a browser. Empty by default: no link is
+      # shown in the dashboard until an operator sets this explicitly.
+      OPENWA_PUBLIC_QR_URL: ${OPENWA_PUBLIC_QR_URL:-}
       EVOLUTION_BASE_URL: ${EVOLUTION_BASE_URL:-}
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-darioos}

@@ -530,6 +530,17 @@ async def admin_whatsapp(db: DbSession) -> schemas.WhatsAppStatus:
 
     status_check = await service.check_whatsapp()
     provider = get_whatsapp_provider()
+    settings = get_settings()
+    # QR pairing has no REST equivalent for openwa (confirmed against the
+    # running gateway -- see utils/config.py::openwa_public_qr_url) --
+    # link to the gateway's own popup page instead of proxying it. Only
+    # meaningful for openwa, and only once an operator has configured the
+    # browser-reachable URL for it.
+    qr_page_url = (
+        settings.openwa_public_qr_url
+        if provider.name == "openwa" and settings.openwa_public_qr_url
+        else None
+    )
 
     queue_depth = (
         await db.execute(
@@ -560,6 +571,7 @@ async def admin_whatsapp(db: DbSession) -> schemas.WhatsAppStatus:
         queue_depth=queue_depth,
         messages_sent=sent,
         messages_received=received,
+        qr_page_url=qr_page_url,
     )
 
 

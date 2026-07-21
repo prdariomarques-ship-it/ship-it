@@ -614,6 +614,48 @@ async def test_admin_whatsapp_counts_messages_by_direction(
     assert "provider" in body
 
 
+@pytest.mark.asyncio
+async def test_admin_whatsapp_qr_page_url_absent_by_default(client, admin_headers):
+    """openwa_public_qr_url defaults to empty -- no link unless an operator
+    explicitly configures the browser-reachable popup URL."""
+    response = await client.get("/api/admin/whatsapp", headers=admin_headers)
+    assert response.json()["qr_page_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_whatsapp_qr_page_url_present_when_configured(
+    client, admin_headers, monkeypatch
+):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(
+        get_settings(), "openwa_public_qr_url", "http://192.168.1.10:8002"
+    )
+    response = await client.get("/api/admin/whatsapp", headers=admin_headers)
+    assert response.json()["qr_page_url"] == "http://192.168.1.10:8002"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other_provider", ["official", "baileys", "evolution"])
+async def test_admin_whatsapp_qr_page_url_hidden_for_non_openwa_provider(
+    client, admin_headers, monkeypatch, other_provider
+):
+    """The QR popup is openwa-specific -- must not leak into the response
+    for any other configured provider, even if the URL setting is present."""
+    from providers.whatsapp import factory as wa_factory
+    from utils.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "openwa_public_qr_url", "http://192.168.1.10:8002")
+    monkeypatch.setattr(settings, "whatsapp_provider", other_provider)
+    wa_factory.get_whatsapp_provider.cache_clear()
+    try:
+        response = await client.get("/api/admin/whatsapp", headers=admin_headers)
+        assert response.json()["qr_page_url"] is None
+    finally:
+        wa_factory.get_whatsapp_provider.cache_clear()
+
+
 # --- admin/service.py unit tests (pure helpers, no HTTP round trip needed) --------
 def test_metric_value_accumulates_only_matching_samples():
     from admin.service import _metric_value

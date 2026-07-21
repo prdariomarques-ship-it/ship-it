@@ -62,7 +62,7 @@ fonte que já existia antes desta sprint:
 | `GET /api/admin/executions` | Tabelas `jobs` e `logs` (`source LIKE 'agent:%'`) — ver limitação abaixo |
 | `GET /api/admin/users` | Tabela `users` (sem `hashed_password`) |
 | `GET /api/admin/metrics` | Snapshot bruto do registro Prometheus já usado por `GET /metrics` |
-| `GET /api/admin/whatsapp` | `WhatsAppProvider.health_check()`, tabela `jobs` (fila), tabela `messages` (contagem por direção) |
+| `GET /api/admin/whatsapp` | `WhatsAppProvider.health_check()`, tabela `jobs` (fila), tabela `messages` (contagem por direção), `OPENWA_PUBLIC_QR_URL` (só quando `WHATSAPP_PROVIDER=openwa`, senão `qr_page_url: null`) |
 
 ## Limitações conhecidas (decisões explícitas, não lacunas esquecidas)
 
@@ -90,13 +90,19 @@ Orchestrator/Agents/Providers:
    linha de log/job a uma tool específica), e `tokens`/`usuário` por execução
    não existem.
 
-2. **Não há QR Code do WhatsApp.** Nenhum código no backend hoje obtém o QR de
-   nenhum dos 4 providers (openwa/baileys/evolution/official) — adicionar isso
-   exigiria um método novo em `providers/whatsapp/`, explicitamente fora do
-   escopo ("não alterar Providers"). A página **WhatsApp** mostra status real de
-   conexão (via `health_check()` e o gauge Prometheus
-   `darioos_whatsapp_session_status`) com uma nota explicando que o
-   re-pareamento é feito diretamente no gateway configurado.
+2. **QR Code do WhatsApp (só openwa).** `GET /admin/whatsapp` retorna
+   `qr_page_url` — um link para a página de pareamento própria do gateway
+   openwa (servida por ele mesmo na porta 8002), nunca um proxy/embed do QR
+   em si. Só populado quando `WHATSAPP_PROVIDER=openwa` **e**
+   `OPENWA_PUBLIC_QR_URL` está configurada (`docker/.env.example` documenta
+   formato e um exemplo de reverse proxy via Caddy); ausente/`null` em
+   qualquer outro caso, e a página **WhatsApp** esconde a seção
+   correspondente sem mostrar link quebrado. Motivo de não ter um proxy REST
+   embutido: confirmado ao vivo contra o gateway rodando que não existe
+   método `getQRCode` (nem equivalente) na API REST args-based do
+   wa-automate — o QR só é entregue via WebSocket para a página popup do
+   próprio gateway, então o dashboard aponta para ela em vez de tentar
+   replicá-la.
 
 Limitações adicionais, menores:
 

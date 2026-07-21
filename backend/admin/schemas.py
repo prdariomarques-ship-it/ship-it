@@ -167,6 +167,7 @@ class WhatsAppStatus(BaseModel):
     queue_depth: int
     messages_sent: int
     messages_received: int
+    qr_page_url: str | None = None
 
 
 class AdminIndex(BaseModel):

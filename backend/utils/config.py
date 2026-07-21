@@ -113,6 +113,15 @@ class Settings(BaseSettings):
 
     openwa_base_url: str = "http://localhost:8002"
     openwa_api_key: str = ""
+    # openwa_base_url is the backend's internal Docker-network address
+    # (e.g. http://openwa:8002) -- not reachable from Dário's browser. The
+    # QR pairing page (see docker/openwa/Dockerfile) is only ever delivered
+    # over that container's own WebSocket to its popup page, with no REST
+    # equivalent (confirmed against the running gateway: "Cannot find
+    # method: getQRCode"), so the dashboard links to the popup directly
+    # instead of proxying it. Empty by default -- unset means no link is
+    # shown, rather than guessing a host/IP that might be wrong.
+    openwa_public_qr_url: str = ""
 
     # Google-backed providers (Gmail, Calendar, Contacts, Drive): retry with
     # exponential backoff for transient HTTP failures, same contract as

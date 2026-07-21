@@ -38,10 +38,21 @@ export default function AdminWhatsAppPage() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground">{data.detail}</p>
-              <p className="mt-3 text-xs text-muted-foreground">
-                QR Code não é exposto nesta versão — o re-pareamento é feito diretamente no provider
-                configurado (fora do escopo desta sprint; ver docs/DASHBOARD.md).
-              </p>
+              {data.qr_page_url ? (
+                <a
+                  href={data.qr_page_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-block text-sm text-primary hover:underline"
+                >
+                  Ver QR Code / reconectar
+                </a>
+              ) : (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  QR Code não disponível — configure OPENWA_PUBLIC_QR_URL para exibir o link de
+                  reconexão aqui.
+                </p>
+              )}
             </CardContent>
           </Card>
 

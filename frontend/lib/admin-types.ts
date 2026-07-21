@@ -159,6 +159,7 @@ export interface WhatsAppStatus {
   queue_depth: number;
   messages_sent: number;
   messages_received: number;
+  qr_page_url: string | null;
 }
 
 export interface AdminIndex {
