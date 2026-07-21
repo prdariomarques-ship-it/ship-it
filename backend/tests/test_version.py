@@ -11,9 +11,9 @@ async def test_version_returns_real_build_metadata(client):
     response = await client.get("/api/version")
     assert response.status_code == 200
     body = response.json()
-    assert body["version"] == "1.3.1"
+    assert body["version"] == "1.4.0"
     assert len(body["commit"]) == 40  # full git SHA
-    assert body["releaseType"] == "patch"
+    assert body["releaseType"] == "minor"
     assert body["environment"] == "test"
     assert body["builtAt"] is not None
 

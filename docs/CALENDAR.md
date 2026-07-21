@@ -96,8 +96,8 @@ Mesmos princípios do PROD-005 e do domínio de e-mail (ver `SECURITY.md`):
 | `list_google_calendars` | — | Lista as agendas do Google Calendar conectado |
 | `search_google_calendar_events` | `calendar_id?, query?, since?, until?, limit?` | Busca/lista eventos por período e/ou palavra-chave |
 | `create_google_calendar_event` | `summary, start, end, calendar_id?, description?, location?, attendees?, recurrence?` | Cria um evento; `recurrence` (lista de linhas RRULE) cria uma série recorrente |
-| `update_google_calendar_event` | `event_id, calendar_id?, ...campos opcionais, recurrence?, scope?` | Edita um evento (só os campos informados mudam); `scope="all_events"` edita a série inteira em vez de só a ocorrência |
-| `delete_google_calendar_event` | `event_id, calendar_id?, scope?` | Exclui um evento; `scope="all_events"` exclui a série inteira em vez de só a ocorrência |
+| `update_google_calendar_event` | `event_id, calendar_id?, ...campos opcionais, recurrence?, scope?` | Edita um evento (só os campos informados mudam); `scope="all_events"` edita a série inteira, `scope="this_and_following"` edita esta ocorrência e as seguintes |
+| `delete_google_calendar_event` | `event_id, calendar_id?, scope?` | Exclui um evento; `scope="all_events"` exclui a série inteira, `scope="this_and_following"` exclui esta ocorrência e as seguintes |
 | `check_google_calendar_availability` | `start, end, calendar_ids?` | Verifica conflitos/disponibilidade em um período |
 
 ## Eventos recorrentes: série vs. ocorrência
@@ -107,7 +107,12 @@ O Google Calendar modela uma série recorrente como um evento **mestre** (`recur
 - **Criar uma série**: `create_google_calendar_event` com `recurrence` (ex: `["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10"]`). A regra é passada direto pro Google — nenhum parsing/validação de RRULE é feito pela aplicação, é tradução pura, mesmo princípio já documentado pra `EventSearchQuery`/`NewEvent`.
 - **Editar/excluir só uma ocorrência**: `scope="this_event"` (padrão) — comportamento inalterado desde a Sprint 2, já funcionava porque o Google já isola PATCH/DELETE pelo id da instância.
 - **Editar/excluir a série inteira**: `scope="all_events"`. A tool primeiro chama `CalendarProvider.get_event` (novo método do Strategy, não exposto como tool própria — usado só internamente pra essa resolução) pra descobrir `recurring_event_id`, e aplica a edição/exclusão nesse id mestre em vez do id da instância. Se o evento não fizer parte de nenhuma série (`recurring_event_id` ausente), o próprio id é usado — `scope="all_events"` nunca falha só por o evento ser um evento único, vira um no-op seguro.
-- **Fora do escopo, deliberadamente**: "este evento e os seguintes" (o terceiro modo que a própria UI do Google Calendar oferece). Implementar isso exigiria dividir a RRULE manualmente (terminar a série original com `UNTIL` no ponto de corte + criar uma nova série a partir dali) — risco real de bug de fuso/data sem ter sido pedido explicitamente. Só `this_event`/`all_events` existem hoje.
+- **Editar/excluir esta ocorrência e as seguintes**: `scope="this_and_following"` — o terceiro modo que a própria UI do Google Calendar também oferece. A API do Google não tem um parâmetro pronto pra isso; a tool implementa dividindo a série em duas, toda a lógica em `agents/tools/gcalendar.py` (o Provider continua só tradução, nenhum método novo):
+  1. **Trunca a série antiga**: lê a RRULE do mestre, recalcula com `UNTIL` = início da ocorrência selecionada menos 1 segundo e `COUNT` removido (RFC 5545 não permite os dois juntos), e faz `PATCH` só nesse campo do mestre. Tudo antes do ponto de corte fica intocado.
+  2. **Cria a série nova**: um evento novo a partir da ocorrência selecionada, com os campos atualizados (só os informados mudam) e uma RRULE de continuação — reaproveitada sem alteração se a regra original tinha `UNTIL` ou nenhum limite (ainda válida a partir de qualquer data), ou recalculada com `dateutil.rrule` (conta quantas ocorrências já aconteceram antes do corte e subtrai do `COUNT` original) se a regra original tinha `COUNT`. Se o chamador já informar uma `recurrence` nova explicitamente, ela é usada direto, sem recálculo.
+  3. **Excluir** faz só o passo 1 (trunca, não cria nada).
+  - **Escopo deliberadamente limitado**: só eventos com horário definido (`dateTime`, não dia inteiro) e cuja `recurrence` tenha exatamente uma linha `RRULE:` simples (sem `EXRULE`/`RDATE`/`EXDATE` junto) — erro explícito fora disso, em vez de arriscar um cálculo sutilmente errado. Se o `event_id` dado não for uma instância de série (já é o próprio mestre, ou é um evento sem recorrência), cai em `all_events`/`this_event` (mesmo no-op seguro já usado nos outros dois scopes).
+  - Nova dependência: `python-dateutil` (`requirements.txt`) — usada só pra essa aritmética de RRULE (contar ocorrências decorridas), nenhuma outra parte do domínio depende dela.
 
 ## Variáveis de ambiente
 
@@ -145,7 +150,7 @@ Começando do zero (sem ter feito o Gmail antes), siga o passo a passo completo 
 - Um único provider de calendário (Google); a interface `CalendarProvider` já é o ponto de extensão para outros (Outlook/Microsoft Graph, CalDAV) sem mudar nenhum chamador.
 - Uma conta Google Calendar conectada por usuário (`UNIQUE(user_id, provider)`).
 - `search_google_calendar_events` busca apenas uma agenda por chamada (`calendar_id`, padrão `primary`) — para consultar várias agendas, chame a tool uma vez por agenda (a lista vem de `list_google_calendars`).
-- Edição de série recorrente cobre só `this_event`/`all_events` — sem "este evento e os seguintes" (ver seção acima).
+- `scope="this_and_following"` só cobre eventos com horário definido (não dia inteiro) e série com uma única regra `RRULE:` simples — ver seção acima para o porquê.
 
 ## Testes
 
@@ -153,7 +158,7 @@ Começando do zero (sem ter feito o Gmail antes), siga o passo a passo completo 
 | --- | --- |
 | `tests/test_gcalendar_provider.py` | `GoogleCalendarProvider` (OAuth, listar agendas, buscar/criar/editar/excluir eventos, **`get_event`**, **recorrência** — `recurrence` enviado/omitido em create/update, parsing de `recurringEventId`/`recurrence`, disponibilidade, parsing de datas/eventos), factory |
 | `tests/test_gcalendar_router.py` | `/connect`, `/oauth/callback` (sucesso, reconexão, corrida de concorrência, sem refresh token, sem chave de cifra, erro do Google, state inválido/errado propósito/de outro domínio, XSS refletido escapado), `/status`, `/disconnect`, admin-only |
-| `tests/test_gcalendar_tools.py` | As 6 tools: rejeição sem conta conectada, refresh token revogado, sucesso, mapeamento de erro do provider, datas inválidas, **isolamento entre dois usuários conectados** — **recorrência**: `recurrence` passado ao criar, `scope="this_event"` (padrão) não chama `get_event` e edita/exclui só a instância dada, `scope="all_events"` resolve pro `recurring_event_id` (mestre) tanto em editar quanto excluir, no-op seguro em `all_events` para evento não recorrente, `scope` inválido rejeitado |
+| `tests/test_gcalendar_tools.py` | As 6 tools: rejeição sem conta conectada, refresh token revogado, sucesso, mapeamento de erro do provider, datas inválidas, **isolamento entre dois usuários conectados** — **recorrência**: `recurrence` passado ao criar, `scope="this_event"` (padrão) não chama `get_event` e edita/exclui só a instância dada, `scope="all_events"` resolve pro `recurring_event_id` (mestre) tanto em editar quanto excluir, no-op seguro em `all_events` para evento não recorrente, `scope` inválido rejeitado — **`scope="this_and_following"`**: helpers de RRULE testados isoladamente (`_set_rrule_until`/`_set_rrule_count`/`_continuation_rrule`/`_single_rrule_line` — substituir `COUNT` por `UNTIL` e vice-versa, reaproveitar regra sem `COUNT` inalterada, recalcular `COUNT` restante, rejeitar split sem ocorrência futura), truncagem+criação de série nova ponta a ponta, `recurrence` explícita ignora o recálculo, fallback pra `all_events`/`this_event` quando o id dado não é uma instância, rejeição de evento de dia inteiro, rejeição de múltiplas linhas de recorrência, exclusão só trunca (não apaga nada) |
 
 ## O que ainda depende do fundador
 

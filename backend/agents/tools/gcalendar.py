@@ -18,10 +18,15 @@ OS's own internal `create_task`/`create_event`/`list_events` tools
 which remain untouched and unaffected by this file.
 """
 
-from datetime import datetime, timezone
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+
+from dateutil.rrule import rrulestr
 
 from agents.tools.base import Tool, ToolContext, ok
 from providers.calendar.base import (
+    CalendarEvent,
     CalendarProvider,
     CalendarProviderError,
     EventSearchQuery,
@@ -94,7 +99,20 @@ def _require_datetime(value: str, field_name: str) -> datetime:
     return parsed
 
 
-_EVENT_SCOPES = ("this_event", "all_events")
+_EVENT_SCOPES = ("this_event", "all_events", "this_and_following")
+
+# Safety cap on `this_and_following`'s COUNT recalculation -- a personal
+# calendar is nowhere near this; refusing explicitly beats silently
+# enumerating a huge series.
+_MAX_RRULE_COUNT_TO_SPLIT = 5000
+_UNTIL_FORMAT = "%Y%m%dT%H%M%SZ"
+_COUNT_RE = re.compile(r"COUNT=(\d+)")
+
+
+class RecurrenceSplitNotSupportedError(RuntimeError):
+    """`this_and_following` has a deliberately narrow, documented scope
+    (see docs/CALENDAR.md) -- surfaced as a normal tool error (via
+    Tool.run's catch-all), never a crash."""
 
 
 async def _resolve_target_event_id(
@@ -117,6 +135,179 @@ async def _resolve_target_event_id(
         return event_id
     event = await provider.get_event(access_token, calendar_id, event_id)
     return event.recurring_event_id or event.id
+
+
+@dataclass
+class _SeriesSplit:
+    instance: CalendarEvent
+    master: CalendarEvent
+
+
+async def _resolve_series_split(
+    provider: CalendarProvider, access_token: str, calendar_id: str, event_id: str
+) -> _SeriesSplit | None:
+    """For `scope="this_and_following"` only. Returns `None` when there's no
+    real split point -- either the event isn't part of any series (caller
+    falls back to `this_event`), or `event_id` is already the series
+    master itself, with no specific occurrence to split from (caller falls
+    back to `all_events`) -- both already handled correctly by
+    `_resolve_target_event_id`, reused as the fallback rather than
+    reimplemented here."""
+    event = await provider.get_event(access_token, calendar_id, event_id)
+    if not event.recurring_event_id:
+        return None
+    master = await provider.get_event(access_token, calendar_id, event.recurring_event_id)
+    return _SeriesSplit(instance=event, master=master)
+
+
+def _single_rrule_line(recurrence: list[str] | None) -> str:
+    """`this_and_following` only supports a series whose `recurrence` is
+    exactly one plain RRULE line -- an EXRULE/RDATE/EXDATE alongside it
+    could be silently dropped or misapplied by the split below, so that
+    case is rejected explicitly instead of risked."""
+    if not recurrence or len(recurrence) != 1 or not recurrence[0].startswith("RRULE:"):
+        raise RecurrenceSplitNotSupportedError(
+            "'this_and_following' só é suportado quando a série tem exatamente uma regra "
+            "RRULE simples (sem EXRULE/RDATE/EXDATE)."
+        )
+    return recurrence[0]
+
+
+def _format_until(value: datetime) -> str:
+    # Google always reports timed (non-all-day) events with an explicit
+    # UTC offset, so per RFC 5545 the RRULE's UNTIL must match: UTC with a
+    # trailing "Z". dateutil's own serializer doesn't add it (confirmed by
+    # inspection), so it's appended by hand rather than trusted to a
+    # round-trip through the library.
+    return value.astimezone(timezone.utc).strftime(_UNTIL_FORMAT)
+
+
+def _set_rrule_until(rrule_line: str, until: datetime) -> str:
+    """Rewrites the RRULE line to end at `until`. Targeted regex substitution
+    on the raw line (not a re-serialization via dateutil) so every other
+    part of the rule (FREQ/BYDAY/INTERVAL/WKST/...) is left untouched.
+    COUNT and UNTIL can never coexist per RFC 5545, so an existing COUNT is
+    replaced, not kept alongside the new UNTIL."""
+    until_field = f"UNTIL={_format_until(until)}"
+    if "COUNT=" in rrule_line:
+        return _COUNT_RE.sub(until_field, rrule_line)
+    if "UNTIL=" in rrule_line:
+        return re.sub(r"UNTIL=[^;]+", until_field, rrule_line)
+    return f"{rrule_line};{until_field}"
+
+
+def _set_rrule_count(rrule_line: str, count: int) -> str:
+    count_field = f"COUNT={count}"
+    if "COUNT=" in rrule_line:
+        return _COUNT_RE.sub(count_field, rrule_line)
+    if "UNTIL=" in rrule_line:
+        return re.sub(r"UNTIL=[^;]+", count_field, rrule_line)
+    return f"{rrule_line};{count_field}"
+
+
+def _continuation_rrule(rrule_line: str, series_start: datetime, split_start: datetime) -> str:
+    """The RRULE for the new ("following") series, starting at the split
+    point. A rule with no COUNT (UNTIL-bounded or unbounded) is reused
+    unchanged -- still a valid, meaningful rule from any later start date.
+    Only a COUNT-bounded rule needs recalculating, since the remaining
+    number of occurrences depends on how many already happened before the
+    split -- computed with a real RRULE engine (`dateutil`), not by hand."""
+    match = _COUNT_RE.search(rrule_line)
+    if match is None:
+        return rrule_line
+    original_count = int(match.group(1))
+    if original_count > _MAX_RRULE_COUNT_TO_SPLIT:
+        raise RecurrenceSplitNotSupportedError(
+            "Série recorrente longa demais para dividir com segurança."
+        )
+    rule = rrulestr(rrule_line, dtstart=series_start)
+    elapsed = rule.between(series_start - timedelta(seconds=1), split_start, inc=False)
+    remaining = original_count - len(elapsed)
+    if remaining <= 0:
+        raise ValueError(
+            "Não há ocorrências futuras a partir dessa data para dividir a série."
+        )
+    return _set_rrule_count(rrule_line, remaining)
+
+
+async def _apply_this_and_following_update(
+    provider: CalendarProvider,
+    access_token: str,
+    calendar_id: str,
+    instance: CalendarEvent,
+    master: CalendarEvent,
+    update: EventUpdate,
+) -> CalendarEvent:
+    if instance.all_day or master.all_day:
+        raise RecurrenceSplitNotSupportedError(
+            "'this_and_following' não é suportado para eventos de dia inteiro nesta versão."
+        )
+    if instance.start is None or master.start is None:
+        raise RecurrenceSplitNotSupportedError(
+            "Evento sem data/hora de início definida."
+        )
+    new_end = update.end if update.end is not None else instance.end
+    if new_end is None:
+        raise RecurrenceSplitNotSupportedError(
+            "Não foi possível determinar o horário de término da nova série."
+        )
+    original_rrule_line = _single_rrule_line(master.recurrence)
+
+    # 1. Truncate the old series so it ends right before this occurrence --
+    # everything before the split keeps its original values, untouched.
+    truncated = _set_rrule_until(original_rrule_line, instance.start - timedelta(seconds=1))
+    await provider.update_event(
+        access_token, calendar_id, master.id, EventUpdate(recurrence=[truncated])
+    )
+
+    # 2. The new series' recurrence: an explicit `recurrence` from the
+    # caller wins outright (they're deliberately changing the pattern from
+    # here on); otherwise continue the old pattern.
+    if update.recurrence is not None:
+        new_recurrence = update.recurrence
+    else:
+        new_recurrence = [
+            _continuation_rrule(original_rrule_line, master.start, instance.start)
+        ]
+
+    # 3. Create the new ("following") series at this occurrence, with the
+    # updated fields -- falling back to the instance's own current values
+    # for anything the caller didn't change (same "only informed fields
+    # change" semantics as this_event/all_events).
+    new_event = NewEvent(
+        summary=update.summary if update.summary is not None else instance.summary,
+        description=(
+            update.description if update.description is not None else instance.description
+        ),
+        location=update.location if update.location is not None else instance.location,
+        start=update.start if update.start is not None else instance.start,
+        end=new_end,
+        attendees=update.attendees if update.attendees is not None else instance.attendees,
+        recurrence=new_recurrence,
+    )
+    return await provider.create_event(access_token, calendar_id, new_event)
+
+
+async def _apply_this_and_following_delete(
+    provider: CalendarProvider,
+    access_token: str,
+    calendar_id: str,
+    instance: CalendarEvent,
+    master: CalendarEvent,
+) -> None:
+    if instance.all_day or master.all_day:
+        raise RecurrenceSplitNotSupportedError(
+            "'this_and_following' não é suportado para eventos de dia inteiro nesta versão."
+        )
+    if instance.start is None:
+        raise RecurrenceSplitNotSupportedError(
+            "Evento sem data/hora de início definida."
+        )
+    original_rrule_line = _single_rrule_line(master.recurrence)
+    truncated = _set_rrule_until(original_rrule_line, instance.start - timedelta(seconds=1))
+    await provider.update_event(
+        access_token, calendar_id, master.id, EventUpdate(recurrence=[truncated])
+    )
 
 
 async def _list_calendars(context: ToolContext) -> str:
@@ -207,6 +398,8 @@ async def _update_event(
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_calendar_provider()
+    if scope not in _EVENT_SCOPES:
+        raise ValueError(f"scope deve ser um de {_EVENT_SCOPES}, recebido: {scope!r}")
     update = EventUpdate(
         summary=summary,
         description=description,
@@ -217,10 +410,22 @@ async def _update_event(
         recurrence=recurrence,
     )
     try:
-        target_id = await _resolve_target_event_id(
-            provider, access_token, calendar_id, event_id, scope
-        )
-        event = await provider.update_event(access_token, calendar_id, target_id, update)
+        if scope == "this_and_following":
+            split = await _resolve_series_split(provider, access_token, calendar_id, event_id)
+            if split is None:
+                target_id = await _resolve_target_event_id(
+                    provider, access_token, calendar_id, event_id, "all_events"
+                )
+                event = await provider.update_event(access_token, calendar_id, target_id, update)
+            else:
+                event = await _apply_this_and_following_update(
+                    provider, access_token, calendar_id, split.instance, split.master, update
+                )
+        else:
+            target_id = await _resolve_target_event_id(
+                provider, access_token, calendar_id, event_id, scope
+            )
+            event = await provider.update_event(access_token, calendar_id, target_id, update)
     except CalendarProviderError as exc:
         raise RuntimeError(f"Falha ao editar evento: {exc}") from exc
     return ok(event=_event_to_dict(event))
@@ -234,10 +439,24 @@ async def _delete_event(
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_calendar_provider()
+    if scope not in _EVENT_SCOPES:
+        raise ValueError(f"scope deve ser um de {_EVENT_SCOPES}, recebido: {scope!r}")
     try:
-        event_id = await _resolve_target_event_id(
-            provider, access_token, calendar_id, event_id, scope
-        )
+        if scope == "this_and_following":
+            split = await _resolve_series_split(provider, access_token, calendar_id, event_id)
+            if split is None:
+                event_id = await _resolve_target_event_id(
+                    provider, access_token, calendar_id, event_id, "all_events"
+                )
+            else:
+                await _apply_this_and_following_delete(
+                    provider, access_token, calendar_id, split.instance, split.master
+                )
+                return ok(deleted=True, event_id=split.master.id, truncated=True)
+        else:
+            event_id = await _resolve_target_event_id(
+                provider, access_token, calendar_id, event_id, scope
+            )
     except CalendarProviderError as exc:
         raise RuntimeError(f"Falha ao excluir evento: {exc}") from exc
     try:
@@ -365,7 +584,7 @@ update_google_calendar_event_tool = Tool(
     description=(
         "Edita um evento existente do Google Calendar (só os campos informados mudam). Se o evento "
         "fizer parte de uma série recorrente, use `scope` para escolher entre editar só esta "
-        "ocorrência (padrão) ou a série inteira."
+        "ocorrência (padrão), a série inteira, ou esta ocorrência e as seguintes."
     ),
     handler=_update_event,
     parameters={
@@ -385,15 +604,23 @@ update_google_calendar_event_tool = Tool(
             "recurrence": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Nova regra RRULE da série (só tem efeito com scope='all_events').",
+                "description": (
+                    "Nova regra RRULE. Com scope='all_events', substitui a regra da série inteira. "
+                    "Com scope='this_and_following', define a regra da nova série a partir desta "
+                    "ocorrência (se omitido, a regra antiga continua, ajustada automaticamente)."
+                ),
             },
             "scope": {
                 "type": "string",
-                "enum": ["this_event", "all_events"],
+                "enum": ["this_event", "all_events", "this_and_following"],
                 "description": (
                     "'this_event' (padrão): edita só esta ocorrência. 'all_events': edita a série "
                     "recorrente inteira -- use quando o usuário disser 'todos os eventos', 'a série "
-                    "inteira', 'sempre', em vez de 'só esse'/'só essa vez'."
+                    "inteira', 'sempre'. 'this_and_following': edita esta ocorrência e todas as "
+                    "seguintes, mantendo as anteriores intactas -- use quando o usuário disser 'a "
+                    "partir de agora', 'esta e as próximas', 'daqui pra frente'. Suportado só para "
+                    "eventos com horário definido (não dia inteiro) e cuja série tenha uma única "
+                    "regra RRULE simples."
                 ),
             },
         },
@@ -405,7 +632,8 @@ delete_google_calendar_event_tool = Tool(
     name="delete_google_calendar_event",
     description=(
         "Exclui um evento do Google Calendar. Se o evento fizer parte de uma série recorrente, use "
-        "`scope` para escolher entre excluir só esta ocorrência (padrão) ou a série inteira."
+        "`scope` para escolher entre excluir só esta ocorrência (padrão), a série inteira, ou esta "
+        "ocorrência e as seguintes."
     ),
     handler=_delete_event,
     parameters={
@@ -418,11 +646,15 @@ delete_google_calendar_event_tool = Tool(
             },
             "scope": {
                 "type": "string",
-                "enum": ["this_event", "all_events"],
+                "enum": ["this_event", "all_events", "this_and_following"],
                 "description": (
                     "'this_event' (padrão): exclui só esta ocorrência. 'all_events': exclui a série "
                     "recorrente inteira -- use quando o usuário disser 'todos os eventos', 'a série "
-                    "inteira', 'sempre', em vez de 'só esse'/'só essa vez'."
+                    "inteira', 'sempre'. 'this_and_following': exclui esta ocorrência e todas as "
+                    "seguintes, mantendo as anteriores -- use quando o usuário disser 'a partir de "
+                    "agora', 'esta e as próximas', 'daqui pra frente'. Suportado só para eventos com "
+                    "horário definido (não dia inteiro) e cuja série tenha uma única regra RRULE "
+                    "simples."
                 ),
             },
         },

@@ -103,12 +103,13 @@ edição de série recorrente (`scope="this_event"`/`"all_events"` em
 `update_google_calendar_event`/`delete_google_calendar_event` — ver
 `docs/CALENDAR.md`). Nenhuma delas bloqueia a integração da v1.4.
 
-27. Suporte a "este evento e os seguintes" (o terceiro modo que a própria UI
-    do Google Calendar oferece, além de "só esta ocorrência"/"toda a
-    série") — exigiria dividir a RRULE manualmente (terminar a série
-    original com `UNTIL` no ponto de corte + criar uma nova série a partir
-    dali), risco real de bug de fuso/data, propositalmente fora desta
-    release.
+27. ~~Suporte a "este evento e os seguintes".~~ **Concluído** —
+    `scope="this_and_following"` em `update_google_calendar_event`/
+    `delete_google_calendar_event`: trunca a série antiga com `UNTIL`
+    calculado (`COUNT` removido, recomputado com `dateutil.rrule` quando a
+    regra original tinha `COUNT`) e cria uma série nova a partir da
+    ocorrência selecionada. Escopo limitado a eventos com horário definido
+    e série com uma única regra `RRULE:` simples — ver `docs/CALENDAR.md`.
 28. Validação local de RRULE antes de chamar o provider (hoje a regra é
     passada direto pro Google sem parsing/validação própria — um erro de
     sintaxe só aparece quando o Google já rejeitou a chamada).
