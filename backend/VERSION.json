@@ -1,9 +1,9 @@
 {
-  "version": "1.3.1",
-  "commit": "2a9d643b8715b8bcdcc3a0f8f81b7876525b6544",
-  "buildDate": "2026-07-19T19:40:00Z",
-  "backendTests": 890,
-  "frontendTests": 268,
-  "readiness": 85,
-  "releaseType": "patch"
+  "version": "1.4.0",
+  "commit": "c533ffae42088568209962b168a9854a493174e8",
+  "buildDate": "2026-07-21T03:00:00Z",
+  "backendTests": 1016,
+  "frontendTests": 317,
+  "readiness": 90,
+  "releaseType": "minor"
 }

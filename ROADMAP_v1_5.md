@@ -14,41 +14,44 @@ Have não iniciados do `ROADMAP_v1_4.md`.
 
 ## Must Have
 
-1. **Fluxo de "esqueci minha senha".** Hoje só existe troca de senha
-   autenticada (`POST /auth/change-password`) — já causou intervenção
-   manual direta no banco pelo menos uma vez (ver `BOOTSTRAP_ADMIN.md`).
-   Sem esse fluxo, qualquer esquecimento de senha é um incidente manual.
-   Fica dentro da estrutura de auth já existente (token de reset +
-   endpoint novo), sem tocar no modelo de permissões. Esforço: 4-6h.
-2. **GoalManager: edição, cancelamento e atualização de progresso.** A UI
-   (`/metas`) hoje só cria e aprova metas — falta editar, cancelar,
-   gerenciar dependências e atualizar progresso manualmente. É o núcleo de
-   uma funcionalidade central do produto (metas) com uma lacuna de CRUD
-   básica. Esforço: 1-2 dias (backend + frontend).
+Todos os itens abaixo foram concluídos — ver `RELEASE_1_4.md` e
+`RELEASE_1_4_POSTMORTEM.md` para o relatório completo de certificação.
+
+1. ~~**Fluxo de "esqueci minha senha".**~~ **Concluído** — modelo de
+   entrega: admin gera um token de uso único
+   (`POST /admin/users/{id}/password-reset-token`), repassado fora de
+   banda (WhatsApp, verbalmente); nunca logado. Rate limiting dedicado e
+   piso de tempo constante contra enumeração de e-mail. Páginas
+   `/esqueci-senha` e `/redefinir-senha`. Commits `e2e4d99`, `393bac9`.
+2. ~~**GoalManager: edição, cancelamento e atualização de progresso.**~~
+   **Concluído** — edição, cancelamento, progresso, dependências e
+   histórico, backend + frontend. Commit `6583a43`.
 
 ## Should Have
 
-3. **Gmail: capacidade de escrita (enviar e-mail via agente).** Hoje é
-   somente leitura. Habilitar envio abriria um caso de uso real (o
-   assistente responder e-mails, não só lê-los) sem exigir um provider
-   novo — mesma integração Gmail já existente, só uma capacidade a mais.
-   Esforço: 1 dia.
-4. **Google Calendar: edição de série de eventos recorrentes.** Hoje só
-   eventos únicos são editáveis. Lacuna perceptível pra quem usa agenda
-   recorrente de verdade (reuniões semanais, etc.). Esforço: 1-2 dias
-   (a API do Google Calendar já suporta isso — o trabalho é na camada de
-   integração existente, não uma reescrita).
-5. **QR Code do WhatsApp exposto no Dashboard Administrativo.** Hoje
-   reconectar o WhatsApp exige acesso direto ao container/logs — expor o
-   QR code na UI elimina essa fricção operacional recorrente. Toca
-   `providers/whatsapp/` para adicionar um método de obter o QR em cada
-   provider, mas não muda a interface do provider nem adiciona
-   abstração nova. Esforço: 1 dia.
-6. **Dashboard Settings: sair do modo somente-leitura.** `/admin/settings`
-   hoje só mostra configuração — permitir editar (mesmo que um subconjunto
-   pequeno e seguro de opções) fecha uma expectativa óbvia de UX de uma
-   página chamada "Settings". Esforço: 1 dia (escopo inicial pequeno:
-   poucas opções não-sensíveis).
+3. ~~**Gmail: capacidade de escrita (enviar e-mail via agente).**~~
+   **Concluído** — deliberadamente reply-only (`reply_to_email_thread`),
+   nunca compor e-mail novo para endereço arbitrário (mesmo princípio
+   PROD-005 do WhatsApp). Escopo `gmail.send` adicionado; contas
+   conectadas antes desta mudança precisam reconectar. Commit `08e7895`.
+4. ~~**Google Calendar: edição de série de eventos recorrentes.**~~
+   **Concluído** — criar evento com `recurrence` (RRULE); editar/excluir
+   com `scope="this_event"` (padrão) ou `scope="all_events"` (série
+   inteira, resolvida pro evento mestre). "Este evento e os seguintes"
+   ficou deliberadamente fora do escopo — ver itens 27-29 abaixo.
+   Commits `19f8e82`, `c533ffa`.
+5. ~~**QR Code do WhatsApp exposto no Dashboard Administrativo.**~~
+   **Concluído** — link direto para a página de pareamento do próprio
+   openwa (não existe endpoint REST de QR, confirmado contra o gateway
+   real); novo campo `OPENWA_PUBLIC_QR_URL`. Commit `cb8632a`.
+6. ~~**Dashboard Settings: sair do modo somente-leitura.**~~ **Concluído**
+   — `auto_reply_enabled` agora é editável (`GET`/`PATCH
+   /admin/settings`), com efeito imediato e persistência através de
+   restarts (tabela nova `app_settings`). `jobs_enabled`/providers
+   continuam somente leitura, por decisão de escopo explícita (ver
+   `docs/DASHBOARD.md`). **Implementado e validado na certificação final
+   (`RELEASE_1_4_POSTMORTEM.md`); aguardando commit/push explícito do
+   fundador.**
 
 ## Nice to Have
 
@@ -94,16 +97,23 @@ escopo e limites definidos antes de estimar esforço.
 
 ## Dependências entre itens
 
-- Item 1 (forgot-password) é independente de tudo.
-- Itens 2, 3, 4 são independentes entre si — cada um toca uma área de
-  produto diferente (metas, e-mail, calendário).
-- Item 5 (QR code) e item 6 (Settings editável) são independentes entre si
-  e do resto.
+- Itens 1-6 (Must Have + Should Have) — todos concluídos, ver acima.
 - Itens 7-10 (Google Workspace) podem ser feitos em qualquer ordem; item 9
   (Docs/Sheets/Slides) é o de maior esforço do grupo.
 
 ## Paralelizável
 
-Todos os itens Must Have e Should Have (1-6) podem rodar em paralelo entre
-si — nenhum depende tecnicamente de outro. Itens 7-10 (Nice to Have) também
-são paralelizáveis entre si e com o restante.
+Itens 7-10 (Nice to Have) são paralelizáveis entre si.
+
+## Status ao final do ciclo (Release 1.4, 2026-07-21)
+
+- **Must Have:** 2/2 concluídos.
+- **Should Have:** 4/4 concluídos.
+- **Nice to Have:** 0/4 iniciados (itens 7-10 seguem no backlog, nenhum é
+  bloqueante).
+- Mais 3 itens entregues fora deste roadmap original: busca semântica de
+  memória, módulo de Notas dedicado, busca em Contacts/Church.
+- Ver `RELEASE_1_4.md`/`RELEASE_1_4_POSTMORTEM.md` para o relatório
+  completo de certificação, e `ROADMAP_v1_4.md` (itens 27-29) para o
+  débito técnico aceito ao fechar a edição de série recorrente do Google
+  Calendar.

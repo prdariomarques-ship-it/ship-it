@@ -4,6 +4,64 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ## [Unreleased]
 
+Nada pendente no momento — ver `ROADMAP_v1_4.md` para os próximos itens
+planejados (27-29, Google Calendar) e `TECHNICAL_DEBT.md` para débito
+técnico não-bloqueante.
+
+## [1.4.0] - 2026-07-21
+
+Ciclo predominantemente funcional: os 6 itens Must/Should Have planejados
+em `ROADMAP_v1_5.md` mais 3 itens adicionais (busca semântica de memória,
+módulo de Notas dedicado, busca em Contacts/Church). Certificação completa
+de produção (9 etapas: módulos, funcional, segurança, arquitetura, banco de
+dados, qualidade de código, documentação, prontidão, decisão de release) —
+ver `RELEASE_1_4.md` e `RELEASE_1_4_POSTMORTEM.md` para os relatórios
+completos.
+
+### Adicionado
+
+- **GoalManager: edição, cancelamento, progresso, dependências e histórico**
+  (`/metas`). Commit `6583a43`.
+- **Busca semântica de memória em `/admin/memory`** (`GET /memory/search`
+  já existia; só faltava UI). Commit `a15ddb0`.
+- **Fluxo de "esqueci minha senha"**: admin gera um token de uso único
+  (`POST /admin/users/{id}/password-reset-token`), repassado fora de
+  banda; nunca logado. Rate limiting dedicado (`/auth/forgot-password` por
+  e-mail, `/auth/reset-password` por IP) e piso de tempo constante contra
+  enumeração de e-mail. Páginas `/esqueci-senha` e `/redefinir-senha`.
+  Commits `e2e4d99`, `393bac9`.
+- **QR Code do WhatsApp no Dashboard Administrativo** (`/admin/whatsapp`) —
+  link direto pra página de pareamento do openwa. Commit `cb8632a`.
+- **Módulo de Notas dedicado** (`notas/`): busca, `pinned`/`archived`,
+  `contact_id` reservado para uso futuro. Commit `a17237a`.
+- **Busca por nome em Contacts e Church** (`?q=`), via um parâmetro novo
+  (`repository_cls`) no factory genérico de CRUD. Commit `7997634`.
+- **Gmail: capacidade de resposta** (`reply_to_email_thread`) — reply-only,
+  nunca compor e-mail novo para endereço arbitrário (PROD-005). Escopo
+  `gmail.send` adicionado. Commit `08e7895`.
+- **Google Calendar: edição de série recorrente** — criar com `recurrence`
+  (RRULE); editar/excluir com `scope="this_event"`/`"all_events"`.
+  Commits `19f8e82`, `c533ffa`.
+- **Dashboard Settings editável** — `auto_reply_enabled` agora é editável
+  (`GET`/`PATCH /admin/settings`), com efeito imediato e persistência
+  através de restarts (tabela `app_settings`). `jobs_enabled`/providers
+  continuam somente leitura, por decisão de escopo.
+
+### Testes
+
+Backend: 1016 testes (era 933 no início do ciclo v1.4), 0 falhas. Frontend:
+317 testes (era 280 no início do ciclo), 0 falhas. `ruff check .` e `mypy`
+(306 arquivos) limpos. `next build` de produção limpo. Ver
+`RELEASE_1_4_POSTMORTEM.md` para a progressão completa de testes por
+feature.
+
+## [1.3.2] - 2026-07-20
+
+Fechamento do trabalho de hardening/débito técnico que ficou pendente
+entre a v1.3.1 e o início do ciclo funcional v1.4 acima — inclui a
+migração do Next.js e o handshake de webhook necessário para a migração
+WhatsApp → Cloud API.
+
 ### Alterado
 
 - **Upgrade do Next.js 14.2.35 → 16.2.10** (branch isolada `chore/nextjs-16-upgrade`, PR #4, merge `1ea265b`). Junto: ESLint 8→9 (flat config, `eslint.config.mjs` substitui `.eslintrc.json`), `eslint-config-next` 14→16, `@next/bundle-analyzer` 14→16. React/react-dom mantidos em 18.3.1 (compatíveis com os peerDeps do Next 16). Turbopack passa a ser o bundler padrão do `next build` (antes Webpack). Quatro violações reais de Rules-of-Hooks, expostas por `eslint-plugin-react-hooks@7` (transitivo), corrigidas com padrões documentados do React (inicializador preguiçoso de `useState` em `use-last-login.ts`/`use-operator-state.ts`, estado derivado do render anterior em `use-previous.ts`, função async nomeada em efeito em `useApi.ts`); `Date.now()` durante o render em `admin/page.tsx` movido para fora do render. `turbopack.root` fixado em `next.config.mjs` para eliminar ambiguidade de workspace-root causada por um lockfile solto fora do projeto. Validado: lint, typecheck, 268/268 testes de frontend e build de produção 100% limpos; CI (backend/frontend/docker-compose-config) verde; deploy em produção (frontend apenas, backend/demais serviços intocados) com healthcheck aprovado e smoke test funcional sem erros JS/hidratação/console. Resolve as CVEs pendentes do Next 14 (`npm audit`: 1 moderada + 4 altas). Detalhes completos: `RELEASE_REPORT_NEXTJS16.md`.
