@@ -63,6 +63,7 @@ fonte que já existia antes desta sprint:
 | `GET /api/admin/users` | Tabela `users` (sem `hashed_password`) |
 | `GET /api/admin/metrics` | Snapshot bruto do registro Prometheus já usado por `GET /metrics` |
 | `GET /api/admin/whatsapp` | `WhatsAppProvider.health_check()`, tabela `jobs` (fila), tabela `messages` (contagem por direção), `OPENWA_PUBLIC_QR_URL` (só quando `WHATSAPP_PROVIDER=openwa`, senão `qr_page_url: null`) |
+| `GET`/`PATCH /api/admin/settings` | Tabela nova `app_settings` (override persistido) + `Settings` (valor ao vivo) — ver "Configurações editáveis" abaixo |
 
 ## Limitações conhecidas (decisões explícitas, não lacunas esquecidas)
 
@@ -138,10 +139,60 @@ Limitações adicionais, menores:
   que cada domínio Google já expunha antes desta sprint
   (`/api/mail/connect`, `/api/gcalendar/connect`, etc.) — nenhuma lógica OAuth
   nova, apenas um link para o fluxo existente.
-- A página **Settings** é somente leitura (spec desta sprint): mostra nomes de
-  provider (`openai`, `openwa`, ...) e flags de comportamento
-  (`auto_reply_enabled`, `jobs_enabled`), nunca chaves de API — editar
-  configuração continua sendo feito via `.env`.
+- A página **Settings** mostra nomes de provider (`openai`, `openwa`, ...) —
+  sempre somente leitura, nunca chaves de API — e agora edita, de fato, uma
+  configuração de comportamento (`auto_reply_enabled`) via `GET`/`PATCH
+  /api/admin/settings`; `jobs_enabled` e `environment` continuam somente
+  leitura no mesmo catálogo. Ver "Configurações editáveis" abaixo para o
+  design completo e o porquê do escopo.
+
+## Configurações editáveis (`/api/admin/settings`)
+
+Sprint posterior à Sprint 4: parte do painel Settings deixou de ser somente
+leitura. `Settings()` (`utils/config.py`) continua a única fonte de verdade
+em todo ponto de leitura do app (`settings.auto_reply_enabled`, etc.) — este
+recurso só *empilha um override persistido por cima dela*, nunca cria um
+sistema de configuração paralelo.
+
+- **`services/app_settings.py`** define `SETTINGS_CATALOG`, um registro
+  explícito e pequeno (hoje 3 entradas: `auto_reply_enabled`, `jobs_enabled`,
+  `environment`) — cada uma com `description`/`category`/`editable`/
+  `value_type`. Adicionar uma configuração editável nova no futuro é uma
+  entrada nova nessa lista, sem redesenhar endpoint, repositório ou tabela.
+- **`auto_reply_enabled` é a única editável hoje.** É lida a cada webhook
+  inbound (`webhooks/router.py`), então mudar o valor do singleton em
+  memória já tem efeito imediato — sem restart.
+- **`jobs_enabled` e `environment` continuam somente leitura, deliberadamente**:
+  `jobs_enabled` só é lida uma vez, na inicialização do processo, para
+  decidir se a task do worker de jobs é iniciada — editá-la em runtime
+  exigiria lifecycle de start/stop do worker (jobs em andamento, corrida
+  entre stop/start), uma feature bem maior que um toggle. `environment` é
+  identidade do deploy. Provider selection (`llm_provider`,
+  `whatsapp_provider`, etc.) nem está neste catálogo — cada um já tem sua
+  própria factory `@lru_cache` com client/conexão viva; trocar em runtime
+  deixaria clients antigos inconsistentes. Ver `ROADMAP_v1_4.md`.
+- **Persistência**: tabela nova `app_settings` (`key` PK, `value`,
+  `description`, `category`, `editable`, `updated_by` FK opcional para
+  `users.id`, `created_at`/`updated_at`) — uma linha só existe para uma
+  configuração que um admin já editou pelo menos uma vez; a ausência de
+  linha significa "ainda no valor padrão do `.env`", nunca um erro.
+  `apply_persisted_overrides()` é chamada uma vez no `lifespan` do `main.py`
+  (antes do worker de jobs iniciar), aplicando por cima do `.env` qualquer
+  override já salvo — assim um restart não reverte silenciosamente uma
+  edição feita pelo dashboard.
+- **Endpoints**: `GET /api/admin/settings` (lista o catálogo com valor atual
+  + metadados de quem/quando editou) e `PATCH /api/admin/settings`
+  (`{"key": ..., "value": ...}`) — rejeita com `404` uma chave desconhecida
+  e `400` uma chave `editable=False`. Mesmo padrão de auditoria/evento já
+  usado por `POST /admin/jobs/{id}/cancel`: `record_log` (audit trail) +
+  `event_bus.publish("admin.setting_updated", ...)`.
+- **Frontend**: o card "Comportamento" em `/admin/settings` itera a lista
+  retornada por `GET /api/admin/settings` genericamente — renderiza um
+  `Switch` (`components/admin/ui/switch.tsx`, botão simples com
+  `role="switch"`, sem nova dependência Radix) quando `editable` é
+  verdadeiro, ou um badge somente-texto quando não é. Uma futura terceira
+  configuração editável aparece com um toggle funcionando sem nenhuma
+  mudança de frontend.
 
 ## Componentes reutilizáveis
 

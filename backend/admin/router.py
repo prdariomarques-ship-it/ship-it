@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import services.app_settings as app_settings_service
 from admin import schemas, service
 from auth.permissions import require_admin
 from auth.service import AuthError, AuthService
@@ -163,6 +164,41 @@ async def admin_system() -> schemas.SystemInfo:
         **resources,
         **pool,
     )
+
+
+@router.get("/settings", response_model=list[schemas.SettingInfo])
+async def admin_get_settings(db: DbSession) -> list[schemas.SettingInfo]:
+    entries = await app_settings_service.list_settings(db)
+    return [schemas.SettingInfo(**entry) for entry in entries]
+
+
+@router.patch("/settings", response_model=schemas.SettingInfo)
+async def admin_update_setting(
+    payload: schemas.UpdateSettingRequest,
+    db: DbSession,
+    admin_user: Annotated[User, Depends(require_admin)],
+) -> schemas.SettingInfo:
+    try:
+        updated = await app_settings_service.update_setting(
+            db, payload.key, payload.value, updated_by=admin_user.id
+        )
+    except app_settings_service.UnknownSettingError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except app_settings_service.SettingNotEditableError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await record_log(
+        db,
+        source=f"admin:settings:{admin_user.id}",
+        message=f"Setting {payload.key!r} updated by admin",
+        level="info",
+        payload={"key": payload.key, "value": updated["value"]},
+    )
+    await event_bus.publish(
+        "admin.setting_updated",
+        {"key": payload.key, "value": updated["value"], "updated_by": admin_user.id},
+    )
+    return schemas.SettingInfo(**updated)
 
 
 @router.get("/agents", response_model=list[schemas.AgentAdminInfo])

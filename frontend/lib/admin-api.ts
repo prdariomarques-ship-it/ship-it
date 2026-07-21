@@ -20,6 +20,7 @@ import type {
   MemoryStats,
   MessageRead,
   MetricsSnapshot,
+  SettingInfo,
   SystemInfo,
   TaskRead,
   ToolAdminInfo,
@@ -55,6 +56,21 @@ export function useAdminSystem() {
     queryKey: ["admin", "system"],
     queryFn: () => apiFetch<SystemInfo>("/admin/system"),
     refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
+
+export function useAdminSettings() {
+  return useQuery({
+    queryKey: ["admin", "settings"],
+    queryFn: () => apiFetch<SettingInfo[]>("/admin/settings"),
+    refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+export function updateAdminSetting(key: string, value: boolean | number | string) {
+  return apiFetch<SettingInfo>("/admin/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ key, value }),
   });
 }
 

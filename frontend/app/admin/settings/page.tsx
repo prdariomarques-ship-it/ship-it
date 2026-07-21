@@ -1,13 +1,17 @@
 "use client";
 
 import { Lock } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { AdminPageHeader } from "@/components/admin/PageHeader";
 import { LoadingGrid } from "@/components/admin/LoadingGrid";
 import { ErrorState } from "@/components/admin/ErrorState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/admin/ui/card";
 import { Badge } from "@/components/admin/ui/badge";
-import { useAdminSystem } from "@/lib/admin-api";
+import { Switch } from "@/components/admin/ui/switch";
+import { useAdminSettings, useAdminSystem, updateAdminSetting } from "@/lib/admin-api";
+import { useToast } from "@/hooks/use-toast";
+import type { SettingInfo } from "@/lib/admin-types";
 
 function SettingRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -18,39 +22,105 @@ function SettingRow({ label, value }: { label: string; value: React.ReactNode })
   );
 }
 
+function BehaviorSettingRow({
+  setting,
+  onToggle,
+  isPending,
+}: {
+  setting: SettingInfo;
+  onToggle: (key: string, value: boolean) => void;
+  isPending: boolean;
+}) {
+  const isBoolean = typeof setting.value === "boolean";
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-border py-3 text-sm last:border-0">
+      <div>
+        <p className="font-medium">{setting.description}</p>
+        {!setting.editable && (
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Somente leitura — ver detalhes no ROADMAP.
+          </p>
+        )}
+      </div>
+      {setting.editable && isBoolean ? (
+        <Switch
+          checked={setting.value as boolean}
+          onCheckedChange={(checked) => onToggle(setting.key, checked)}
+          disabled={isPending}
+          aria-label={setting.key}
+        />
+      ) : isBoolean ? (
+        <Badge variant={setting.value ? "success" : "secondary"}>
+          {setting.value ? "ativado" : "desativado"}
+        </Badge>
+      ) : (
+        <Badge variant="outline">{String(setting.value)}</Badge>
+      )}
+    </div>
+  );
+}
+
 export default function AdminSettingsPage() {
-  const { data, isLoading, isError, error, refetch } = useAdminSystem();
+  const { data: system, isLoading: systemLoading, isError: systemIsError, error: systemError, refetch: refetchSystem } = useAdminSystem();
+  const { data: settings, isLoading: settingsLoading, isError: settingsIsError, error: settingsError, refetch: refetchSettings } = useAdminSettings();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const updateSetting = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: boolean }) =>
+      updateAdminSetting(key, value),
+    onSuccess: () => {
+      toast({ title: "Configuração atualizada", variant: "success" });
+      queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "system"] });
+    },
+    onError: (error: Error) =>
+      toast({
+        title: "Falha ao atualizar configuração",
+        description: error.message,
+        variant: "destructive",
+      }),
+  });
+
+  const isLoading = systemLoading || settingsLoading;
+  const isError = systemIsError || settingsIsError;
 
   return (
     <div>
       <AdminPageHeader
         title="Settings"
-        subtitle="Somente leitura nesta sprint — configuração é feita via variáveis de ambiente (.env)."
+        subtitle="Providers e identidade do processo são somente leitura (variáveis de ambiente). Alguns comportamentos abaixo já podem ser editados aqui, com efeito imediato."
         actions={
           <Badge variant="secondary" className="gap-1.5">
             <Lock className="h-3 w-3" />
-            read-only
+            providers read-only
           </Badge>
         }
       />
       {isLoading ? (
         <LoadingGrid count={2} />
       ) : isError ? (
-        <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
-      ) : data ? (
+        <ErrorState
+          message={((systemError ?? settingsError) as Error).message}
+          onRetry={() => {
+            refetchSystem();
+            refetchSettings();
+          }}
+        />
+      ) : system && settings ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card>
             <CardHeader>
               <CardTitle>Providers</CardTitle>
             </CardHeader>
             <CardContent>
-              <SettingRow label="LLM" value={data.llm_provider} />
-              <SettingRow label="Embeddings" value={data.embedding_provider} />
-              <SettingRow label="WhatsApp" value={data.whatsapp_provider} />
-              <SettingRow label="Mail (Gmail)" value={data.mail_provider} />
-              <SettingRow label="Calendar" value={data.calendar_provider} />
-              <SettingRow label="Contacts" value={data.contacts_provider} />
-              <SettingRow label="Drive" value={data.drive_provider} />
+              <SettingRow label="LLM" value={system.llm_provider} />
+              <SettingRow label="Embeddings" value={system.embedding_provider} />
+              <SettingRow label="WhatsApp" value={system.whatsapp_provider} />
+              <SettingRow label="Mail (Gmail)" value={system.mail_provider} />
+              <SettingRow label="Calendar" value={system.calendar_provider} />
+              <SettingRow label="Contacts" value={system.contacts_provider} />
+              <SettingRow label="Drive" value={system.drive_provider} />
             </CardContent>
           </Card>
 
@@ -59,15 +129,14 @@ export default function AdminSettingsPage() {
               <CardTitle>Comportamento</CardTitle>
             </CardHeader>
             <CardContent>
-              <SettingRow
-                label="Resposta automática (WhatsApp)"
-                value={<Badge variant={data.auto_reply_enabled ? "success" : "secondary"}>{data.auto_reply_enabled ? "ativada" : "desativada"}</Badge>}
-              />
-              <SettingRow
-                label="Fila de jobs"
-                value={<Badge variant={data.jobs_enabled ? "success" : "secondary"}>{data.jobs_enabled ? "ativa" : "desativada"}</Badge>}
-              />
-              <SettingRow label="Ambiente" value={data.environment} />
+              {settings.map((setting) => (
+                <BehaviorSettingRow
+                  key={setting.key}
+                  setting={setting}
+                  isPending={updateSetting.isPending}
+                  onToggle={(key, value) => updateSetting.mutate({ key, value })}
+                />
+              ))}
             </CardContent>
           </Card>
 
@@ -79,7 +148,8 @@ export default function AdminSettingsPage() {
               <p className="text-sm text-muted-foreground">
                 Chaves de API, tokens OAuth e segredos nunca são expostos por este dashboard — são configurados
                 exclusivamente via variáveis de ambiente no arquivo <code className="rounded bg-muted px-1 py-0.5 text-xs">.env</code> do
-                backend. Edição fica fora do escopo desta sprint (dashboard somente leitura).
+                backend. Trocar o provider em si (não só ligar/desligar um comportamento) também continua exigindo
+                variável de ambiente + reinício, já que cada provider mantém conexões/clients próprios em memória.
               </p>
             </CardContent>
           </Card>

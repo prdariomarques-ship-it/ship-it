@@ -22,6 +22,7 @@ ADMIN_ENDPOINTS = [
     "/api/admin",
     "/api/admin/status",
     "/api/admin/system",
+    "/api/admin/settings",
     "/api/admin/agents",
     "/api/admin/tools",
     "/api/admin/logs",
@@ -171,6 +172,112 @@ async def test_admin_system_exposes_provider_names_but_never_secrets(
     assert body["mail_provider"] == "gmail"
     assert "api_key" not in response.text.lower()
     assert "secret" not in response.text.lower()
+
+
+# --- /admin/settings --------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _restore_auto_reply_enabled_after_settings_tests(monkeypatch):
+    """PATCH /admin/settings mutates the live, `@lru_cache`d `Settings`
+    singleton in place -- priming monkeypatch with the current value (not
+    the value after a test's own PATCH call) still guarantees teardown
+    restores it, so these tests can't leak into any other test in the
+    suite. Applied to the whole file (autouse) since any test here could
+    reach the PATCH endpoint."""
+    from utils.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "auto_reply_enabled", settings.auto_reply_enabled)
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_lists_the_behavior_catalog(client, admin_headers):
+    response = await client.get("/api/admin/settings", headers=admin_headers)
+    body = response.json()
+    keys = {entry["key"] for entry in body}
+    assert keys == {"auto_reply_enabled", "jobs_enabled", "environment"}
+    by_key = {entry["key"]: entry for entry in body}
+    assert by_key["auto_reply_enabled"]["editable"] is True
+    assert by_key["jobs_enabled"]["editable"] is False
+    assert by_key["environment"]["editable"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_settings_never_exposes_provider_or_secret_fields(
+    client, admin_headers
+):
+    """Providers stay exclusively on /admin/system -- this endpoint is
+    scoped to the behavior catalog only, by design (see
+    services/app_settings.py)."""
+    response = await client.get("/api/admin/settings", headers=admin_headers)
+    keys = {entry["key"] for entry in response.json()}
+    assert "llm_provider" not in keys
+    assert "whatsapp_provider" not in keys
+
+
+@pytest.mark.asyncio
+async def test_admin_update_setting_requires_authentication(client):
+    response = await client.patch(
+        "/api/admin/settings", json={"key": "auto_reply_enabled", "value": False}
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_admin_update_setting_rejects_non_admin(client, user_headers):
+    response = await client.patch(
+        "/api/admin/settings",
+        json={"key": "auto_reply_enabled", "value": False},
+        headers=user_headers,
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_admin_update_setting_toggles_auto_reply_enabled_immediately(
+    client, admin_headers, admin_user
+):
+    from utils.config import get_settings
+
+    response = await client.patch(
+        "/api/admin/settings",
+        json={"key": "auto_reply_enabled", "value": False},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["value"] is False
+    assert body["updated_by"] == admin_user.id
+    assert body["updated_at"] is not None
+    # Takes effect immediately -- no restart, same singleton every request reads.
+    assert get_settings().auto_reply_enabled is False
+
+    # And a subsequent GET reflects the persisted change, not the old default.
+    follow_up = await client.get("/api/admin/settings", headers=admin_headers)
+    entry = next(
+        e for e in follow_up.json() if e["key"] == "auto_reply_enabled"
+    )
+    assert entry["value"] is False
+    assert entry["updated_by"] == admin_user.id
+
+
+@pytest.mark.asyncio
+async def test_admin_update_setting_rejects_a_non_editable_key(client, admin_headers):
+    response = await client.patch(
+        "/api/admin/settings",
+        json={"key": "jobs_enabled", "value": False},
+        headers=admin_headers,
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_admin_update_setting_rejects_an_unknown_key(client, admin_headers):
+    response = await client.patch(
+        "/api/admin/settings",
+        json={"key": "not_a_real_setting", "value": True},
+        headers=admin_headers,
+    )
+    assert response.status_code == 404
 
 
 # --- /admin/agents ----------------------------------------------------------------

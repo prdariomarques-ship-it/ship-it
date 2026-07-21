@@ -53,6 +53,24 @@ class SystemInfo(BaseModel):
     jobs_enabled: bool
 
 
+class SettingInfo(BaseModel):
+    """One entry from `services.app_settings.SETTINGS_CATALOG`, merged with
+    its persisted override (if any admin has ever changed it)."""
+
+    key: str
+    value: bool | int | str
+    description: str
+    category: str
+    editable: bool
+    updated_at: datetime | None
+    updated_by: int | None
+
+
+class UpdateSettingRequest(BaseModel):
+    key: str
+    value: bool | int | str
+
+
 class AgentAdminInfo(BaseModel):
     name: str
     description: str

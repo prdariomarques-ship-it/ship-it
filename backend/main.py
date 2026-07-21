@@ -50,6 +50,7 @@ from observability import (
     setup_tracing,
     version_router,
 )
+from services.app_settings import apply_persisted_overrides
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
 from utils.logging import configure_logging, get_logger
@@ -107,6 +108,9 @@ async def lifespan(app: FastAPI):
     configure_logging(json_output=settings.log_json)
     register_event_subscribers()
     register_observation_event_subscribers()
+    if settings.environment != "test":
+        async with async_session_factory() as session:
+            await apply_persisted_overrides(session)
     if settings.jobs_enabled and settings.environment != "test":
         job_worker.start()
         if settings.observation_enabled:

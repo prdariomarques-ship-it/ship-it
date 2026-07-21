@@ -38,6 +38,16 @@ export interface SystemInfo {
   jobs_enabled: boolean;
 }
 
+export interface SettingInfo {
+  key: string;
+  value: boolean | number | string;
+  description: string;
+  category: string;
+  editable: boolean;
+  updated_at: string | null;
+  updated_by: number | null;
+}
+
 export interface AgentAdminInfo {
   name: string;
   description: string;
