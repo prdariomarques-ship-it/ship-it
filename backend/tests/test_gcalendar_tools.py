@@ -91,6 +91,9 @@ class FakeCalendarProvider(CalendarProvider):
     ) -> None:
         self.events_by_token = calendars_by_token or {}
         self.calls: list[str] = []
+        self.created_events: list = []
+        self.update_calls: list[tuple[str, object]] = []
+        self.delete_calls: list[str] = []
 
     def authorization_url(self, state: str) -> str:
         raise NotImplementedError
@@ -115,22 +118,35 @@ class FakeCalendarProvider(CalendarProvider):
         self.calls.append(access_token)
         return self.events_by_token.get(access_token, [])
 
+    async def get_event(
+        self, access_token: str, calendar_id: str, event_id: str
+    ) -> CalendarEvent:
+        self.calls.append(access_token)
+        for event in self.events_by_token.get(access_token, []):
+            if event.id == event_id:
+                return event
+        return _event(access_token, event_id)
+
     async def create_event(
         self, access_token: str, calendar_id: str, event
     ) -> CalendarEvent:
         self.calls.append(access_token)
-        return _event(access_token, "new-event")
+        self.created_events.append(event)
+        created = _event(access_token, "new-event")
+        return created.model_copy(update={"recurrence": event.recurrence})
 
     async def update_event(
         self, access_token: str, calendar_id: str, event_id: str, update
     ) -> CalendarEvent:
         self.calls.append(access_token)
+        self.update_calls.append((event_id, update))
         return _event(access_token, event_id)
 
     async def delete_event(
         self, access_token: str, calendar_id: str, event_id: str
     ) -> None:
         self.calls.append(access_token)
+        self.delete_calls.append(event_id)
 
     async def check_availability(
         self, access_token: str, calendar_ids, since, until
@@ -142,11 +158,14 @@ class FakeCalendarProvider(CalendarProvider):
         )
 
 
-def _event(tag: str, event_id: str = "e1") -> CalendarEvent:
+def _event(
+    tag: str, event_id: str = "e1", recurring_event_id: str | None = None
+) -> CalendarEvent:
     return CalendarEvent(
         id=event_id,
         calendar_id="primary",
         summary=f"Evento confidencial de {tag}",
+        recurring_event_id=recurring_event_id,
         start=datetime(2026, 1, 1, tzinfo=timezone.utc),
         end=datetime(2026, 1, 1, 1, tzinfo=timezone.utc),
     )
@@ -370,3 +389,182 @@ async def test_check_availability_tool_never_reveals_another_users_conflicts(
     payload = json.loads(result_b)
     assert payload["is_free"] is True
     assert payload["conflicting_events"] == []
+
+
+# --- recurring series: create, and scope resolution on update/delete -----------
+@pytest.mark.asyncio
+async def test_create_event_tool_passes_recurrence_through_to_the_provider(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider()
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await create_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a),
+            {
+                "summary": "Reunião semanal",
+                "start": "2026-01-01T10:00:00",
+                "end": "2026-01-01T11:00:00",
+                "recurrence": ["RRULE:FREQ=WEEKLY;COUNT=10"],
+            },
+        )
+    payload = json.loads(result)
+    assert payload["ok"] is True
+    assert payload["event"]["recurrence"] == ["RRULE:FREQ=WEEKLY;COUNT=10"]
+    assert provider.created_events[0].recurrence == ["RRULE:FREQ=WEEKLY;COUNT=10"]
+
+
+@pytest.mark.asyncio
+async def test_create_event_tool_omits_recurrence_for_a_plain_event(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider()
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await create_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a),
+            {
+                "summary": "Consulta única",
+                "start": "2026-01-01T10:00:00",
+                "end": "2026-01-01T11:00:00",
+            },
+        )
+    payload = json.loads(result)
+    assert payload["event"]["recurrence"] is None
+    assert provider.created_events[0].recurrence is None
+
+
+@pytest.mark.asyncio
+async def test_update_event_tool_default_scope_targets_only_the_given_instance(
+    session_factory, user_a, monkeypatch
+):
+    """`this_event` (the default) is a no-op resolution -- no extra provider
+    call, and the update lands on exactly the id the caller passed in,
+    whether or not it happens to be part of a series."""
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider(
+        {"access-for-rt-a": [_event("a", "instance-1", recurring_event_id="master-1")]}
+    )
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await update_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a),
+            {"event_id": "instance-1", "summary": "Só esta ocorrência"},
+        )
+    assert json.loads(result)["ok"] is True
+    assert provider.update_calls == [("instance-1", provider.update_calls[0][1])]
+    assert provider.calls.count("access-for-rt-a") == 1  # only the update call, no get_event
+
+
+@pytest.mark.asyncio
+async def test_update_event_tool_all_events_scope_resolves_to_the_series_master(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider(
+        {"access-for-rt-a": [_event("a", "instance-1", recurring_event_id="master-1")]}
+    )
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await update_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a),
+            {
+                "event_id": "instance-1",
+                "summary": "Toda a série",
+                "scope": "all_events",
+            },
+        )
+    assert json.loads(result)["ok"] is True
+    assert provider.update_calls[0][0] == "master-1"
+
+
+@pytest.mark.asyncio
+async def test_update_event_tool_all_events_scope_is_a_safe_no_op_for_a_non_recurring_event(
+    session_factory, user_a, monkeypatch
+):
+    """An event with no `recurring_event_id` (not part of a series) falls
+    back to its own id -- scope="all_events" never errors just because the
+    event turned out not to be recurring."""
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider({"access-for-rt-a": [_event("a", "e1")]})
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await update_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a),
+            {"event_id": "e1", "summary": "x", "scope": "all_events"},
+        )
+    assert json.loads(result)["ok"] is True
+    assert provider.update_calls[0][0] == "e1"
+
+
+@pytest.mark.asyncio
+async def test_update_event_tool_rejects_an_invalid_scope(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider()
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await update_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a),
+            {"event_id": "e1", "summary": "x", "scope": "not-a-real-scope"},
+        )
+    assert "error" in json.loads(result)
+    assert provider.update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_delete_event_tool_all_events_scope_resolves_to_the_series_master(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider(
+        {"access-for-rt-a": [_event("a", "instance-1", recurring_event_id="master-1")]}
+    )
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await delete_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a),
+            {"event_id": "instance-1", "scope": "all_events"},
+        )
+    payload = json.loads(result)
+    assert payload["deleted"] is True
+    assert payload["event_id"] == "master-1"
+    assert provider.delete_calls == ["master-1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_event_tool_default_scope_deletes_only_the_given_instance(
+    session_factory, user_a, monkeypatch
+):
+    await _connect(session_factory, user_a, "rt-a", "a")
+    provider = FakeCalendarProvider(
+        {"access-for-rt-a": [_event("a", "instance-1", recurring_event_id="master-1")]}
+    )
+    monkeypatch.setattr(
+        "agents.tools.gcalendar.get_calendar_provider", lambda: provider
+    )
+    async with session_factory() as session:
+        result = await delete_google_calendar_event_tool.run(
+            ToolContext(db=session, user=user_a), {"event_id": "instance-1"}
+        )
+    payload = json.loads(result)
+    assert payload["deleted"] is True
+    assert payload["event_id"] == "instance-1"
+    assert provider.delete_calls == ["instance-1"]

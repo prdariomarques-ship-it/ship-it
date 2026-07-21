@@ -229,6 +229,101 @@ async def test_update_event_only_sends_provided_fields(provider):
     assert sent_body == {"summary": "Novo título"}
 
 
+# --- recurrence: create/update pass-through, get_event, parsing ----------------
+@pytest.mark.asyncio
+async def test_create_event_sends_recurrence_when_provided(provider):
+    response_body = {
+        "id": "master-1",
+        "summary": "Reunião semanal",
+        "recurrence": ["RRULE:FREQ=WEEKLY;COUNT=10"],
+    }
+    patcher, client = _patch_client(request_result=[_mock_response(response_body)])
+    new_event = NewEvent(
+        summary="Reunião semanal",
+        start=datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 2, 1, 9, 30, tzinfo=timezone.utc),
+        recurrence=["RRULE:FREQ=WEEKLY;COUNT=10"],
+    )
+    with patcher:
+        event = await provider.create_event("access-token", "primary", new_event)
+    sent_body = client.request.call_args.kwargs["json"]
+    assert sent_body["recurrence"] == ["RRULE:FREQ=WEEKLY;COUNT=10"]
+    assert event.recurrence == ["RRULE:FREQ=WEEKLY;COUNT=10"]
+
+
+@pytest.mark.asyncio
+async def test_create_event_omits_recurrence_key_when_not_a_recurring_event(provider):
+    response_body = {"id": "e1", "summary": "Único"}
+    patcher, client = _patch_client(request_result=[_mock_response(response_body)])
+    new_event = NewEvent(
+        summary="Único",
+        start=datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 2, 1, 9, 30, tzinfo=timezone.utc),
+    )
+    with patcher:
+        await provider.create_event("access-token", "primary", new_event)
+    sent_body = client.request.call_args.kwargs["json"]
+    assert "recurrence" not in sent_body
+
+
+@pytest.mark.asyncio
+async def test_update_event_sends_recurrence_when_provided(provider):
+    response_body = {"id": "master-1", "recurrence": ["RRULE:FREQ=WEEKLY;INTERVAL=2"]}
+    patcher, client = _patch_client(request_result=[_mock_response(response_body)])
+    update = EventUpdate(recurrence=["RRULE:FREQ=WEEKLY;INTERVAL=2"])
+    with patcher:
+        event = await provider.update_event(
+            "access-token", "primary", "master-1", update
+        )
+    sent_body = client.request.call_args.kwargs["json"]
+    assert sent_body == {"recurrence": ["RRULE:FREQ=WEEKLY;INTERVAL=2"]}
+    assert event.recurrence == ["RRULE:FREQ=WEEKLY;INTERVAL=2"]
+
+
+@pytest.mark.asyncio
+async def test_get_event_fetches_and_parses_a_single_event(provider):
+    response_body = {
+        "id": "instance-1",
+        "summary": "Ocorrência",
+        "recurringEventId": "master-1",
+    }
+    patcher, client = _patch_client(request_result=[_mock_response(response_body)])
+    with patcher:
+        event = await provider.get_event("access-token", "primary", "instance-1")
+    assert event.id == "instance-1"
+    assert event.recurring_event_id == "master-1"
+    assert client.request.call_args.args[0] == "GET"
+    assert "/events/instance-1" in client.request.call_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_get_event_api_failure_raises_provider_error(provider, monkeypatch):
+    import httpx as httpx_module
+
+    monkeypatch.setattr(get_settings(), "google_request_backoff_seconds", 0)
+    client = MagicMock()
+    client.request = AsyncMock(side_effect=httpx_module.ConnectError("down"))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch("providers.google_http.httpx.AsyncClient", return_value=client):
+        with pytest.raises(CalendarProviderError):
+            await provider.get_event("access-token", "primary", "e1")
+
+
+def test_parse_event_captures_recurrence_and_recurring_event_id():
+    master = _parse_event(
+        {"id": "master-1", "recurrence": ["RRULE:FREQ=DAILY"]}, "primary"
+    )
+    assert master.recurrence == ["RRULE:FREQ=DAILY"]
+    assert master.recurring_event_id is None
+
+    instance = _parse_event(
+        {"id": "instance-1", "recurringEventId": "master-1"}, "primary"
+    )
+    assert instance.recurring_event_id == "master-1"
+    assert instance.recurrence is None
+
+
 @pytest.mark.asyncio
 async def test_delete_event_calls_delete_and_returns_none(provider):
     patcher, client = _patch_client(

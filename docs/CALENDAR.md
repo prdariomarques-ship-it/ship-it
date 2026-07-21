@@ -11,6 +11,8 @@ Domínio novo, isolado do resto do Dario OS: leitura e escrita no Google Calenda
 | Criar evento | ✅ |
 | Editar evento | ✅ |
 | Excluir evento | ✅ |
+| Criar evento recorrente (RRULE) | ✅ |
+| Editar/excluir uma série recorrente inteira (`scope="all_events"`), não só a ocorrência | ✅ |
 | Verificar conflitos / consultar disponibilidade | ✅ (uma única pergunta: o que está ocupado nesse período) |
 
 ## Não confundir com o calendário interno do Dario OS
@@ -93,10 +95,19 @@ Mesmos princípios do PROD-005 e do domínio de e-mail (ver `SECURITY.md`):
 | --- | --- | --- |
 | `list_google_calendars` | — | Lista as agendas do Google Calendar conectado |
 | `search_google_calendar_events` | `calendar_id?, query?, since?, until?, limit?` | Busca/lista eventos por período e/ou palavra-chave |
-| `create_google_calendar_event` | `summary, start, end, calendar_id?, description?, location?, attendees?` | Cria um evento |
-| `update_google_calendar_event` | `event_id, calendar_id?, ...campos opcionais` | Edita um evento (só os campos informados mudam) |
-| `delete_google_calendar_event` | `event_id, calendar_id?` | Exclui um evento |
+| `create_google_calendar_event` | `summary, start, end, calendar_id?, description?, location?, attendees?, recurrence?` | Cria um evento; `recurrence` (lista de linhas RRULE) cria uma série recorrente |
+| `update_google_calendar_event` | `event_id, calendar_id?, ...campos opcionais, recurrence?, scope?` | Edita um evento (só os campos informados mudam); `scope="all_events"` edita a série inteira em vez de só a ocorrência |
+| `delete_google_calendar_event` | `event_id, calendar_id?, scope?` | Exclui um evento; `scope="all_events"` exclui a série inteira em vez de só a ocorrência |
 | `check_google_calendar_availability` | `start, end, calendar_ids?` | Verifica conflitos/disponibilidade em um período |
+
+## Eventos recorrentes: série vs. ocorrência
+
+O Google Calendar modela uma série recorrente como um evento **mestre** (`recurrence: ["RRULE:..."]`) mais **instâncias** — cada ocorrência retornada por `search_google_calendar_events` (que já usa `singleEvents=true`) carrega `recurring_event_id` apontando pro mestre. `CalendarEvent` (`providers/calendar/base.py`) expõe os dois campos: `recurrence` só vem preenchido no mestre, `recurring_event_id` só vem preenchido numa instância — nunca os dois ao mesmo tempo.
+
+- **Criar uma série**: `create_google_calendar_event` com `recurrence` (ex: `["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10"]`). A regra é passada direto pro Google — nenhum parsing/validação de RRULE é feito pela aplicação, é tradução pura, mesmo princípio já documentado pra `EventSearchQuery`/`NewEvent`.
+- **Editar/excluir só uma ocorrência**: `scope="this_event"` (padrão) — comportamento inalterado desde a Sprint 2, já funcionava porque o Google já isola PATCH/DELETE pelo id da instância.
+- **Editar/excluir a série inteira**: `scope="all_events"`. A tool primeiro chama `CalendarProvider.get_event` (novo método do Strategy, não exposto como tool própria — usado só internamente pra essa resolução) pra descobrir `recurring_event_id`, e aplica a edição/exclusão nesse id mestre em vez do id da instância. Se o evento não fizer parte de nenhuma série (`recurring_event_id` ausente), o próprio id é usado — `scope="all_events"` nunca falha só por o evento ser um evento único, vira um no-op seguro.
+- **Fora do escopo, deliberadamente**: "este evento e os seguintes" (o terceiro modo que a própria UI do Google Calendar oferece). Implementar isso exigiria dividir a RRULE manualmente (terminar a série original com `UNTIL` no ponto de corte + criar uma nova série a partir dali) — risco real de bug de fuso/data sem ter sido pedido explicitamente. Só `this_event`/`all_events` existem hoje.
 
 ## Variáveis de ambiente
 
@@ -129,20 +140,20 @@ Se você já configurou o Gmail (`docs/EMAIL.md`), reaproveite o mesmo projeto e
 
 Começando do zero (sem ter feito o Gmail antes), siga o passo a passo completo do zero em `docs/EMAIL.md#passo-a-passo-configurando-o-google-cloud-oauth` primeiro, depois volte aqui para os passos 2-3 acima (adicionar escopo e redirect URI ao mesmo app).
 
-## Limitações desta sprint
+## Limitações
 
 - Um único provider de calendário (Google); a interface `CalendarProvider` já é o ponto de extensão para outros (Outlook/Microsoft Graph, CalDAV) sem mudar nenhum chamador.
 - Uma conta Google Calendar conectada por usuário (`UNIQUE(user_id, provider)`).
 - `search_google_calendar_events` busca apenas uma agenda por chamada (`calendar_id`, padrão `primary`) — para consultar várias agendas, chame a tool uma vez por agenda (a lista vem de `list_google_calendars`).
-- Sem suporte a eventos recorrentes com edição de série (uma edição afeta a instância retornada pela API, não a série inteira) — fora do escopo desta sprint.
+- Edição de série recorrente cobre só `this_event`/`all_events` — sem "este evento e os seguintes" (ver seção acima).
 
 ## Testes
 
 | Arquivo | Cobertura |
 | --- | --- |
-| `tests/test_gcalendar_provider.py` | `GoogleCalendarProvider` (OAuth, listar agendas, buscar/criar/editar/excluir eventos, disponibilidade, parsing de datas/eventos), factory |
+| `tests/test_gcalendar_provider.py` | `GoogleCalendarProvider` (OAuth, listar agendas, buscar/criar/editar/excluir eventos, **`get_event`**, **recorrência** — `recurrence` enviado/omitido em create/update, parsing de `recurringEventId`/`recurrence`, disponibilidade, parsing de datas/eventos), factory |
 | `tests/test_gcalendar_router.py` | `/connect`, `/oauth/callback` (sucesso, reconexão, corrida de concorrência, sem refresh token, sem chave de cifra, erro do Google, state inválido/errado propósito/de outro domínio, XSS refletido escapado), `/status`, `/disconnect`, admin-only |
-| `tests/test_gcalendar_tools.py` | As 6 tools: rejeição sem conta conectada, refresh token revogado, sucesso, mapeamento de erro do provider, datas inválidas, **isolamento entre dois usuários conectados** |
+| `tests/test_gcalendar_tools.py` | As 6 tools: rejeição sem conta conectada, refresh token revogado, sucesso, mapeamento de erro do provider, datas inválidas, **isolamento entre dois usuários conectados** — **recorrência**: `recurrence` passado ao criar, `scope="this_event"` (padrão) não chama `get_event` e edita/exclui só a instância dada, `scope="all_events"` resolve pro `recurring_event_id` (mestre) tanto em editar quanto excluir, no-op seguro em `all_events` para evento não recorrente, `scope` inválido rejeitado |
 
 ## O que ainda depende do fundador
 

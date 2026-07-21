@@ -158,10 +158,20 @@ class GoogleCalendarProvider(CalendarProvider):
         )
         return [_parse_event(raw, query.calendar_id) for raw in result.get("items", [])]
 
+    async def get_event(
+        self, access_token: str, calendar_id: str, event_id: str
+    ) -> CalendarEvent:
+        raw = await self._request(
+            "GET",
+            access_token,
+            f"/calendars/{_encode(calendar_id)}/events/{_encode(event_id)}",
+        )
+        return _parse_event(raw, calendar_id)
+
     async def create_event(
         self, access_token: str, calendar_id: str, event: NewEvent
     ) -> CalendarEvent:
-        body = {
+        body: dict = {
             "summary": event.summary,
             "description": event.description,
             "location": event.location,
@@ -169,6 +179,8 @@ class GoogleCalendarProvider(CalendarProvider):
             "end": {"dateTime": _to_rfc3339(event.end)},
             "attendees": [{"email": address} for address in event.attendees],
         }
+        if event.recurrence is not None:
+            body["recurrence"] = event.recurrence
         raw = await self._request(
             "POST", access_token, f"/calendars/{_encode(calendar_id)}/events", json=body
         )
@@ -190,6 +202,8 @@ class GoogleCalendarProvider(CalendarProvider):
             body["end"] = {"dateTime": _to_rfc3339(update.end)}
         if update.attendees is not None:
             body["attendees"] = [{"email": address} for address in update.attendees]
+        if update.recurrence is not None:
+            body["recurrence"] = update.recurrence
         raw = await self._request(
             "PATCH",
             access_token,
@@ -286,6 +300,8 @@ def _parse_event(raw: dict, calendar_id: str) -> CalendarEvent:
         attendees=[a["email"] for a in raw.get("attendees", []) if a.get("email")],
         status=raw.get("status", ""),
         html_link=raw.get("htmlLink", ""),
+        recurrence=raw.get("recurrence"),
+        recurring_event_id=raw.get("recurringEventId"),
     )
 
 

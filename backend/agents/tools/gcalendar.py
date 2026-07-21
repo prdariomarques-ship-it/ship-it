@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 from agents.tools.base import Tool, ToolContext, ok
 from providers.calendar.base import (
+    CalendarProvider,
     CalendarProviderError,
     EventSearchQuery,
     EventUpdate,
@@ -93,6 +94,31 @@ def _require_datetime(value: str, field_name: str) -> datetime:
     return parsed
 
 
+_EVENT_SCOPES = ("this_event", "all_events")
+
+
+async def _resolve_target_event_id(
+    provider: CalendarProvider,
+    access_token: str,
+    calendar_id: str,
+    event_id: str,
+    scope: str,
+) -> str:
+    """`this_event` (default) is a no-op -- Google already scopes a PATCH/DELETE
+    to just the given id, whether it's a plain event or one instance of a
+    series (current, unchanged behavior). `all_events` resolves to the
+    series' master id (`recurring_event_id`) so the edit/delete lands on the
+    whole series; an event that isn't part of a series simply has no
+    `recurring_event_id`, so it falls back to its own id -- a safe no-op,
+    not an error, for a non-recurring event."""
+    if scope not in _EVENT_SCOPES:
+        raise ValueError(f"scope deve ser um de {_EVENT_SCOPES}, recebido: {scope!r}")
+    if scope == "this_event":
+        return event_id
+    event = await provider.get_event(access_token, calendar_id, event_id)
+    return event.recurring_event_id or event.id
+
+
 async def _list_calendars(context: ToolContext) -> str:
     access_token = await _get_access_token(context)
     provider = get_calendar_provider()
@@ -146,6 +172,7 @@ async def _create_event(
     description: str = "",
     location: str = "",
     attendees: list[str] | None = None,
+    recurrence: list[str] | None = None,
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_calendar_provider()
@@ -156,6 +183,7 @@ async def _create_event(
         start=_require_datetime(start, "start"),
         end=_require_datetime(end, "end"),
         attendees=attendees or [],
+        recurrence=recurrence,
     )
     try:
         event = await provider.create_event(access_token, calendar_id, new_event)
@@ -174,6 +202,8 @@ async def _update_event(
     start: str | None = None,
     end: str | None = None,
     attendees: list[str] | None = None,
+    recurrence: list[str] | None = None,
+    scope: str = "this_event",
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_calendar_provider()
@@ -184,19 +214,32 @@ async def _update_event(
         start=_parse_datetime(start),
         end=_parse_datetime(end),
         attendees=attendees,
+        recurrence=recurrence,
     )
     try:
-        event = await provider.update_event(access_token, calendar_id, event_id, update)
+        target_id = await _resolve_target_event_id(
+            provider, access_token, calendar_id, event_id, scope
+        )
+        event = await provider.update_event(access_token, calendar_id, target_id, update)
     except CalendarProviderError as exc:
         raise RuntimeError(f"Falha ao editar evento: {exc}") from exc
     return ok(event=_event_to_dict(event))
 
 
 async def _delete_event(
-    context: ToolContext, event_id: str, calendar_id: str = "primary"
+    context: ToolContext,
+    event_id: str,
+    calendar_id: str = "primary",
+    scope: str = "this_event",
 ) -> str:
     access_token = await _get_access_token(context)
     provider = get_calendar_provider()
+    try:
+        event_id = await _resolve_target_event_id(
+            provider, access_token, calendar_id, event_id, scope
+        )
+    except CalendarProviderError as exc:
+        raise RuntimeError(f"Falha ao excluir evento: {exc}") from exc
     try:
         await provider.delete_event(access_token, calendar_id, event_id)
     except CalendarProviderError as exc:
@@ -239,6 +282,8 @@ def _event_to_dict(event) -> dict:
         "attendees": event.attendees,
         "status": event.status,
         "html_link": event.html_link,
+        "recurrence": event.recurrence,
+        "recurring_event_id": event.recurring_event_id,
     }
 
 
@@ -281,7 +326,7 @@ search_google_calendar_events_tool = Tool(
 
 create_google_calendar_event_tool = Tool(
     name="create_google_calendar_event",
-    description="Cria um novo evento no Google Calendar.",
+    description="Cria um novo evento no Google Calendar. Para um evento recorrente, informe `recurrence`.",
     handler=_create_event,
     parameters={
         "type": "object",
@@ -300,6 +345,16 @@ create_google_calendar_event_tool = Tool(
                 "items": {"type": "string"},
                 "description": "E-mails dos convidados",
             },
+            "recurrence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Regra de recorrência no formato RRULE do Google Calendar, ex: "
+                    "['RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10'] para toda segunda, 10 vezes, ou "
+                    "['RRULE:FREQ=WEEKLY;UNTIL=20261231T000000Z'] para toda semana até uma data. "
+                    "Omita para um evento único (não recorrente)."
+                ),
+            },
         },
         "required": ["summary", "start", "end"],
     },
@@ -307,7 +362,11 @@ create_google_calendar_event_tool = Tool(
 
 update_google_calendar_event_tool = Tool(
     name="update_google_calendar_event",
-    description="Edita um evento existente do Google Calendar (só os campos informados mudam).",
+    description=(
+        "Edita um evento existente do Google Calendar (só os campos informados mudam). Se o evento "
+        "fizer parte de uma série recorrente, use `scope` para escolher entre editar só esta "
+        "ocorrência (padrão) ou a série inteira."
+    ),
     handler=_update_event,
     parameters={
         "type": "object",
@@ -323,6 +382,20 @@ update_google_calendar_event_tool = Tool(
             "start": {"type": "string", "description": "Nova data/hora ISO de início"},
             "end": {"type": "string", "description": "Nova data/hora ISO de término"},
             "attendees": {"type": "array", "items": {"type": "string"}},
+            "recurrence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Nova regra RRULE da série (só tem efeito com scope='all_events').",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["this_event", "all_events"],
+                "description": (
+                    "'this_event' (padrão): edita só esta ocorrência. 'all_events': edita a série "
+                    "recorrente inteira -- use quando o usuário disser 'todos os eventos', 'a série "
+                    "inteira', 'sempre', em vez de 'só esse'/'só essa vez'."
+                ),
+            },
         },
         "required": ["event_id"],
     },
@@ -330,7 +403,10 @@ update_google_calendar_event_tool = Tool(
 
 delete_google_calendar_event_tool = Tool(
     name="delete_google_calendar_event",
-    description="Exclui um evento do Google Calendar.",
+    description=(
+        "Exclui um evento do Google Calendar. Se o evento fizer parte de uma série recorrente, use "
+        "`scope` para escolher entre excluir só esta ocorrência (padrão) ou a série inteira."
+    ),
     handler=_delete_event,
     parameters={
         "type": "object",
@@ -339,6 +415,15 @@ delete_google_calendar_event_tool = Tool(
             "calendar_id": {
                 "type": "string",
                 "description": "Id da agenda (padrão 'primary')",
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["this_event", "all_events"],
+                "description": (
+                    "'this_event' (padrão): exclui só esta ocorrência. 'all_events': exclui a série "
+                    "recorrente inteira -- use quando o usuário disser 'todos os eventos', 'a série "
+                    "inteira', 'sempre', em vez de 'só esse'/'só essa vez'."
+                ),
             },
         },
         "required": ["event_id"],

@@ -31,7 +31,13 @@ class CalendarInfo(BaseModel):
 
 
 class CalendarEvent(BaseModel):
-    """A single Google Calendar event, normalized across providers."""
+    """A single Google Calendar event, normalized across providers.
+
+    `recurrence` (a list of RRULE/EXRULE/RDATE/EXDATE lines) is only ever
+    populated on a series' *master* event. `recurring_event_id` is only
+    populated on an *instance* returned by `singleEvents=true` search, and
+    points back at that master -- the two fields are mutually exclusive,
+    and both are None on a plain, non-recurring event."""
 
     id: str
     calendar_id: str
@@ -44,6 +50,8 @@ class CalendarEvent(BaseModel):
     attendees: list[str] = []
     status: str = ""
     html_link: str = ""
+    recurrence: list[str] | None = None
+    recurring_event_id: str | None = None
 
 
 class EventSearchQuery(BaseModel):
@@ -61,6 +69,9 @@ class NewEvent(BaseModel):
     start: datetime
     end: datetime
     attendees: list[str] = []
+    # RRULE lines (e.g. ["RRULE:FREQ=WEEKLY;COUNT=10"]) -- passed straight
+    # through to Google, never parsed/validated here (translation only).
+    recurrence: list[str] | None = None
 
 
 class EventUpdate(BaseModel):
@@ -70,6 +81,9 @@ class EventUpdate(BaseModel):
     start: datetime | None = None
     end: datetime | None = None
     attendees: list[str] | None = None
+    # Replaces the series' recurrence rule when targeting the master event
+    # (scope="all_events") -- see agents/tools/gcalendar.py.
+    recurrence: list[str] | None = None
 
 
 class FreeBusyBlock(BaseModel):
@@ -121,6 +135,14 @@ class CalendarProvider(ABC):
     ) -> list[CalendarEvent]:
         """Search/list events in one calendar (covers "listar", "buscar",
         "próximos compromissos", "hoje/amanhã/semana" via since/until)."""
+
+    @abstractmethod
+    async def get_event(
+        self, access_token: str, calendar_id: str, event_id: str
+    ) -> CalendarEvent:
+        """Fetch a single event -- used internally to resolve a recurring
+        instance's `recurring_event_id` (the series' master) before an
+        `scope="all_events"` update/delete. Not exposed as its own tool."""
 
     @abstractmethod
     async def create_event(
