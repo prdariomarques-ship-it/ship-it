@@ -36,3 +36,11 @@ class Task(Base, TimestampMixin):
         Enum(TaskPriority), default=TaskPriority.MEDIUM
     )
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Nullable, additive -- same reserved-until-linked pattern as
+    # Note.contact_id. Populated either explicitly or automatically when an
+    # agent tool creates the task mid-WhatsApp-conversation (ToolContext
+    # already carries contact_id there). See docs/CONTACTS.md (Contact
+    # Workspace, Release 1.5 P0-2).
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), index=True
+    )

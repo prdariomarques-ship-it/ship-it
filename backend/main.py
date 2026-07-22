@@ -16,6 +16,7 @@ from observation.events import (
     register_event_subscribers as register_observation_event_subscribers,
 )
 from observation.scheduler import start as start_observation_scheduler
+from api.contact_workspace import router as contact_workspace_router
 from api.routes import (
     calendar_router,
     church_router,
@@ -234,6 +235,7 @@ def create_app() -> FastAPI:
     app.include_router(whatsapp_router, prefix=prefix)
     app.include_router(jobs_router, prefix=prefix)
     app.include_router(contacts_router, prefix=prefix)
+    app.include_router(contact_workspace_router, prefix=prefix)
     app.include_router(messages_router, prefix=prefix)
     app.include_router(tasks_router, prefix=prefix)
     app.include_router(goals_router, prefix=prefix)

@@ -41,6 +41,7 @@ class NoteCreate(BaseModel):
     content: str = ""
     tags: list[str] = []
     pinned: bool = False
+    contact_id: int | None = None
 
 
 class NoteUpdate(BaseModel):
@@ -49,6 +50,7 @@ class NoteUpdate(BaseModel):
     tags: list[str] | None = None
     pinned: bool | None = None
     archived: bool | None = None
+    contact_id: int | None = None
 
 
 async def _get_owned_note_or_404(
@@ -95,6 +97,7 @@ async def create_note(
         content=payload.content,
         tags=payload.tags,
         pinned=payload.pinned,
+        contact_id=payload.contact_id,
     )
 
 

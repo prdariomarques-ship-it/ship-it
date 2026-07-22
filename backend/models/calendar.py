@@ -21,3 +21,9 @@ class CalendarEvent(Base, TimestampMixin):
     )
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reminder_minutes: Mapped[int | None] = mapped_column()
+    # Nullable, additive -- same reserved-until-linked pattern as
+    # Note.contact_id/Task.contact_id. See docs/CONTACTS.md (Contact
+    # Workspace, Release 1.5 P0-2).
+    contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), index=True
+    )

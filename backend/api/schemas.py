@@ -81,6 +81,7 @@ class TaskCreate(BaseModel):
     status: TaskStatus = TaskStatus.PENDING
     priority: TaskPriority = TaskPriority.MEDIUM
     due_date: datetime | None = None
+    contact_id: int | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -89,6 +90,7 @@ class TaskUpdate(BaseModel):
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     due_date: datetime | None = None
+    contact_id: int | None = None
 
 
 class TaskRead(_Read):
@@ -98,6 +100,7 @@ class TaskRead(_Read):
     status: TaskStatus
     priority: TaskPriority
     due_date: datetime | None
+    contact_id: int | None
 
 
 # --- Calendar ---------------------------------------------------------------
@@ -108,6 +111,7 @@ class CalendarEventCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime | None = None
     reminder_minutes: int | None = Field(default=None, ge=0)
+    contact_id: int | None = None
 
 
 class CalendarEventUpdate(BaseModel):
@@ -117,6 +121,7 @@ class CalendarEventUpdate(BaseModel):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     reminder_minutes: int | None = Field(default=None, ge=0)
+    contact_id: int | None = None
 
 
 class CalendarEventRead(_Read):
@@ -127,6 +132,7 @@ class CalendarEventRead(_Read):
     starts_at: datetime
     ends_at: datetime | None
     reminder_minutes: int | None
+    contact_id: int | None
 
 
 # --- Church -----------------------------------------------------------------

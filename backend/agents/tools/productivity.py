@@ -31,6 +31,11 @@ async def _create_task(
         description=description,
         priority=TaskPriority(priority),
         due_date=datetime.fromisoformat(due_date) if due_date else None,
+        # Auto-linked to the contact this conversation is scoped to, if
+        # any (None outside a WhatsApp conversation, e.g. the admin
+        # dashboard) -- feeds the Contact Workspace's Tasks box for free,
+        # no extra judgment required from the model.
+        contact_id=context.contact_id,
     )
     return ok(task_id=task.id, title=task.title, status=task.status.value)
 
@@ -76,6 +81,7 @@ async def _create_event(
         starts_at=datetime.fromisoformat(starts_at),
         ends_at=datetime.fromisoformat(ends_at) if ends_at else None,
         location=location,
+        contact_id=context.contact_id,
     )
     return ok(event_id=event.id, title=event.title, starts_at=event.starts_at)
 
@@ -97,7 +103,10 @@ async def _list_events(context: ToolContext) -> str:
 
 async def _create_note(context: ToolContext, title: str, content: str = "") -> str:
     note = await _NoteRepo(context.db).create(
-        user_id=context.user.id, title=title, content=content
+        user_id=context.user.id,
+        title=title,
+        content=content,
+        contact_id=context.contact_id,
     )
     return ok(note_id=note.id, title=note.title)
 

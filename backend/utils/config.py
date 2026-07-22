@@ -219,6 +219,11 @@ class Settings(BaseSettings):
     )
     google_people_api_base_url: str = "https://people.googleapis.com/v1"
 
+    # Contact Workspace (Release 1.5, P0-2) -- combined-timeline cap, not a
+    # storage limit; a business value on purpose, so it's here rather than
+    # hardcoded in api/contact_workspace.py.
+    contact_workspace_timeline_limit: int = 30
+
     # Google Drive (Sprint 3) — base de conhecimento; mesmo padrão de reuso de
     # google_client_id/google_client_secret/email_token_encryption_key.
     drive_provider: str = "google"
