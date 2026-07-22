@@ -6,6 +6,25 @@
 **Commit:** `5ea29b2`
 **Data:** 2026-07-22
 
+## Progresso da iniciativa Contact Workspace / Intelligence
+
+| Fase | Descrição | Status | Commit |
+| --- | --- | --- | --- |
+| P0-1 | — | ⚠️ Não identificado nesta iniciativa (ver nota abaixo) | — |
+| P0-2 | Contact Workspace | ✅ Aprovado | `5ea29b2` |
+| P0-3 | Contact Intelligence | ✅ Aprovado | `146eea9` |
+| P0-4 | Recommendations (Action Center reuse) | ⏳ Pendente — aguardando proposta de arquitetura | — |
+
+**Nota sobre P0-1:** não há, em nenhum lugar deste repositório ou desta
+conversa, um "P0-1" pertencente a esta iniciativa (Contact Workspace/
+Intelligence) — P0-2 é a primeira fase que de fato existe aqui. A única
+ocorrência real de "P0-1" no repositório é um item completamente diferente
+e não relacionado, já concluído há muito tempo: "fechar o auto-registro
+aberto" (`ROADMAP_v1.1.md`, corrigido no commit `6b773c0`, ver
+`RELEASE_1_3_1_POSTMORTEM.md`). Marcá-lo como "✅" aqui seria inventar uma
+entrega que não existe nesta linha de trabalho — deixado como pendência de
+esclarecimento em vez de uma marca fabricada.
+
 ## Resumo da funcionalidade entregue
 
 Endpoint `GET /api/contacts/{contact_id}/workspace`: uma única leitura
@@ -91,7 +110,16 @@ N+1, sem consultas novas introduzidas pelas correções de contrato.
 
 ## Próxima fase
 
-**P0-3 — Contact Intelligence.** Ver `CONTACT_INTELLIGENCE_ARCHITECTURE.md`
-para a proposta de arquitetura (documento de design apenas — nenhuma
-implementação, migração, endpoint ou componente de frontend foi criado
-nesta fase). Aguardando aprovação explícita antes de qualquer código.
+**P0-3 — Contact Intelligence: CONCLUÍDO E APROVADO.** Commit `146eea9`.
+`summary.relationship_status`/`suggested_next_action` deixaram de ser
+`null` (backend/contacts/intelligence.py, deterministico, sem novas
+queries); novo `GET /contacts/priority` para ranking entre contatos. Ver
+`CONTACT_INTELLIGENCE_ARCHITECTURE.md` para o desenho completo e sua
+seção "Architectural decision" (fronteira Intelligence vs. Action).
+
+**P0-4 — Recommendations, pendente.** Ainda apenas uma proposta de
+arquitetura será preparada (lifecycle de recomendação, fluxo de
+confirmação, modelo de explicação, modelo de confiança, fronteira de
+execução, trilha de auditoria) reaproveitando o Action Center/Planner já
+existentes — nenhuma implementação, migração, endpoint ou componente de
+frontend até aprovação explícita.
