@@ -234,8 +234,15 @@ def create_app() -> FastAPI:
     app.include_router(webhooks_router, prefix=prefix)
     app.include_router(whatsapp_router, prefix=prefix)
     app.include_router(jobs_router, prefix=prefix)
-    app.include_router(contacts_router, prefix=prefix)
+    # contact_workspace_router before contacts_router: it now owns
+    # GET /contacts/priority (P0-3), a single-segment literal path that
+    # would otherwise be swallowed by contacts_router's generic
+    # GET /{item_id} catch-all if that router matched first (same
+    # specific-before-generic ordering api/crud.py already applies to its
+    # own /count vs /{item_id}). /contacts/{id}/workspace was never at risk
+    # either way -- it has an extra path segment the catch-all can't match.
     app.include_router(contact_workspace_router, prefix=prefix)
+    app.include_router(contacts_router, prefix=prefix)
     app.include_router(messages_router, prefix=prefix)
     app.include_router(tasks_router, prefix=prefix)
     app.include_router(goals_router, prefix=prefix)

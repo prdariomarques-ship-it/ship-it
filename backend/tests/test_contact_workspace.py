@@ -1,16 +1,19 @@
-"""GET /contacts/{id}/workspace -- Release 1.5, P0-2: Contact Workspace.
+"""GET /contacts/{id}/workspace -- Release 1.5, P0-2 + P0-3.
 
 A single aggregate read over Notes/Tasks/Calendar/Messages/Memory, all
 scoped to one contact, shaped exactly like the requested visual hierarchy:
 `summary` (who/tags/last interaction -- `relationship_status`/
-`suggested_next_action` are reserved `null` placeholders for P0-3),
-`timeline` (WhatsApp+Notes+Tasks+Meetings merged, most recent first),
-`current_state` (open_tasks/upcoming_events/pending_follow_ups/
-important_notes), `recommendations` (always `[]` here -- P0-4's job).
+`suggested_next_action` computed deterministically by
+`contacts/intelligence.py`, P0-3), `timeline` (WhatsApp+Notes+Tasks+
+Meetings merged, most recent first), `current_state` (open_tasks/
+upcoming_events/pending_follow_ups/important_notes), `recommendations`
+(always `[]` here -- P0-4's job).
 
-Deliberately not testing any P0-3/P0-4 logic (scores, recommendations) --
-those don't exist yet; every assertion here is about correctly assembling
-data that already exists, never about producing a new judgment.
+Deliberately not testing P0-4 logic (executable recommendations) -- that
+doesn't exist yet. Signal/tier/score correctness itself is unit-tested in
+`test_contact_intelligence.py`, no DB, against `contacts/intelligence.py`
+directly; the assertions here only confirm the endpoint actually wires
+that module's output into the response, once per representative case.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -86,7 +89,11 @@ async def test_empty_relationship_returns_every_box_as_a_clean_empty_state(
     client, session_factory
 ):
     """A brand-new contact with nothing linked yet -- every list is empty,
-    nothing crashes, the reserved P0-3/P0-4 fields stay null/empty."""
+    nothing crashes, `recommendations` (still P0-4's job) stays empty.
+    `relationship_status`/`suggested_next_action` are no longer null (P0-3)
+    but must read as a healthy, honest "nothing wrong yet" result, not an
+    urgent one -- see contacts/intelligence.py's `no_interaction_ever`
+    (info-severity, not urgent)."""
     headers = await _register_and_login(client)
     contact = await _new_contact(session_factory, name="Novo Contato")
 
@@ -96,8 +103,15 @@ async def test_empty_relationship_returns_every_box_as_a_clean_empty_state(
     assert response.status_code == 200
     body = response.json()
 
-    assert body["summary"]["relationship_status"] is None
-    assert body["summary"]["suggested_next_action"] is None
+    assert body["summary"]["relationship_status"]["tier"] == "healthy"
+    assert body["summary"]["relationship_status"]["score"] == 0.0
+    assert {s["code"] for s in body["summary"]["relationship_status"]["signals"]} == {
+        "no_interaction_ever"
+    }
+    assert (
+        body["summary"]["suggested_next_action"]
+        == "No interaction recorded yet for this contact."
+    )
     assert body["summary"]["ai_summary"] is None
     assert body["summary"]["last_interaction_at"] is None
     assert body["timeline"] == []
@@ -184,9 +198,11 @@ async def test_active_relationship_populates_every_box(client, session_factory):
 async def test_a_task_with_a_past_due_date_still_appears_correctly(
     client, session_factory
 ):
-    """P0-2 doesn't compute an "overdue" flag (that's a P0-3 concept) --
-    but a task whose due_date has already passed must still be assembled
-    correctly, with its real due_date intact, not hidden or crashed on."""
+    """A task whose due_date has already passed must still be assembled
+    correctly, with its real due_date intact, not hidden or crashed on --
+    and (P0-3) must drive the endpoint's own `relationship_status` to
+    `at_risk` with an `overdue_commitment` signal, proving
+    `contacts/intelligence.py` is actually wired in, not just present."""
     headers = await _register_and_login(client)
     owner = await _owner_user(session_factory)
     contact = await _new_contact(session_factory, name="Contato com pendência")
@@ -208,10 +224,45 @@ async def test_a_task_with_a_past_due_date_still_appears_correctly(
     response = await client.get(
         f"/api/contacts/{contact.id}/workspace", headers=headers
     )
-    open_tasks = response.json()["current_state"]["open_tasks"]
+    body = response.json()
+    open_tasks = body["current_state"]["open_tasks"]
     assert len(open_tasks) == 1
     assert open_tasks[0]["title"] == "Follow-up atrasado"
     assert open_tasks[0]["due_date"] is not None
+
+    relationship_status = body["summary"]["relationship_status"]
+    assert relationship_status["tier"] == "at_risk"
+    assert "overdue_commitment" in {s["code"] for s in relationship_status["signals"]}
+    assert "overdue" in body["summary"]["suggested_next_action"].lower()
+
+
+# --- healthy, active relationship (P0-3) ---------------------------------------------
+@pytest.mark.asyncio
+async def test_recently_active_contact_with_no_open_issue_is_healthy(
+    client, session_factory
+):
+    """The opposite of the overdue case above: a contact interacted with
+    moments ago, no overdue task, no unanswered message -- must read as
+    `healthy`, not fabricate a risk signal from nothing. Uses a `now`-
+    relative timestamp (not a fixed historical date) so this stays true
+    regardless of when the suite runs."""
+    headers = await _register_and_login(client)
+    contact = await _new_contact(
+        session_factory,
+        name="Contato saudável",
+        last_interaction_at=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+
+    response = await client.get(
+        f"/api/contacts/{contact.id}/workspace", headers=headers
+    )
+    relationship_status = response.json()["summary"]["relationship_status"]
+    assert relationship_status["tier"] == "healthy"
+    assert relationship_status["score"] == 0.0
+    assert not any(
+        s["kind"] == "risk" and s["severity"] in ("urgent", "attention")
+        for s in relationship_status["signals"]
+    )
 
 
 # --- no notes / no tasks / no meetings (each in isolation) --------------------------

@@ -1,4 +1,4 @@
-"""Contact Workspace — Release 1.5, P0-2.
+"""Contact Workspace — Release 1.5, P0-2 + P0-3 (Contact Intelligence).
 
 A single aggregate read assembled from data that already exists across
 Notes/Tasks/Calendar/Messages/Memory — the same "one endpoint, several
@@ -14,7 +14,9 @@ aggregate read, no frontend orchestration across multiple requests):
     {
       "summary": {...},         # who is this, tags, last interaction --
                                  # relationship_status/suggested_next_action
-                                 # are reserved placeholders (null) for P0-3
+                                 # computed deterministically (P0-3, see
+                                 # contacts/intelligence.py) from data this
+                                 # endpoint already loads -- no new query
       "timeline": [...],        # WhatsApp + Notes + Tasks + Meetings, merged
                                  # chronologically (most recent first), each
                                  # entry sharing one stable contract --
@@ -35,19 +37,19 @@ app, only additionally filtered to this one contact via the `contact_id`
 column added in this same release (Notes already had it, reserved and
 unused until now; Tasks/Calendar gained it in this migration).
 
-P0-3's deterministic scoring (relationship health, suggested follow-up,
-pending reminders) is deliberately NOT computed here — `relationship_status`
-and `suggested_next_action` are typed, present, and `null` so the frontend
-has a stable shape to render once that step ships, but nothing here
-fabricates a score. `recommendations` stays an empty list for the same
-reason: P0-4 is where a recommendation is ever produced, and only ever
-behind its own confirmation step.
+P0-3's deterministic scoring (`contacts/intelligence.py`) fills
+`relationship_status`/`suggested_next_action` from data already loaded
+above -- understanding only, per CONTACT_INTELLIGENCE_ARCHITECTURE.md's
+"Architectural decision": no executable action, no side effect, no
+confirmation flow. `recommendations` stays an empty list -- P0-4 is where
+a recommendation is ever produced, and only ever behind its own
+confirmation step; this endpoint never fabricates one.
 """
 
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +57,7 @@ from auth.dependencies import CurrentUser
 from database.session import get_db
 from memory.manager import memory_manager
 from models.calendar import CalendarEvent
+from models.contact import Contact
 from models.message import Message, MessageDirection
 from models.note import Note
 from models.task import Task, TaskStatus
@@ -63,6 +66,14 @@ from repositories.contact import ContactRepository
 from repositories.message import MessageRepository
 from repositories.note import NoteRepository
 from repositories.task import TaskRepository
+from contacts.intelligence import (
+    Signal,
+    compute_risk_signals_from_aggregates,
+    compute_signals,
+    priority_score,
+    relationship_tier,
+    suggested_next_action,
+)
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -130,6 +141,8 @@ async def get_contact_workspace(
     outbound = [m for m in messages if m.direction == MessageDirection.OUTBOUND]
     important_notes = sorted(notes, key=lambda note: not note.pinned)
 
+    signals = compute_signals(contact, messages, notes, open_tasks, upcoming_events)
+
     return {
         "summary": {
             "id": contact.id,
@@ -138,10 +151,12 @@ async def get_contact_workspace(
             "categories": contact.categories,
             "tags": contact.tags,
             "last_interaction_at": contact.last_interaction_at,
-            # Reserved for P0-3 (deterministic relationship scoring) --
-            # deliberately null here, never computed by this endpoint.
-            "relationship_status": None,
-            "suggested_next_action": None,
+            # Computed in-memory from data already loaded above -- P0-3
+            # (Contact Intelligence). Understanding only: no executable
+            # action, no side effect. See contacts/intelligence.py and
+            # CONTACT_INTELLIGENCE_ARCHITECTURE.md.
+            "relationship_status": _relationship_status_dict(contact, signals),
+            "suggested_next_action": suggested_next_action(signals),
             "ai_summary": ai_summary,
             "memory": preferences,
         },
@@ -158,6 +173,62 @@ async def get_contact_workspace(
         # always empty here; this endpoint never produces a recommendation.
         "recommendations": [],
     }
+
+
+@router.get("/priority")
+async def list_contact_priority(
+    db: DbSession,
+    current_user: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[dict]:
+    """Contacts ranked by priority_score desc -- mirrors GET /goals/ready
+    (goals/router.py): score every contact via 2 aggregate queries (never
+    one per contact), rank in Python with the same pure scoring function
+    the single-contact workspace uses, return the top `limit`. See
+    CONTACT_INTELLIGENCE_ARCHITECTURE.md #12/#13.
+
+    Registered on this router (not the generic `contacts_router`) so it can
+    be mounted before that router's `/{item_id}` catch-all in main.py --
+    otherwise "priority" would be parsed as `item_id` and 422 before ever
+    reaching this route."""
+    now = datetime.now(timezone.utc)
+    settings = get_settings()
+
+    contacts = await ContactRepository(db).list_for_intelligence(
+        settings.contact_priority_candidate_ceiling
+    )
+    contact_ids = [contact.id for contact in contacts]
+
+    overdue_counts = await TaskRepository(db).overdue_counts_by_contact(
+        current_user.id, contact_ids, now=now
+    )
+    last_messages = await MessageRepository(db).last_message_by_contact(contact_ids)
+
+    ranked: list[dict] = []
+    for contact in contacts:
+        last_message = last_messages.get(contact.id)
+        signals = compute_risk_signals_from_aggregates(
+            contact,
+            overdue_task_count=overdue_counts.get(contact.id, 0),
+            last_message_direction=last_message.direction if last_message else None,
+            last_message_at=(
+                (last_message.provider_timestamp or last_message.created_at)
+                if last_message
+                else None
+            ),
+            now=now,
+        )
+        ranked.append(
+            {
+                "contact_id": contact.id,
+                "name": contact.name,
+                "relationship_status": _relationship_status_dict(contact, signals),
+                "suggested_next_action": suggested_next_action(signals),
+            }
+        )
+
+    ranked.sort(key=lambda item: item["relationship_status"]["score"], reverse=True)
+    return ranked[:limit]
 
 
 async def _fetch_upcoming_events(
@@ -220,6 +291,22 @@ def _task_dict(task: Task) -> dict:
         "priority": task.priority.value,
         "due_date": task.due_date,
         "created_at": task.created_at,
+    }
+
+
+def _relationship_status_dict(contact: Contact, signals: list[Signal]) -> dict:
+    return {
+        "tier": relationship_tier(contact, signals),
+        "score": priority_score(signals),
+        "signals": [
+            {
+                "code": signal.code,
+                "kind": signal.kind,
+                "severity": signal.severity,
+                "reason": signal.reason,
+            }
+            for signal in signals
+        ],
     }
 
 

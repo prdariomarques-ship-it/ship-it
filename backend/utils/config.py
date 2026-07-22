@@ -224,6 +224,21 @@ class Settings(BaseSettings):
     # hardcoded in api/contact_workspace.py.
     contact_workspace_timeline_limit: int = 30
 
+    # Contact Intelligence (Release 1.5, P0-3) -- every threshold and
+    # per-signal weight configurable on purpose (see
+    # CONTACT_INTELLIGENCE_ARCHITECTURE.md's "Architectural decision"), never
+    # a bare literal in contacts/intelligence.py.
+    contact_reply_sla_hours: float = 24.0
+    contact_stale_after_days: float = 14.0
+    contact_at_risk_after_days: float = 45.0
+    contact_risk_weight_overdue_commitment: float = 40.0
+    contact_risk_weight_no_reply_to_inbound: float = 25.0
+    contact_risk_weight_relationship_stale: float = 20.0
+    contact_risk_weight_relationship_at_risk: float = 40.0
+    # Safety bound (never a ranking heuristic) for GET /contacts/priority --
+    # see repositories/contact.py::list_for_intelligence.
+    contact_priority_candidate_ceiling: int = 2000
+
     # Google Drive (Sprint 3) — base de conhecimento; mesmo padrão de reuso de
     # google_client_id/google_client_secret/email_token_encryption_key.
     drive_provider: str = "google"

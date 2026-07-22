@@ -47,6 +47,19 @@ interface TimelineEntry {
   metadata: Record<string, unknown>;
 }
 
+interface RelationshipSignal {
+  code: string;
+  kind: "risk" | "opportunity";
+  severity: "urgent" | "attention" | "info";
+  reason: string;
+}
+
+interface RelationshipStatus {
+  tier: "healthy" | "cooling" | "cold" | "at_risk";
+  score: number;
+  signals: RelationshipSignal[];
+}
+
 interface WorkspaceSummary {
   id: number;
   name: string;
@@ -54,8 +67,8 @@ interface WorkspaceSummary {
   categories: string[];
   tags: string[];
   last_interaction_at: string | null;
-  relationship_status: string | null;
-  suggested_next_action: string | null;
+  relationship_status: RelationshipStatus;
+  suggested_next_action: string;
   ai_summary: string | null;
   memory: Record<string, unknown>;
 }
@@ -84,6 +97,13 @@ const TIMELINE_LABELS: Record<TimelineEntry["type"], string> = {
   note: "Nota",
   task: "Tarefa",
   meeting: "Reunião",
+};
+
+const RELATIONSHIP_TIER_LABELS: Record<RelationshipStatus["tier"], string> = {
+  healthy: "Saudável",
+  cooling: "Esfriando",
+  cold: "Fria",
+  at_risk: "Em risco",
 };
 
 export default function ContactWorkspacePage() {
@@ -115,10 +135,20 @@ export default function ContactWorkspacePage() {
           Última interação: {formatDateTime(summary.last_interaction_at)}
         </p>
         <p className="muted">
-          Status do relacionamento: {summary.relationship_status ?? "Ainda não calculado."}
+          Status do relacionamento:{" "}
+          {RELATIONSHIP_TIER_LABELS[summary.relationship_status.tier]}
         </p>
+        {summary.relationship_status.signals.length > 0 && (
+          <ul>
+            {summary.relationship_status.signals.map((signal) => (
+              <li key={signal.code} className="muted">
+                {signal.reason}
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="muted">
-          Próxima ação sugerida: {summary.suggested_next_action ?? "Ainda não calculada."}
+          Próxima ação sugerida: {summary.suggested_next_action}
         </p>
         <p>{summary.ai_summary ?? "Ainda sem resumo gerado."}</p>
       </div>

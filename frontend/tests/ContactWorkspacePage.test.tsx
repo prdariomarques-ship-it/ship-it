@@ -15,8 +15,19 @@ const WORKSPACE = {
     categories: ["loja"],
     tags: ["vip"],
     last_interaction_at: "2026-01-15T10:00:00Z",
-    relationship_status: null,
-    suggested_next_action: null,
+    relationship_status: {
+      tier: "at_risk",
+      score: 40,
+      signals: [
+        {
+          code: "relationship_at_risk",
+          kind: "risk",
+          severity: "urgent",
+          reason: "No interaction in 90 day(s) (>= 45-day at-risk threshold).",
+        },
+      ],
+    },
+    suggested_next_action: "Reach out -- there has been no interaction in a long time.",
     ai_summary: "Cliente recorrente, prefere contato à tarde.",
     memory: {},
   },
@@ -115,7 +126,7 @@ describe("ContactWorkspacePage", () => {
     expect(screen.getByText("Nenhuma nota vinculada a este contato.")).toBeInTheDocument();
   });
 
-  it("renders reserved P0-3/P0-4 placeholders as honest 'not yet computed' text", async () => {
+  it("renders the P0-3 relationship tier, its signal reasons, and the suggested action", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => WORKSPACE })
@@ -123,7 +134,39 @@ describe("ContactWorkspacePage", () => {
     render(<ContactWorkspacePage />);
 
     await screen.findByText("Ana Souza");
-    expect(screen.getByText(/Ainda não calculado/)).toBeInTheDocument();
-    expect(screen.getByText(/Próxima ação sugerida: Ainda não calculada/)).toBeInTheDocument();
+    expect(screen.getByText(/Status do relacionamento:/)).toBeInTheDocument();
+    expect(screen.getByText(/Em risco/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/No interaction in 90 day\(s\)/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Próxima ação sugerida: Reach out/)
+    ).toBeInTheDocument();
+  });
+
+  it("renders a healthy tier with no signal list when nothing fired", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...WORKSPACE,
+          summary: {
+            ...WORKSPACE.summary,
+            relationship_status: { tier: "healthy", score: 0, signals: [] },
+            suggested_next_action:
+              "No action needed right now -- this relationship looks healthy.",
+          },
+        }),
+      })
+    );
+    render(<ContactWorkspacePage />);
+
+    await screen.findByText("Ana Souza");
+    expect(screen.getByText(/Saudável/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Próxima ação sugerida: No action needed/)
+    ).toBeInTheDocument();
   });
 });
