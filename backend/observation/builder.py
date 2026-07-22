@@ -17,46 +17,48 @@ table not migrated yet) is skipped and recorded in
 enhancement, never a requirement blocking anything else.
 
 Reuses, never reimplements:
-- `goals.service.GoalService.ready_goals` — same call `orchestrator.context`
-  makes for the Cognitive Pipeline.
+- `orchestrator.context_sources.fetch_ready_goals/fetch_pending_tasks/
+  fetch_upcoming_calendar_events` — the exact same goals/tasks/calendar
+  queries `orchestrator.context.ContextBuilder` uses for the Cognitive
+  Pipeline. Extracted into that shared module specifically because this
+  file and `orchestrator/context.py` used to each run their own copy of
+  all three queries (confirmed byte-for-byte identical for calendar) —
+  this builder and that one now call the same functions; only the
+  degradation policy (this file's `degraded_sources` list vs. that file's
+  per-source try/except) and the return shape (`ContextItem` here,
+  `dict` there) stay intentionally different.
 - `repositories.job.JobRepository`, `repositories.message.MessageRepository`
-  and `repositories.task.TaskRepository` — existing repositories, unmodified
-  (job.py gained one read-only method, `pending_by_name`, used by the
-  scheduler, not by this builder; task.py is shared with
-  `orchestrator.context`, extracted there in the same change that added this
-  file, so the two context surfaces never had two competing `Task`
-  repositories).
+  — existing repositories, unmodified (job.py gained one read-only method,
+  `pending_by_name`, used by the scheduler, not by this builder).
 - `services.descriptions.describe_goal/describe_task/describe_calendar_event`
   — the exact same rendering `orchestrator.context.ContextBuilder` uses, so a
   Goal/Task/CalendarEvent reads identically regardless of which context
   surface produced it.
 - `repositories.base.SQLAlchemyRepository` — the same generic base every
   other repository extends, for the one source with no dedicated repository
-  yet (`Embedding`) and for the one-off queries (`CalendarEvent`, `LogEntry`)
-  that `orchestrator.context` and `api/routes.py`/`admin/service.py` already
-  write inline rather than through a repository — same precedent, not a new
-  one.
+  yet (`Embedding`) and for the one-off query (`LogEntry`) that
+  `api/routes.py`/`admin/service.py` already write inline rather than
+  through a repository — same precedent, not a new one.
 """
-
-from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from goals.service import GoalService
-from models.calendar import CalendarEvent
 from models.embedding import Embedding
 from models.job import Job, JobStatus
 from models.log import LogEntry
 from models.message import Message, MessageDirection
-from models.task import TaskStatus
 from models.user import User
 from observability.metrics import record_observation_source_error
 from observation.models import ContextItem, CurrentContext
+from orchestrator.context_sources import (
+    fetch_pending_tasks,
+    fetch_ready_goals,
+    fetch_upcoming_calendar_events,
+)
 from repositories.base import SQLAlchemyRepository
 from repositories.job import JobRepository
 from repositories.message import MessageRepository
-from repositories.task import TaskRepository
 from services.descriptions import describe_calendar_event, describe_goal, describe_task
 from utils.config import get_settings
 from utils.logging import get_logger
@@ -117,30 +119,19 @@ class ObservationContextBuilder:
     async def _gather_goals(
         self, db: AsyncSession, user: User, limit: int
     ) -> list[ContextItem]:
-        ready = await GoalService(db).ready_goals(user.id, limit=limit)
+        ready = await fetch_ready_goals(db, user.id, limit)
         return [ContextItem(source="goal", content=describe_goal(goal)) for goal in ready]
 
     async def _gather_tasks(
         self, db: AsyncSession, user: User, limit: int
     ) -> list[ContextItem]:
-        tasks = await TaskRepository(db).list(
-            user_id=user.id, status=TaskStatus.PENDING, limit=limit
-        )
+        tasks = await fetch_pending_tasks(db, user.id, limit)
         return [ContextItem(source="task", content=describe_task(task)) for task in tasks]
 
     async def _gather_calendar(
         self, db: AsyncSession, user: User, limit: int
     ) -> list[ContextItem]:
-        statement = (
-            select(CalendarEvent)
-            .where(
-                CalendarEvent.user_id == user.id,
-                CalendarEvent.starts_at >= datetime.now(timezone.utc),
-            )
-            .order_by(CalendarEvent.starts_at.asc())
-            .limit(limit)
-        )
-        events = list((await db.execute(statement)).scalars().all())
+        events = await fetch_upcoming_calendar_events(db, user.id, limit)
         return [
             ContextItem(source="calendar", content=describe_calendar_event(event))
             for event in events

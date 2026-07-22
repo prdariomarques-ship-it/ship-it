@@ -228,7 +228,7 @@ async def test_a_failing_source_is_skipped_and_recorded_without_blocking_the_res
         await session.commit()
 
     with patch(
-        "observation.builder.GoalService.ready_goals",
+        "observation.builder.fetch_ready_goals",
         new=AsyncMock(side_effect=RuntimeError("db down")),
     ):
         async with session_factory() as session:

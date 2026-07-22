@@ -17,22 +17,20 @@ domains were never contact-scoped to begin with (`Goal.user_id`,
 `CalendarEvent.user_id`, `Task.user_id`).
 """
 
-from datetime import datetime, timezone
-
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from goals.service import GoalService
 from memory.manager import memory_manager
-from models.calendar import CalendarEvent
 from models.message import MessageDirection
-from models.task import TaskStatus
 from models.user import User
 from observability.metrics import record_memory_lookup
+from orchestrator.context_sources import (
+    fetch_pending_tasks,
+    fetch_ready_goals,
+    fetch_upcoming_calendar_events,
+)
 from orchestrator.intent import Intent, IntentResult
 from orchestrator.priority import Priority, PriorityResult
 from providers.llm.base import ChatMessage
-from repositories.task import TaskRepository
 from services.descriptions import describe_calendar_event, describe_goal, describe_task
 from utils.logging import get_logger
 
@@ -130,9 +128,7 @@ class ContextBuilder:
 
     async def _gather_goals(self, db: AsyncSession, user: User) -> list[dict]:
         try:
-            ready = await GoalService(db).ready_goals(
-                user.id, limit=_OWNER_CONTEXT_LIMIT
-            )
+            ready = await fetch_ready_goals(db, user.id, _OWNER_CONTEXT_LIMIT)
         except Exception as exc:  # noqa: BLE001 - context is an enhancement, never a requirement
             logger.warning("Goal context lookup skipped: %s", exc)
             return []
@@ -141,9 +137,7 @@ class ContextBuilder:
 
     async def _gather_tasks(self, db: AsyncSession, user: User) -> list[dict]:
         try:
-            tasks = await TaskRepository(db).list(
-                user_id=user.id, status=TaskStatus.PENDING, limit=_OWNER_CONTEXT_LIMIT
-            )
+            tasks = await fetch_pending_tasks(db, user.id, _OWNER_CONTEXT_LIMIT)
         except Exception as exc:  # noqa: BLE001 - context is an enhancement, never a requirement
             logger.warning("Task context lookup skipped: %s", exc)
             return []
@@ -152,16 +146,9 @@ class ContextBuilder:
 
     async def _gather_calendar(self, db: AsyncSession, user: User) -> list[dict]:
         try:
-            statement = (
-                select(CalendarEvent)
-                .where(
-                    CalendarEvent.user_id == user.id,
-                    CalendarEvent.starts_at >= datetime.now(timezone.utc),
-                )
-                .order_by(CalendarEvent.starts_at.asc())
-                .limit(_OWNER_CONTEXT_LIMIT)
+            events = await fetch_upcoming_calendar_events(
+                db, user.id, _OWNER_CONTEXT_LIMIT
             )
-            events = list((await db.execute(statement)).scalars().all())
         except Exception as exc:  # noqa: BLE001 - context is an enhancement, never a requirement
             logger.warning("Calendar context lookup skipped: %s", exc)
             return []

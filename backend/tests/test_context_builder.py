@@ -99,7 +99,7 @@ async def test_goal_lookup_failure_does_not_block_context_building(
     session_factory, user
 ):
     with patch(
-        "orchestrator.context.GoalService.ready_goals",
+        "orchestrator.context.fetch_ready_goals",
         new=AsyncMock(side_effect=RuntimeError("db down")),
     ):
         async with session_factory() as session:
