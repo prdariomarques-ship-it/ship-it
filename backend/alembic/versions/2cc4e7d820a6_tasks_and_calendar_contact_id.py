@@ -24,36 +24,43 @@ def upgrade() -> None:
     # existing rows are simply unlinked, not migrated to any value.
     op.add_column("tasks", sa.Column("contact_id", sa.Integer(), nullable=True))
     op.create_index(op.f("ix_tasks_contact_id"), "tasks", ["contact_id"], unique=False)
-    op.create_foreign_key(
-        "fk_tasks_contact_id_contacts",
-        "tasks",
-        "contacts",
-        ["contact_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    # batch_alter_table: SQLite has no ALTER support for adding/dropping a
+    # constraint (op.create_foreign_key/drop_constraint fail outright there
+    # with NotImplementedError) -- batch mode uses SQLite's copy-and-move
+    # strategy instead. On other dialects (Postgres in production) this
+    # renders as the same direct ALTER statement, so behavior is unchanged.
+    with op.batch_alter_table("tasks") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_tasks_contact_id_contacts",
+            "contacts",
+            ["contact_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
     op.add_column("calendar", sa.Column("contact_id", sa.Integer(), nullable=True))
     op.create_index(
         op.f("ix_calendar_contact_id"), "calendar", ["contact_id"], unique=False
     )
-    op.create_foreign_key(
-        "fk_calendar_contact_id_contacts",
-        "calendar",
-        "contacts",
-        ["contact_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    with op.batch_alter_table("calendar") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_calendar_contact_id_contacts",
+            "contacts",
+            ["contact_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "fk_calendar_contact_id_contacts", "calendar", type_="foreignkey"
-    )
+    with op.batch_alter_table("calendar") as batch_op:
+        batch_op.drop_constraint(
+            "fk_calendar_contact_id_contacts", type_="foreignkey"
+        )
     op.drop_index(op.f("ix_calendar_contact_id"), table_name="calendar")
     op.drop_column("calendar", "contact_id")
 
-    op.drop_constraint("fk_tasks_contact_id_contacts", "tasks", type_="foreignkey")
+    with op.batch_alter_table("tasks") as batch_op:
+        batch_op.drop_constraint("fk_tasks_contact_id_contacts", type_="foreignkey")
     op.drop_index(op.f("ix_tasks_contact_id"), table_name="tasks")
     op.drop_column("tasks", "contact_id")
