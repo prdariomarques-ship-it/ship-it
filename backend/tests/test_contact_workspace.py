@@ -28,6 +28,7 @@ from models.message import Message, MessageDirection
 from models.note import Note
 from models.task import Task, TaskPriority, TaskStatus
 from models.user import User
+from utils import messages as user_messages
 from utils.config import get_settings
 
 
@@ -81,6 +82,8 @@ async def test_contact_workspace_returns_404_for_unknown_contact(client):
     headers = await _register_and_login(client)
     response = await client.get("/api/contacts/999999/workspace", headers=headers)
     assert response.status_code == 404
+    # Release 1.5 hardening (FIX 3): user-facing error text must be pt-BR.
+    assert response.json()["detail"] == user_messages.CONTACT_NOT_FOUND
 
 
 # --- empty relationship -------------------------------------------------------------

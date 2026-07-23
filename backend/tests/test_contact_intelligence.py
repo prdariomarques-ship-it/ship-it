@@ -14,6 +14,7 @@ from contacts.intelligence import (
     Signal,
     compute_risk_signals_from_aggregates,
     compute_signals,
+    primary_risk_signal,
     priority_score,
     relationship_tier,
     suggested_next_action,
@@ -302,6 +303,53 @@ def test_suggested_action_is_honest_when_nothing_fires():
     contact = _contact(last_interaction_at=NOW - timedelta(days=1))
     signals = compute_signals(contact, [], [], [], [], now=NOW)
     assert suggested_next_action(signals) == "No action needed right now -- this relationship looks healthy."
+
+
+# --- primary_risk_signal: Release 1.5 hardening, FIX 6 --------------------------------------
+# Added when a frontend panel was found re-implementing its own severity-only
+# ordering to pick a "primary reason" for display -- this is now the one
+# place, backend-only, that decides which signal is primary. Must agree with
+# suggested_next_action's tie-break exactly, since both read _ACTION_PRIORITY.
+def test_primary_risk_signal_agrees_with_suggested_next_action_tie_break():
+    contact = _contact(last_interaction_at=NOW - timedelta(days=90))
+    overdue = _pending_task(due_date=NOW - timedelta(days=1))
+    signals = compute_signals(contact, [], [], [overdue], [], now=NOW)
+    codes = {s.code for s in signals}
+    assert {"overdue_commitment", "relationship_at_risk"} <= codes
+
+    signal = primary_risk_signal(signals)
+
+    assert signal is not None
+    assert signal.code == "overdue_commitment"  # outranks relationship_at_risk
+    assert "overdue" in suggested_next_action(signals).lower()
+
+
+def test_primary_risk_signal_is_order_independent():
+    contact = _contact(last_interaction_at=NOW - timedelta(days=90))
+    overdue = _pending_task(due_date=NOW - timedelta(days=1))
+    signals = compute_signals(contact, [], [], [overdue], [], now=NOW)
+
+    signal_1 = primary_risk_signal(signals)
+    signal_2 = primary_risk_signal(list(reversed(signals)))
+
+    assert signal_1 is not None and signal_2 is not None
+    assert signal_1.code == signal_2.code
+
+
+def test_primary_risk_signal_is_none_when_nothing_fires():
+    contact = _contact(last_interaction_at=NOW - timedelta(days=1))
+    signals = compute_signals(contact, [], [], [], [], now=NOW)
+    assert primary_risk_signal(signals) is None
+
+
+def test_primary_risk_signal_ignores_opportunity_and_info_signals():
+    """Only risk signals with real severity are eligible -- an opportunity
+    signal or an info-severity risk signal (e.g. no_interaction_ever) must
+    never be picked as the "primary reason"."""
+    contact = _contact(last_interaction_at=None)  # fires no_interaction_ever (info)
+    signals = compute_signals(contact, [], [], [], [], now=NOW)
+    assert any(s.code == "no_interaction_ever" for s in signals)
+    assert primary_risk_signal(signals) is None
 
 
 def test_suggested_action_for_no_reply_to_inbound_alone():

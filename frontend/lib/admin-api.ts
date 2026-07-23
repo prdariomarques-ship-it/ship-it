@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/hooks/useApi";
 import type {
   AdminIndex,
+  ContactPriorityItem,
   AdminLogEntry,
   AgentAdminInfo,
   CalendarEventRead,
@@ -234,6 +235,17 @@ export function useTasks() {
   return useQuery({
     queryKey: ["tasks"],
     queryFn: () => apiFetch<TaskRead[]>("/tasks?limit=200"),
+    refetchInterval: NORMAL_INTERVAL_MS,
+  });
+}
+
+// Daily work queue for the Dashboard — pure consumer of the deterministic
+// Contact Intelligence ranking (GET /contacts/priority); no scoring logic
+// here, see contacts/intelligence.py on the backend.
+export function useContactPriority() {
+  return useQuery({
+    queryKey: ["contacts", "priority"],
+    queryFn: () => apiFetch<ContactPriorityItem[]>("/contacts/priority?limit=10"),
     refetchInterval: NORMAL_INTERVAL_MS,
   });
 }

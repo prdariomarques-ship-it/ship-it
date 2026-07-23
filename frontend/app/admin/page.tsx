@@ -21,6 +21,7 @@ import { LoadingGrid, LoadingRows } from "@/components/admin/LoadingGrid";
 import { ErrorState } from "@/components/admin/ErrorState";
 import { AIOperatorCenter } from "@/components/admin/AIOperatorCenter";
 import { CurrentContextPanel } from "@/components/admin/CurrentContextPanel";
+import { ContactPriorityPanel } from "@/components/admin/ContactPriorityPanel";
 import { GoalsPanel } from "@/components/admin/GoalsPanel";
 import { TasksPanel } from "@/components/admin/TasksPanel";
 import { CalendarPanel } from "@/components/admin/CalendarPanel";
@@ -36,6 +37,7 @@ import {
   useAdminStatus,
   useAdminWhatsApp,
   useCalendarEvents,
+  useContactPriority,
   useGoalsAwaitingApproval,
   useJobsByStatus,
   useReadyGoals,
@@ -73,6 +75,7 @@ export default function AdminDashboardPage() {
   const awaitingApproval = useGoalsAwaitingApproval();
   const tasks = useTasks();
   const calendar = useCalendarEvents();
+  const contactPriority = useContactPriority();
   const queuedJobs = useJobsByStatus("queued");
   const runningJobs = useJobsByStatus("running");
   const failedJobs = useJobsByStatus("failed");
@@ -320,6 +323,28 @@ export default function AdminDashboardPage() {
             ) : observation.data ? (
               <CurrentContextPanel context={observation.data} />
             ) : null}
+          </CardContent>
+        </Card>
+
+        {/* Daily work queue -- pure consumer of the deterministic Contact
+            Intelligence ranking (GET /contacts/priority); answers "who
+            should I work on next?". Links through to the Contact Workspace
+            for detail and action -- never duplicated here. */}
+        <Card className="mb-4">
+          <CardHeader>
+            <CardTitle>Contatos que precisam de atenção</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {contactPriority.isLoading ? (
+              <LoadingRows count={3} />
+            ) : contactPriority.isError ? (
+              <ErrorState
+                message={(contactPriority.error as Error).message}
+                onRetry={() => contactPriority.refetch()}
+              />
+            ) : (
+              <ContactPriorityPanel contacts={contactPriority.data ?? []} />
+            )}
           </CardContent>
         </Card>
 

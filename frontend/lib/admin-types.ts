@@ -300,3 +300,31 @@ export interface MessageRead {
   created_at: string;
   updated_at: string;
 }
+
+// --- Contact priority (mirrors api/contact_workspace.py::list_contact_priority,
+// not backend/admin/schemas.py — a regular contacts-domain endpoint, reused
+// here for the Dashboard's daily work queue) --------------------------------
+export type RelationshipTier = "healthy" | "cooling" | "cold" | "at_risk";
+
+export interface RelationshipSignal {
+  code: string;
+  kind: "risk" | "opportunity";
+  severity: "urgent" | "attention" | "info";
+  reason: string;
+}
+
+export interface ContactPriorityItem {
+  contact_id: number;
+  name: string;
+  relationship_status: {
+    tier: RelationshipTier;
+    score: number;
+    signals: RelationshipSignal[];
+  };
+  suggested_next_action: string;
+  last_interaction_at: string | null;
+  // Release 1.5 hardening: computed backend-side (contacts/intelligence.py
+  // ::primary_risk_signal) -- the frontend renders this verbatim, it must
+  // never re-derive "which signal is primary" itself (see ADR-0001 addendum).
+  primary_reason: string | null;
+}

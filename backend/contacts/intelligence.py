@@ -75,6 +75,84 @@ def _as_aware(value: datetime, *, now: datetime) -> datetime:
     return value
 
 
+def _overdue_commitment_signal(overdue_task_count: int) -> Signal | None:
+    """Shared by `compute_signals` (counts a full task list) and
+    `compute_risk_signals_from_aggregates` (already has the count) -- one
+    rule, one place, so the two call sites can never disagree about what
+    an overdue count means."""
+    if overdue_task_count <= 0:
+        return None
+    return Signal(
+        code="overdue_commitment",
+        kind="risk",
+        severity="urgent",
+        reason=f"{overdue_task_count} pending task(s) past their due date.",
+    )
+
+
+def _no_reply_to_inbound_signal(
+    direction: MessageDirection | None,
+    message_at: datetime | None,
+    *,
+    now: datetime,
+    reply_sla_hours: float,
+) -> Signal | None:
+    """Shared by `compute_signals` (derives direction/timestamp from the
+    full message list's most recent entry) and
+    `compute_risk_signals_from_aggregates` (already has both)."""
+    if direction != MessageDirection.INBOUND or message_at is None:
+        return None
+    hours_since = (now - _as_aware(message_at, now=now)).total_seconds() / 3600
+    if hours_since < reply_sla_hours:
+        return None
+    days_since = hours_since / 24
+    return Signal(
+        code="no_reply_to_inbound",
+        kind="risk",
+        severity="attention",
+        reason=(
+            f"Last message was inbound {days_since:.1f} day(s) ago with no "
+            "reply since."
+        ),
+    )
+
+
+def _staleness_signal(
+    last_interaction_at: datetime | None,
+    *,
+    now: datetime,
+    stale_after_days: float,
+    at_risk_after_days: float,
+) -> Signal | None:
+    """Shared by `compute_signals` and `compute_risk_signals_from_aggregates`
+    -- both read `contact.last_interaction_at` identically; factored out so
+    the two can never drift on the stale/at-risk threshold comparison."""
+    if last_interaction_at is None:
+        return None
+    days_since = (now - _as_aware(last_interaction_at, now=now)).total_seconds() / 86400
+    if days_since >= at_risk_after_days:
+        return Signal(
+            code="relationship_at_risk",
+            kind="risk",
+            severity="urgent",
+            reason=(
+                f"No interaction in {days_since:.0f} day(s) "
+                f"(>= {at_risk_after_days:.0f}-day at-risk threshold)."
+            ),
+        )
+    if days_since >= stale_after_days:
+        return Signal(
+            code="relationship_stale",
+            kind="risk",
+            severity="attention",
+            reason=(
+                f"No interaction in {days_since:.0f} day(s) "
+                f"(>= {stale_after_days:.0f}-day stale threshold)."
+            ),
+        )
+    return None
+
+
 def compute_signals(
     contact: Contact,
     messages: list[Message],
@@ -93,48 +171,32 @@ def compute_signals(
     settings = get_settings()
     signals: list[Signal] = []
 
-    overdue_tasks = [
-        task
-        for task in tasks
-        if task.status == TaskStatus.PENDING
-        and task.due_date is not None
-        and _as_aware(task.due_date, now=now) < now
-    ]
-    if overdue_tasks:
-        signals.append(
-            Signal(
-                code="overdue_commitment",
-                kind="risk",
-                severity="urgent",
-                reason=f"{len(overdue_tasks)} pending task(s) past their due date.",
-            )
-        )
+    overdue_task_count = len(
+        [
+            task
+            for task in tasks
+            if task.status == TaskStatus.PENDING
+            and task.due_date is not None
+            and _as_aware(task.due_date, now=now) < now
+        ]
+    )
+    overdue_signal = _overdue_commitment_signal(overdue_task_count)
+    if overdue_signal is not None:
+        signals.append(overdue_signal)
 
     if messages:
         last_message = max(
             messages,
             key=lambda m: _as_aware(m.provider_timestamp or m.created_at, now=now),
         )
-        last_message_at = _as_aware(
-            last_message.provider_timestamp or last_message.created_at, now=now
+        no_reply_signal = _no_reply_to_inbound_signal(
+            last_message.direction,
+            last_message.provider_timestamp or last_message.created_at,
+            now=now,
+            reply_sla_hours=settings.contact_reply_sla_hours,
         )
-        hours_since_last_message = (now - last_message_at).total_seconds() / 3600
-        if (
-            last_message.direction == MessageDirection.INBOUND
-            and hours_since_last_message >= settings.contact_reply_sla_hours
-        ):
-            days_since_last_message = hours_since_last_message / 24
-            signals.append(
-                Signal(
-                    code="no_reply_to_inbound",
-                    kind="risk",
-                    severity="attention",
-                    reason=(
-                        f"Last message was inbound {days_since_last_message:.1f} "
-                        "day(s) ago with no reply since."
-                    ),
-                )
-            )
+        if no_reply_signal is not None:
+            signals.append(no_reply_signal)
 
     if contact.last_interaction_at is None:
         signals.append(
@@ -146,34 +208,14 @@ def compute_signals(
             )
         )
     else:
-        last_interaction = _as_aware(contact.last_interaction_at, now=now)
-        days_since_interaction = (now - last_interaction).total_seconds() / 86400
-        if days_since_interaction >= settings.contact_at_risk_after_days:
-            signals.append(
-                Signal(
-                    code="relationship_at_risk",
-                    kind="risk",
-                    severity="urgent",
-                    reason=(
-                        f"No interaction in {days_since_interaction:.0f} day(s) "
-                        f"(>= {settings.contact_at_risk_after_days:.0f}-day "
-                        "at-risk threshold)."
-                    ),
-                )
-            )
-        elif days_since_interaction >= settings.contact_stale_after_days:
-            signals.append(
-                Signal(
-                    code="relationship_stale",
-                    kind="risk",
-                    severity="attention",
-                    reason=(
-                        f"No interaction in {days_since_interaction:.0f} day(s) "
-                        f"(>= {settings.contact_stale_after_days:.0f}-day "
-                        "stale threshold)."
-                    ),
-                )
-            )
+        staleness_signal = _staleness_signal(
+            contact.last_interaction_at,
+            now=now,
+            stale_after_days=settings.contact_stale_after_days,
+            at_risk_after_days=settings.contact_at_risk_after_days,
+        )
+        if staleness_signal is not None:
+            signals.append(staleness_signal)
 
     has_active_risk = any(
         signal.kind == "risk" and signal.severity in ("urgent", "attention")
@@ -231,64 +273,28 @@ def compute_risk_signals_from_aggregates(
     settings = get_settings()
     signals: list[Signal] = []
 
-    if overdue_task_count > 0:
-        signals.append(
-            Signal(
-                code="overdue_commitment",
-                kind="risk",
-                severity="urgent",
-                reason=f"{overdue_task_count} pending task(s) past their due date.",
-            )
-        )
+    overdue_signal = _overdue_commitment_signal(overdue_task_count)
+    if overdue_signal is not None:
+        signals.append(overdue_signal)
 
-    if last_message_direction == MessageDirection.INBOUND and last_message_at is not None:
-        hours_since_last_message = (
-            now - _as_aware(last_message_at, now=now)
-        ).total_seconds() / 3600
-        if hours_since_last_message >= settings.contact_reply_sla_hours:
-            days_since_last_message = hours_since_last_message / 24
-            signals.append(
-                Signal(
-                    code="no_reply_to_inbound",
-                    kind="risk",
-                    severity="attention",
-                    reason=(
-                        f"Last message was inbound {days_since_last_message:.1f} "
-                        "day(s) ago with no reply since."
-                    ),
-                )
-            )
+    no_reply_signal = _no_reply_to_inbound_signal(
+        last_message_direction,
+        last_message_at,
+        now=now,
+        reply_sla_hours=settings.contact_reply_sla_hours,
+    )
+    if no_reply_signal is not None:
+        signals.append(no_reply_signal)
 
     if contact.last_interaction_at is not None:
-        days_since_interaction = (
-            now - _as_aware(contact.last_interaction_at, now=now)
-        ).total_seconds() / 86400
-        if days_since_interaction >= settings.contact_at_risk_after_days:
-            signals.append(
-                Signal(
-                    code="relationship_at_risk",
-                    kind="risk",
-                    severity="urgent",
-                    reason=(
-                        f"No interaction in {days_since_interaction:.0f} day(s) "
-                        f"(>= {settings.contact_at_risk_after_days:.0f}-day "
-                        "at-risk threshold)."
-                    ),
-                )
-            )
-        elif days_since_interaction >= settings.contact_stale_after_days:
-            signals.append(
-                Signal(
-                    code="relationship_stale",
-                    kind="risk",
-                    severity="attention",
-                    reason=(
-                        f"No interaction in {days_since_interaction:.0f} day(s) "
-                        f"(>= {settings.contact_stale_after_days:.0f}-day "
-                        "stale threshold)."
-                    ),
-                )
-            )
+        staleness_signal = _staleness_signal(
+            contact.last_interaction_at,
+            now=now,
+            stale_after_days=settings.contact_stale_after_days,
+            at_risk_after_days=settings.contact_at_risk_after_days,
+        )
+        if staleness_signal is not None:
+            signals.append(staleness_signal)
 
     return signals
 
@@ -346,12 +352,50 @@ def priority_score(signals: list[Signal]) -> float:
     )
 
 
-def suggested_next_action(signals: list[Signal]) -> str:
-    """Fixed template picked by the single highest-priority risk signal
-    present (`_ACTION_PRIORITY`'s fixed order) -- deterministic, plain text,
-    never an executable action (see this module's docstring)."""
-    signal_by_code = {signal.code: signal for signal in signals if signal.kind == "risk"}
+def _highest_priority_signal(signals: list[Signal], *, exclude_info: bool) -> Signal | None:
+    """Shared lookup, fixed order (`_ACTION_PRIORITY`), for both
+    `primary_risk_signal` and `suggested_next_action` -- one source of
+    truth for "which signal matters most" so the two can never silently
+    disagree on ordering. `exclude_info` is the one place they diverge:
+    `no_interaction_ever` (severity="info", a data-quality flag -- see
+    `priority_score`'s zero weight for it) still deserves an honest
+    `suggested_next_action` template, but must never be surfaced as a
+    "primary reason" of relationship risk (see `primary_risk_signal`)."""
+    signal_by_code = {
+        signal.code: signal
+        for signal in signals
+        if signal.kind == "risk" and not (exclude_info and signal.severity == "info")
+    }
     for code in _ACTION_PRIORITY:
         if code in signal_by_code:
-            return _ACTION_TEMPLATES[code]
-    return _NO_ACTION_NEEDED
+            return signal_by_code[code]
+    return None
+
+
+def primary_risk_signal(signals: list[Signal]) -> Signal | None:
+    """The single highest-priority *real* risk signal present (severity
+    "urgent"/"attention" only) -- the one place that decides "which signal
+    is the primary reason" for any caller that needs it (e.g.
+    `GET /contacts/priority`'s `primary_reason`). Added in Release 1.5
+    hardening: a frontend panel had re-implemented its own severity-only
+    ordering to pick a "primary reason" for display, which could silently
+    disagree with this function's code-based ordering on a tie between two
+    equal-severity signals (e.g. `overdue_commitment` vs
+    `relationship_at_risk`, both "urgent") -- the frontend must only
+    render this, never re-derive it. Deliberately excludes info-severity
+    risk signals (`no_interaction_ever`) -- "no history yet" is not a
+    relationship-risk reason (see `test_info_severity_risk_signal_
+    contributes_zero_to_score`)."""
+    return _highest_priority_signal(signals, exclude_info=True)
+
+
+def suggested_next_action(signals: list[Signal]) -> str:
+    """Fixed template picked by the single highest-priority risk signal
+    present -- deterministic, plain text, never an executable action (see
+    this module's docstring). Unlike `primary_risk_signal`, info-severity
+    signals are eligible here: "no interaction recorded yet" is still an
+    honest, useful suggestion even though it isn't a "risk reason"."""
+    signal = _highest_priority_signal(signals, exclude_info=False)
+    if signal is None:
+        return _NO_ACTION_NEEDED
+    return _ACTION_TEMPLATES[signal.code]
