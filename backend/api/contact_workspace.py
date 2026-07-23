@@ -1,4 +1,4 @@
-"""Contact Workspace — Release 1.5, P0-2 + P0-3 (Contact Intelligence).
+"""Contact Workspace — Release 1.5, P0-2 + P0-3 (Contact Intelligence) + P0-4 (Recommendations).
 
 A single aggregate read assembled from data that already exists across
 Notes/Tasks/Calendar/Messages/Memory — the same "one endpoint, several
@@ -26,8 +26,10 @@ aggregate read, no frontend orchestration across multiple requests):
                                  # a future source slots in unchanged
       "current_state": {...},   # open_tasks, upcoming_events,
                                  # pending_follow_ups, important_notes
-      "recommendations": [],    # reserved, empty -- P0-4's job to populate,
-                                 # never fabricated here
+      "recommendations": [...], # deterministic, built from the same
+                                 # signals above (P0-4, see
+                                 # contacts/recommendations.py) -- never
+                                 # independently computed or LLM-decided
     }
 
 `Contact` itself has no owner (a single shared WhatsApp address book, by
@@ -41,11 +43,19 @@ P0-3's deterministic scoring (`contacts/intelligence.py`) fills
 `relationship_status`/`suggested_next_action` from data already loaded
 above -- understanding only, per CONTACT_INTELLIGENCE_ARCHITECTURE.md's
 "Architectural decision": no executable action, no side effect, no
-confirmation flow. `recommendations` stays an empty list -- P0-4 is where
-a recommendation is ever produced, and only ever behind its own
-confirmation step; this endpoint never fabricates one.
+confirmation flow.
+
+P0-4's Recommendation Engine (`contacts/recommendations.py`) consumes
+that same signal list -- never recomputes intelligence, never decides
+priority/confidence independently. A recommendation with
+`confirmation_required=True` names an existing Tool Registry entry in
+`execution_target`; nothing executes until `POST .../recommendations/
+{recommendation_id}/execute` is called, which re-derives the
+recommendation from live data before dispatching (see that endpoint's
+own docstring below) -- this GET never performs a write.
 """
 
+import json
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -53,6 +63,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import agents.tools.productivity  # noqa: F401 -- side effect: registers
+# "create_task" (and its sibling tools) in the Tool Registry. Registration
+# normally happens as a side effect of agent module discovery, which is
+# itself lazy (agents.registry._discover(), triggered by get_agent()) --
+# this endpoint deliberately never runs an agent or calls get_agent()
+# (no Cognitive Planner, no LLM, per the approved P0-4 architecture), so
+# without this explicit import "create_task" would simply never be
+# registered by the time execute_contact_recommendation looks it up.
+from agents.tools.base import ToolContext
+from agents.tools.registry import get_tool
 from auth.dependencies import CurrentUser
 from database.session import get_db
 from memory.manager import memory_manager
@@ -61,7 +81,6 @@ from models.contact import Contact
 from models.message import Message, MessageDirection
 from models.note import Note
 from models.task import Task, TaskStatus
-from repositories.base import SQLAlchemyRepository
 from repositories.contact import ContactRepository
 from repositories.message import MessageRepository
 from repositories.note import NoteRepository
@@ -70,10 +89,14 @@ from contacts.intelligence import (
     Signal,
     compute_risk_signals_from_aggregates,
     compute_signals,
+    primary_risk_signal,
     priority_score,
     relationship_tier,
     suggested_next_action,
 )
+from contacts.recommendations import Recommendation, build_recommendations
+from services.audit import record_log
+from utils import messages as user_messages
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -91,16 +114,6 @@ _TIMELINE_EVENTS_LIMIT = 10
 _FOLLOW_UPS_LIMIT = 5
 
 
-class _CalendarRepo(SQLAlchemyRepository[CalendarEvent]):
-    """No dedicated CalendarEvent repository exists (the internal calendar
-    router uses the generic CRUD factory's anonymous repository) — same
-    precedent already used for this exact model in
-    `agents/tools/productivity.py::_EventRepo` and
-    `observation/builder.py::_EmbeddingRepo`, not a new one."""
-
-    model = CalendarEvent
-
-
 @router.get("/{contact_id}/workspace")
 async def get_contact_workspace(
     contact_id: int, db: DbSession, current_user: CurrentUser
@@ -108,23 +121,12 @@ async def get_contact_workspace(
     contact = await ContactRepository(db).get(contact_id)
     if contact is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Contact not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=user_messages.CONTACT_NOT_FOUND,
         )
 
-    messages = await MessageRepository(db).recent_for_contact(
-        contact.id, limit=_RECENT_MESSAGES_LIMIT
-    )
-    notes = await NoteRepository(db).list(
-        user_id=current_user.id, contact_id=contact.id, limit=_NOTES_LIMIT
-    )
-    open_tasks = await TaskRepository(db).list(
-        user_id=current_user.id,
-        contact_id=contact.id,
-        status=TaskStatus.PENDING,
-        limit=_TASKS_LIMIT,
-    )
-    upcoming_events = await _fetch_upcoming_events(
-        db, current_user.id, contact.id, _UPCOMING_EVENTS_LIMIT
+    messages, notes, open_tasks, upcoming_events = await _load_signal_inputs(
+        db, current_user.id, contact.id
     )
     timeline_events = await _fetch_recent_events(
         db, current_user.id, contact.id, _TIMELINE_EVENTS_LIMIT
@@ -169,10 +171,119 @@ async def get_contact_workspace(
             ],
             "important_notes": [_note_dict(n) for n in important_notes],
         },
-        # Reserved for P0-4 (AI Recommendations, confirmation-gated) --
-        # always empty here; this endpoint never produces a recommendation.
-        "recommendations": [],
+        # Deterministic, built from the same `signals` above -- P0-4.
+        # Never independently computed; execution (if any) only ever
+        # happens via POST .../recommendations/{id}/execute, never here.
+        "recommendations": [
+            _recommendation_dict(r) for r in build_recommendations(contact, signals)
+        ],
     }
+
+
+@router.post("/{contact_id}/recommendations/{recommendation_id}/execute")
+async def execute_contact_recommendation(
+    contact_id: int, recommendation_id: str, db: DbSession, current_user: CurrentUser
+) -> dict:
+    """Confirms and executes one recommendation -- the only write path in
+    this module. Never trusts a client-echoed payload: re-derives the
+    recommendation from live data first (staleness guard -- see
+    CONTACT_INTELLIGENCE_ARCHITECTURE.md and
+    P0_4_RECOMMENDATIONS_ARCHITECTURE.md §3/§13), then dispatches to the
+    Tool Registry (never the Cognitive Planner -- see
+    contacts/recommendations.py's own docstring for why), then records
+    the outcome through the same audit path every other admin action
+    already uses."""
+    contact = await ContactRepository(db).get(contact_id)
+    if contact is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=user_messages.CONTACT_NOT_FOUND,
+        )
+
+    signals = await _recompute_signals(db, current_user.id, contact)
+    recommendations = build_recommendations(contact, signals)
+    recommendation = next(
+        (r for r in recommendations if r.id == recommendation_id), None
+    )
+    if recommendation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=user_messages.RECOMMENDATION_EXPIRED,
+        )
+    if not recommendation.confirmation_required or recommendation.execution_target is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=user_messages.RECOMMENDATION_NOT_EXECUTABLE,
+        )
+
+    tool = get_tool(recommendation.execution_target)
+    if tool is None:
+        logger.error(
+            "Tool %r referenced by recommendation %r is not registered",
+            recommendation.execution_target,
+            recommendation.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=user_messages.tool_not_registered(recommendation.execution_target),
+        )
+
+    tool_context = ToolContext(db=db, user=current_user, contact_id=contact.id)
+    raw_result = await tool.run(tool_context, recommendation.execution_payload or {})
+    result = json.loads(raw_result)
+    ok = "error" not in result
+
+    await record_log(
+        db,
+        source=f"contacts:recommendation.{recommendation.type}",
+        message=f"Recomendação executada: {recommendation.explanation}",
+        level="info" if ok else "warning",
+        payload={
+            "recommendation_id": recommendation.id,
+            "contact_id": contact.id,
+            "supporting_signals": recommendation.supporting_signals,
+            "execution_target": recommendation.execution_target,
+            "result": result,
+        },
+    )
+
+    return {"ok": ok, "result": result}
+
+
+async def _load_signal_inputs(
+    db: AsyncSession, user_id: int, contact_id: int
+) -> tuple[list[Message], list[Note], list[Task], list[CalendarEvent]]:
+    """The four inputs `compute_signals` needs -- shared by
+    `get_contact_workspace` and `_recompute_signals` so the two can never
+    drift on what a signal computation is actually based on."""
+    messages = await MessageRepository(db).recent_for_contact(
+        contact_id, limit=_RECENT_MESSAGES_LIMIT
+    )
+    notes = await NoteRepository(db).list(
+        user_id=user_id, contact_id=contact_id, limit=_NOTES_LIMIT
+    )
+    open_tasks = await TaskRepository(db).list(
+        user_id=user_id,
+        contact_id=contact_id,
+        status=TaskStatus.PENDING,
+        limit=_TASKS_LIMIT,
+    )
+    upcoming_events = await _fetch_upcoming_events(
+        db, user_id, contact_id, _UPCOMING_EVENTS_LIMIT
+    )
+    return messages, notes, open_tasks, upcoming_events
+
+
+async def _recompute_signals(
+    db: AsyncSession, user_id: int, contact: Contact
+) -> list[Signal]:
+    """Re-derives the exact same signals `get_contact_workspace` would show
+    right now -- the execute endpoint's staleness guard (see
+    `execute_contact_recommendation`)."""
+    messages, notes, open_tasks, upcoming_events = await _load_signal_inputs(
+        db, user_id, contact.id
+    )
+    return compute_signals(contact, messages, notes, open_tasks, upcoming_events)
 
 
 @router.get("/priority")
@@ -218,12 +329,21 @@ async def list_contact_priority(
             ),
             now=now,
         )
+        primary_signal = primary_risk_signal(signals)
         ranked.append(
             {
                 "contact_id": contact.id,
                 "name": contact.name,
                 "relationship_status": _relationship_status_dict(contact, signals),
                 "suggested_next_action": suggested_next_action(signals),
+                "last_interaction_at": contact.last_interaction_at,
+                # Release 1.5 hardening: the frontend previously re-derived
+                # this by sorting signals by severity client-side, which
+                # could disagree with the backend's own priority ordering on
+                # a tie (see contacts/intelligence.py::primary_risk_signal).
+                # The frontend must only render this field now, never
+                # recompute it.
+                "primary_reason": primary_signal.reason if primary_signal else None,
             }
         )
 
@@ -307,6 +427,23 @@ def _relationship_status_dict(contact: Contact, signals: list[Signal]) -> dict:
             }
             for signal in signals
         ],
+    }
+
+
+def _recommendation_dict(recommendation: Recommendation) -> dict:
+    return {
+        "id": recommendation.id,
+        "type": recommendation.type,
+        "priority": recommendation.priority,
+        "confidence": recommendation.confidence,
+        "explanation": recommendation.explanation,
+        "reasoning": recommendation.reasoning,
+        "supporting_signals": recommendation.supporting_signals,
+        "confirmation_required": recommendation.confirmation_required,
+        "execution_target": recommendation.execution_target,
+        "execution_payload": recommendation.execution_payload,
+        "created_at": recommendation.created_at,
+        "expires_at": recommendation.expires_at,
     }
 
 

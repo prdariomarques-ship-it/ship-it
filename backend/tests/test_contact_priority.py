@@ -124,6 +124,14 @@ async def test_contacts_are_ranked_by_priority_score_descending(
     assert "overdue_commitment" in {
         s["code"] for s in at_risk_item["relationship_status"]["signals"]
     }
+    # Release 1.5 hardening (FIX 6): this contact has TWO urgent-severity
+    # signals (overdue_commitment AND relationship_at_risk) -- exactly the
+    # tie the frontend's removed severity-only sort could get wrong.
+    # `primary_reason` must reflect the backend's own fixed code-priority
+    # order (contacts/intelligence.py::primary_risk_signal /
+    # _ACTION_PRIORITY), which ranks overdue_commitment first.
+    assert at_risk_item["primary_reason"] is not None
+    assert "pending task" in at_risk_item["primary_reason"]
 
 
 @pytest.mark.asyncio
@@ -159,6 +167,10 @@ async def test_a_contact_with_no_signals_still_appears_in_the_ranking(
     response = await client.get("/api/contacts/priority", headers=headers)
     body = response.json()
     assert any(item["name"] == "Sem sinais" for item in body)
+    no_signals_item = next(item for item in body if item["name"] == "Sem sinais")
+    # No risk signal fired -- primary_reason must be null, not an empty
+    # string or a fabricated placeholder.
+    assert no_signals_item["primary_reason"] is None
     entry = next(item for item in body if item["name"] == "Sem sinais")
     assert entry["relationship_status"]["tier"] == "healthy"
 

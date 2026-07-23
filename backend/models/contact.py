@@ -7,7 +7,14 @@ from database.base import Base, TimestampMixin
 
 
 class Contact(Base, TimestampMixin):
-    """A person Dario OS knows about — the core of the permanent memory."""
+    """A person Dario OS knows about — the core of the permanent memory.
+
+    Deliberately has no `user_id`/owner column -- a single shared address
+    book, correct only because Release 1.x supports exactly one operator.
+    This is a documented, hard architectural constraint, not an oversight:
+    see docs/adr/ADR-0002-single-operator-constraint.md for what must be
+    redesigned (this model included) before any second real user account
+    is ever created."""
 
     __tablename__ = "contacts"
 

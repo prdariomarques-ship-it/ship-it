@@ -68,6 +68,26 @@ merged into one module or one phase.**
 This section supersedes the "Open decision" discussion below, kept
 for its rationale.
 
+## P0-4 status update (2026-07-22) — supersedes the open decision below
+
+P0-4 has since been approved and its backend shipped. Kept here for
+historical accuracy, but two things below turned out different from what
+this document proposed — see `P0_4_RECOMMENDATIONS_ARCHITECTURE.md` for
+the corrected design and its own "what shipped" note:
+
+- **Execution reuses the Tool Registry** (`agents/tools/base.py::Tool`),
+  not `lib/actions.ts`/`ActionWorkflowControl` as this section originally
+  proposed. The Cognitive Planner was also explicitly evaluated and
+  rejected as an execution path (it's LLM-driven interpretation of
+  ambiguous requests; a confirmed recommendation is never ambiguous).
+- **Only the backend shipped in this pass** —
+  `contacts/recommendations.py`, the `recommendations` field on
+  `GET /contacts/{id}/workspace`, and
+  `POST /contacts/{id}/recommendations/{id}/execute`. The frontend
+  (`ActionWorkflowControl` integration on `/contatos/[id]`) is not yet
+  wired — the API returns real recommendations today with no UI
+  consuming them yet.
+
 ## Open decision this document needs signed off before P0-4 starts
 
 `api/contact_workspace.py`'s own docstring (written in P0-2) already

@@ -1,9 +1,10 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { useRef, useState } from "react";
 
 import PageHeader from "@/components/PageHeader";
-import { useApi } from "@/hooks/useApi";
+import { apiFetch, useApi } from "@/hooks/useApi";
 
 interface WorkspaceMessage {
   id: number;
@@ -80,11 +81,26 @@ interface CurrentState {
   important_notes: WorkspaceNote[];
 }
 
+interface Recommendation {
+  id: string;
+  type: "follow_up" | "check_pending_tasks";
+  priority: "urgent" | "attention";
+  confidence: number;
+  explanation: string;
+  reasoning: string[];
+  supporting_signals: string[];
+  confirmation_required: boolean;
+  execution_target: string | null;
+  execution_payload: Record<string, unknown> | null;
+  created_at: string;
+  expires_at: string | null;
+}
+
 interface ContactWorkspace {
   summary: WorkspaceSummary;
   timeline: TimelineEntry[];
   current_state: CurrentState;
-  recommendations: unknown[];
+  recommendations: Recommendation[];
 }
 
 function formatDateTime(value: string | null): string {
@@ -106,11 +122,71 @@ const RELATIONSHIP_TIER_LABELS: Record<RelationshipStatus["tier"], string> = {
   at_risk: "Em risco",
 };
 
+const RECOMMENDATION_PRIORITY_LABELS: Record<Recommendation["priority"], string> = {
+  urgent: "Urgente",
+  attention: "Atenção",
+};
+
 export default function ContactWorkspacePage() {
   const params = useParams<{ id: string }>();
-  const { data, loading, error } = useApi<ContactWorkspace>(
+  const { data, loading, error, reload } = useApi<ContactWorkspace>(
     `/contacts/${params.id}/workspace`
   );
+
+  // Release 1.5 hardening (red-team audit): `executingIdsRef` is the real
+  // guard against double-execution -- a plain ref mutates synchronously,
+  // so a second click (even one that fires before React commits the
+  // disabled-button re-render) sees the id already present and bails out
+  // immediately. `executingIds` (state) exists only to drive the UI
+  // (disabled attribute, "Executando…" label) -- it is never the guard
+  // itself. A Set (not a single id) supports more than one recommendation
+  // executing at once, independently -- a single scalar here previously
+  // meant a second recommendation's click could silently clear the first
+  // one's disabled state while its request was still in flight. Entries are
+  // recommendation ids, always formatted `${contactId}-${type}` by the
+  // backend (contacts/recommendations.py) -- unique across contacts, so a
+  // stale entry left behind by an in-flight request from a previously
+  // viewed contact can never match a different contact's recommendation id.
+  const executingIdsRef = useRef<Set<string>>(new Set());
+  const [executingIds, setExecutingIds] = useState<Set<string>>(new Set());
+  const [executeError, setExecuteError] = useState<string | null>(null);
+
+  // Release 1.5 hardening (red-team audit, FIX 4): `executeError` must
+  // never survive a navigation to a different contact -- a failure on
+  // contact A must not linger as a banner on contact B's page. Adjusted
+  // during render (React's documented pattern for resetting state when a
+  // prop changes -- react.dev/learn/you-might-not-need-an-effect
+  // #adjusting-some-state-when-a-prop-changes) rather than in a
+  // `useEffect`, which would call setState synchronously inside the effect
+  // body and cause an extra, avoidable render pass. Only plain state is
+  // touched here, never the ref (see above) -- mutating a ref during render
+  // is itself unsafe and unnecessary given the id-uniqueness guarantee.
+  const [renderedContactId, setRenderedContactId] = useState(params.id);
+  if (params.id !== renderedContactId) {
+    setRenderedContactId(params.id);
+    setExecutingIds(new Set());
+    setExecuteError(null);
+  }
+
+  async function handleExecute(recommendationId: string) {
+    if (executingIdsRef.current.has(recommendationId)) return;
+    executingIdsRef.current.add(recommendationId);
+    setExecutingIds(new Set(executingIdsRef.current));
+    setExecuteError(null);
+    try {
+      await apiFetch(`/contacts/${params.id}/recommendations/${recommendationId}/execute`, {
+        method: "POST",
+      });
+      reload();
+    } catch (err) {
+      setExecuteError(
+        err instanceof Error ? err.message : "Falha ao executar recomendação"
+      );
+    } finally {
+      executingIdsRef.current.delete(recommendationId);
+      setExecutingIds(new Set(executingIdsRef.current));
+    }
+  }
 
   if (loading) return <p className="muted">Carregando…</p>;
   if (error) return <p className="error">Erro: {error}</p>;
@@ -236,15 +312,36 @@ export default function ContactWorkspacePage() {
         )}
       </div>
 
-      {/* 4. Ações -- só depois do contexto; ainda vazio até o P0-4 existir */}
+      {/* 4. Ações -- recomendações determinísticas do P0-4 (contacts/recommendations.py) */}
       <div className="card">
         <h3 style={{ marginBottom: "0.5rem" }}>Ações sugeridas</h3>
+        {executeError && <p className="error">{executeError}</p>}
         {recommendations.length === 0 ? (
           <p className="muted">Nenhuma recomendação disponível ainda.</p>
         ) : (
           <ul>
-            {recommendations.map((_, index) => (
-              <li key={index} />
+            {recommendations.map((recommendation) => (
+              <li key={recommendation.id} style={{ marginBottom: "0.75rem" }}>
+                <span className="badge">
+                  {RECOMMENDATION_PRIORITY_LABELS[recommendation.priority]}
+                </span>{" "}
+                {recommendation.explanation}{" "}
+                <span className="muted">
+                  (confiança {recommendation.confidence}%)
+                </span>
+                {recommendation.confirmation_required && (
+                  <div style={{ marginTop: "0.35rem" }}>
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={executingIds.has(recommendation.id)}
+                      onClick={() => handleExecute(recommendation.id)}
+                    >
+                      {executingIds.has(recommendation.id) ? "Executando…" : "Executar"}
+                    </button>
+                  </div>
+                )}
+              </li>
             ))}
           </ul>
         )}
