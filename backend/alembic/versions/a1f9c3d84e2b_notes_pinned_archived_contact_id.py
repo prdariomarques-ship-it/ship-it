@@ -39,18 +39,24 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_notes_contact_id"), "notes", ["contact_id"], unique=False
     )
-    op.create_foreign_key(
-        "fk_notes_contact_id_contacts",
-        "notes",
-        "contacts",
-        ["contact_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    # batch_alter_table: SQLite has no ALTER support for adding/dropping a
+    # constraint (op.create_foreign_key/drop_constraint fail outright there
+    # with NotImplementedError) -- batch mode uses SQLite's copy-and-move
+    # strategy instead. On other dialects (Postgres in production) this
+    # renders as the same direct ALTER statement, so behavior is unchanged.
+    with op.batch_alter_table("notes") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_notes_contact_id_contacts",
+            "contacts",
+            ["contact_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_notes_contact_id_contacts", "notes", type_="foreignkey")
+    with op.batch_alter_table("notes") as batch_op:
+        batch_op.drop_constraint("fk_notes_contact_id_contacts", type_="foreignkey")
     op.drop_index(op.f("ix_notes_contact_id"), table_name="notes")
     op.drop_column("notes", "contact_id")
     op.drop_column("notes", "archived")
