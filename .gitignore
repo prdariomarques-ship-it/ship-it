@@ -1,40 +1,28 @@
-# Credenciais e tokens — NUNCA commitar
-.credentials.json
-*.json.backup.*
-
-# Sessões e dados temporários
-sessions/
-shell-snapshots/
-projects/
-backups/
-ide/
-session-env/
-
-# Arquivos de estado interno
-.last-cleanup
-mcp-needs-auth-cache.json
-
-# Python
+```gitignore
+# Python cache files
 __pycache__/
-*.py[cod]
-.venv/
+*.pyc
+*.pyo
+*.pyd
+
+# Dependencies
 venv/
-.pytest_cache/
-.ruff_cache/
-.coverage
-*.db
-
-# Node / Next.js
-node_modules/
-.next/
-next-env.d.ts
-npm-debug.log*
-
-# Ambiente
+.venv/
 .env
 .env.local
+*.env.*
 
-# Editor
-.idea/
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Editors
 .vscode/
-.DS_Store
+.idea/
+
+# Build artifacts
+dist/
+build/
+target/
+```

@@ -35,6 +35,7 @@ from services.audit import record_log
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
 from utils.logging import get_logger
+from webhooks.middleware import WebhookSecurity
 
 logger = get_logger(__name__)
 
@@ -145,6 +146,15 @@ async def whatsapp_webhook(
 ) -> WebhookAck:
     provider = get_whatsapp_provider()
     raw_body = await request.body()
+    
+    # Validação de segurança por provider (nova implementação)
+    if not WebhookSecurity.validate(provider.name, request, raw_body):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid webhook signature for provider {provider.name}"
+        )
+    
+    # Manter validação legacy para compatibilidade (webhook_secret global)
     _verify_webhook_security(provider, raw_body, request.headers)
 
     try:
