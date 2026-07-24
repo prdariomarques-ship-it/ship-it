@@ -129,6 +129,14 @@ class Settings(BaseSettings):
     google_request_max_attempts: int = 3
     google_request_backoff_seconds: float = 1.0
 
+    # Circuit breaker (per Google provider): after this many consecutive
+    # exhausted-retry failures, stop attempting requests for
+    # google_circuit_reset_seconds and fail fast instead -- avoids repeating
+    # the same doomed retry-with-backoff dance for every caller during a
+    # sustained outage. See providers/google_http.py.
+    google_circuit_failure_threshold: int = 5
+    google_circuit_reset_seconds: float = 60.0
+
     evolution_base_url: str = "http://localhost:8080"
     evolution_api_key: str = ""
     evolution_instance: str = "darioos"

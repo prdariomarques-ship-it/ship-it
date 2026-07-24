@@ -88,6 +88,13 @@ GOOGLE_PROVIDER_REQUESTS = Counter(
     labelnames=("provider", "status"),  # status: ok | error
 )
 
+GOOGLE_CIRCUIT_STATE = Gauge(
+    "darioos_google_circuit_state",
+    "Circuit breaker state for a Google provider (0=closed, 1=open) -- see "
+    "providers/google_http.py",
+    labelnames=("provider",),
+)
+
 PIPELINE_STAGE_DURATION = Histogram(
     "darioos_pipeline_stage_duration_seconds",
     "Duration of each Cognitive Pipeline stage",
@@ -203,6 +210,10 @@ def record_whatsapp_session_status(provider: str, connected: bool) -> None:
 
 def record_google_request(provider: str, status: str) -> None:
     GOOGLE_PROVIDER_REQUESTS.labels(provider, status).inc()
+
+
+def record_google_circuit_state(provider: str, state: str) -> None:
+    GOOGLE_CIRCUIT_STATE.labels(provider).set(1 if state == "open" else 0)
 
 
 def record_pipeline_stage(stage: str, duration_seconds: float) -> None:
