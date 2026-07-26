@@ -1,59 +1,64 @@
 # Branch Protection Checklist — OSAI
 
-Este documento contém o checklist manual para configurar Branch Protection
-na branch `master` do repositório `prdariomarques-ship-it/ship-it`.
+> **STATUS: CONFIGURADO VIA API em 2026-07-26**
+>
+> Todas as proteções listadas abaixo foram aplicadas com sucesso via GitHub API.
+> Este documento serve como referência de auditoria.
 
 ---
 
-## Configuração Manual
+## Configuração Aplicada
 
-Acesse: **Settings → Branches → Branch protection rules → Add branch protection rule**
+**Branch**: `master`
+**Método**: GitHub REST API (`PUT /repos/{owner}/{repo}/branches/{branch}/protection`)
+**Data**: 2026-07-26
 
-Branch name pattern: `master`
+### Proteções Ativas
 
-### Proteções Obrigatórias
-
-- [ ] **Require a pull request before merging**
-  - [ ] Require approvals: **1** (mínimo)
-  - [ ] Dismiss stale pull request approvals when new commits are pushed
-  - [ ] Require review from Code Owners (se CODEOWNERS existir)
-
-- [ ] **Require status checks to pass before merging**
-  - [ ] CI
-  - [ ] All required checks must pass
-
-- [ ] **Do not allow bypassing the above settings**
-
-- [ ] **Require branches to be up to date before merging**
-
-- [ ] **Require conversation resolution before merging**
-
-- [ ] **Require linear history** (squash merge)
-
-### Proteções Adicionais (Recomendadas)
-
-- [ ] **Restrict who can push to matching branches**: apenas mantenedores
-- [ ] **Require signed commits** (se GPG estiver configurado)
-- [ ] **Include administrators** (para garantir que até admins passam pelo processo)
+| Proteção | Status | Configuração |
+|----------|--------|-------------|
+| **Require status checks to pass** | Ativado | CI (strict mode) |
+| **Require branches to be up to date** | Ativado | Branches devem estar atualizadas |
+| **Require pull request reviews** | Ativado | 1 approval, dismiss stale reviews |
+| **Require code owner reviews** | Ativado | CODEOWNERS obrigatório |
+| **Require last push approval** | Ativado | Re-aprovação após novos commits |
+| **Require conversation resolution** | Ativado | Todos comentários resolvidos |
+| **Require linear history** | Ativado | Squash merge obrigatório |
+| **Enforce for admins** | Ativado | Admins também seguem as regras |
+| **Allow force pushes** | Desativado | Força desativada |
+| **Allow deletions** | Desativado | Deleção desativada |
+| **Block branch creation** | Desativado | Libera criação de novas branches |
 
 ### Merge Strategy
 
-- [ ] **Allow squash merging** (recomendado — mantém histórico linear)
-- [ ] Disallow merge commits
-- [ ] Disallow rebase merging
+| Configuração | Status |
+|-------------|--------|
+| **Squash merge** | Ativado (padrão) |
+| **Merge commit** | Desativado |
+| **Rebase merge** | Desativado |
+| **Auto merge** | Ativado |
+| **Delete branch on merge** | Ativado |
+| **Update branch** | Ativado |
+| **Squash PR title as default** | Ativado |
+| **Squash commit message from PR body** | Ativado |
 
 ---
 
-## Justificativa
+## Verificação
 
-Cada proteção garante que:
+Para verificar a configuração atual:
 
-| Proteção | Justificativa |
-|----------|---------------|
-| PR obrigatório | Revisão de código antes do merge |
-| CI obrigatório | Código testado antes de entrar na branch principal |
-| Approvals | Qualidade garantida por revisão humana |
-| Branches atualizadas | Evita conflitos silenciosos |
-| Conversação resolvida | Nenhum comentário fica sem resposta |
-| Histórico linear | Histórico limpo e auditável |
-| Squash merge | Commits agrupados por feature, não por commit individual |
+```bash
+gh api repos/prdariomarques-ship-it/ship-it/branches/master/protection
+```
+
+Ou via interface: **Settings → Branches → Branch protection rules → master**
+
+---
+
+## Histórico
+
+| Data | Ação | Método |
+|------|------|--------|
+| 2026-07-26 | Branch Protection aplicada | GitHub REST API |
+| 2026-07-26 | Merge strategy configurada | GitHub REST API |
