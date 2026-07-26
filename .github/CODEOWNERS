@@ -1,0 +1,45 @@
+# CODEOWNERS — OSAI (prdariomarques-ship-it/ship-it)
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Rules are evaluated top-to-bottom; the LAST matching rule wins.
+# Every pull request that touches a file covered here will automatically
+# request a review from the listed owner(s).
+
+# Default owner — catches everything not matched below
+* @prdariomarques-ship-it
+
+# Backend (Python / FastAPI / SQLAlchemy)
+/backend/ @prdariomarques-ship-it
+/backend/api/ @prdariomarques-ship-it
+/backend/services/ @prdariomarques-ship-it
+/backend/models/ @prdariomarques-ship-it
+/backend/agents/ @prdariomarques-ship-it
+/backend/providers/ @prdariomarques-ship-it
+
+# Frontend (Next.js / TypeScript / Tailwind)
+/frontend/ @prdariomarques-ship-it
+/frontend/app/ @prdariomarques-ship-it
+/frontend/components/ @prdariomarques-ship-it
+
+# Docker / Infrastructure
+/docker/ @prdariomarques-ship-it
+/docker-compose* @prdariomarques-ship-it
+/Dockerfile* @prdariomarques-ship-it
+
+# GitHub Configuration
+/.github/ @prdariomarques-ship-it
+
+# Documentation
+/docs/ @prdariomarques-ship-it
+
+# CI / Workflows
+/.github/workflows/ @prdariomarques-ship-it
+
+# Tests
+/backend/tests/ @prdariomarques-ship-it
+/frontend/tests/ @prdariomarques-ship-it
+/frontend/e2e/ @prdariomarques-ship-it
+
+# Migrations
+/backend/alembic/ @prdariomarques-ship-it
