@@ -1,8 +1,11 @@
-# Contribuindo com o Dario OS
+# Contribuindo com o OSAI
 
 Guia prático para quem vai mexer no código. Para a arquitetura completa,
 ver `docs/architecture.md` — este documento é o "como fazer X", não o
 "como o sistema funciona por dentro".
+
+Para o fluxo completo de engenharia (Issues, Projects, Milestones, CI/CD,
+Releases), consulte `docs/GITHUB_WORKFLOW.md`.
 
 ## Padrões do projeto
 
@@ -18,6 +21,31 @@ ver `docs/architecture.md` — este documento é o "como fazer X", não o
   um documenta cobertura real.
 - **Alteração mínima e justificada.** Não refatore código não relacionado
   à sua mudança. Não invente abstração para um caso de uso hipotético.
+
+## Fluxo de Trabalho
+
+Toda contribuição segue o fluxo:
+
+```
+Issue → Label → Milestone → Project → Pull Request → CI → Merge
+```
+
+A **Issue** é o contrato de trabalho. Ela deve ser criada a partir de um
+template oficial em `.github/ISSUE_TEMPLATE/`.
+
+Consulte `docs/GITHUB_WORKFLOW.md` para detalhes sobre:
+
+- Lifecycle de Issues e Labels
+- Organização do GitHub Project (Kanban)
+- Processo de Release
+- Branch Protection e Code Review
+
+Consulte `docs/DEVELOPMENT_WORKFLOW.md` para:
+
+- Setup do ambiente
+- Fluxo diário de desenvolvimento
+- Convenções de commit e testes
+- Migrations e troubleshooting
 
 ## Arquitetura em uma frase por camada
 
@@ -134,3 +162,6 @@ alembic revision --autogenerate -m "descrição curta"
 5. Descreva o que mudou e por quê — a maioria dos relatórios de sprint
    deste projeto (`SPRINT5_REPORT.md` e similares) existe justamente para
    que "por quê" nunca precise ser reconstruído por arqueologia de código.
+6. Use o template de PR (`.github/PULL_REQUEST_TEMPLATE/pull_request_template.md`)
+   e preencha todos os campos.
+7. Referencie a Issue correspondente com `Closes #XXX` ou `Fixes #XXX`.
