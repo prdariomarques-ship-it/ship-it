@@ -262,6 +262,11 @@ class Settings(BaseSettings):
         False  # Enable Prometheus metrics reader for tracing
     )
 
+    # Economic Calendar (Release 1.1, CAP-001) — provider-agnostic;
+    # rapidapi is the first vendor, mock is the no-key fallback.
+    economic_calendar_provider: str = "rapidapi"
+    economic_calendar_api_key: str = ""
+
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
 

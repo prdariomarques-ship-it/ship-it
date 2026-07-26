@@ -56,6 +56,7 @@ from services.rate_limit import rate_limiter
 from utils.config import get_settings
 from utils.logging import configure_logging, get_logger
 from webhooks.router import router as webhooks_router
+from api.economic_calendar_router import router as economic_calendar_router
 from workflows.router import router as workflows_router
 
 logger = get_logger(__name__)
@@ -257,6 +258,7 @@ def create_app() -> FastAPI:
     app.include_router(gcontacts_router, prefix=prefix)
     app.include_router(gdrive_router, prefix=prefix)
     app.include_router(admin_router, prefix=prefix)
+    app.include_router(economic_calendar_router, prefix=prefix)
 
     return app
 
