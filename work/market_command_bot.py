@@ -238,8 +238,8 @@ def main() -> int:
     token = env.get("TELEGRAM_BOT_TOKEN")
     allowed_chat = env.get("TELEGRAM_CHAT_ID")
     if not token:
-        log("Telegram comandos: erro - token ausente.")
-        return 1
+        log("Telegram comandos: poller ignorado - configure TELEGRAM_BOT_TOKEN nos secrets do repositorio.")
+        return 0
 
     offset = read_offset()
     params = {"timeout": "0"}
