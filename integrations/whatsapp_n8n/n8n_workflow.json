@@ -1,0 +1,160 @@
+{
+  "name": "WhatsApp Executive Summary",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-executive-summary",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "whatsapp-executive-summary",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1",
+          "name": "WhatsApp Summary API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and unpack the incoming payload\nconst body = $input.first().json.body ?? $input.first().json;\n\nif (!body.event || body.event !== 'whatsapp_executive_summary') {\n  throw new Error('Unexpected event type: ' + body.event);\n}\n\nconst summary = body.summary_markdown ?? '';\nconst stats = body.stats ?? {};\nconst meta = body.metadata ?? {};\nconst generatedAt = body.generated_at ?? new Date().toISOString();\n\n// Build a plain-text version (strip Markdown bold/italic for plain channels)\nconst plainText = summary\n  .replace(/\\*([^*]+)\\*/g, '$1')\n  .replace(/_([^_]+)_/g, '$1');\n\nreturn [{\n  json: {\n    summary_markdown: summary,\n    summary_plain: plainText,\n    stats,\n    meta,\n    generated_at: generatedAt,\n    date_label: new Date(generatedAt).toLocaleDateString('pt-BR', {\n      timeZone: 'America/Sao_Paulo',\n      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'\n    })\n  }\n}];"
+      },
+      "id": "node-transform",
+      "name": "Parse & Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-has-actions",
+              "leftValue": "={{ $json.summary_markdown }}",
+              "rightValue": "Nenhuma ação",
+              "operator": { "type": "string", "operation": "notContains" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-has-actions",
+      "name": "Has actionable content?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"received\", \"messages_processed\": {{ $('Parse & Validate').first().json.stats.total_messages_processed }}, \"generated_at\": \"{{ $('Parse & Validate').first().json.generated_at }}\" }",
+        "options": { "responseCode": 200 }
+      },
+      "id": "node-respond",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"no_actions\", \"generated_at\": \"{{ $('Parse & Validate').first().json.generated_at }}\" }",
+        "options": { "responseCode": 200 }
+      },
+      "id": "node-respond-empty",
+      "name": "Respond 200 (no actions)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 420]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=📋 *Briefing Executivo WhatsApp*\n_{{ $json.date_label }}_\n\n{{ $json.summary_markdown }}\n\n—\n✉️ {{ $json.stats.total_messages_processed }} mensagens · {{ $json.stats.unique_senders }} remetentes",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_notification": false
+        }
+      },
+      "id": "node-telegram",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1120, 200],
+      "credentials": {
+        "telegramApi": {
+          "id": "2",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "mode": "list", "value": "YOUR_GOOGLE_SHEET_ID" },
+        "sheetName": { "mode": "list", "value": "Briefings" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Data": "={{ $json.date_label }}",
+            "Gerado_em": "={{ $json.generated_at }}",
+            "Mensagens": "={{ $json.stats.total_messages_processed }}",
+            "Remetentes": "={{ $json.stats.senders.join(', ') }}",
+            "Resumo": "={{ $json.summary_markdown }}",
+            "Modelo_LLM": "={{ $json.meta.llm_model }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "node-sheets",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1120, 340],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "3",
+          "name": "Google Sheets"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Receiver": {
+      "main": [[{ "node": "Parse & Validate", "type": "main", "index": 0 }]]
+    },
+    "Parse & Validate": {
+      "main": [[{ "node": "Has actionable content?", "type": "main", "index": 0 }]]
+    },
+    "Has actionable content?": {
+      "main": [
+        [
+          { "node": "Respond 200", "type": "main", "index": 0 },
+          { "node": "Send Telegram", "type": "main", "index": 0 },
+          { "node": "Log to Google Sheets", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Respond 200 (no actions)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["whatsapp", "executive-summary", "automation"],
+  "triggerCount": 0,
+  "updatedAt": "2026-08-08T00:00:00.000Z",
+  "versionId": "1"
+}

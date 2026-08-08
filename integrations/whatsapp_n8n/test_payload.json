@@ -1,0 +1,67 @@
+[
+  {
+    "timestamp": "2026-08-08T08:02:00Z",
+    "sender": "Carlos Mendes",
+    "text": "Bom dia!"
+  },
+  {
+    "timestamp": "2026-08-08T08:03:00Z",
+    "sender": "Carlos Mendes",
+    "text": "Dário, preciso de aprovação para fechar o contrato com a Infraco. Valor total de R$ 2.400.000. Deadline para assinatura é 12/08. Sem retorno até amanhã eles cancelam a proposta."
+  },
+  {
+    "timestamp": "2026-08-08T08:10:00Z",
+    "sender": "Ana Paula – Financeiro",
+    "text": "Oi"
+  },
+  {
+    "timestamp": "2026-08-08T08:11:00Z",
+    "sender": "Ana Paula – Financeiro",
+    "text": "Fechamos o mês de julho com margem EBITDA de 18,3%, abaixo do target de 22%. Principal driver foi aumento de 34% no CAC no canal digital. Preciso de sua ok para redireccionar R$ 180k do budget de mídia para inbound."
+  },
+  {
+    "timestamp": "2026-08-08T08:15:00Z",
+    "sender": "Ana Paula – Financeiro",
+    "text": "ok"
+  },
+  {
+    "timestamp": "2026-08-08T08:20:00Z",
+    "sender": "Rodrigo – Tech Lead",
+    "text": "Tudo bem por aí?"
+  },
+  {
+    "timestamp": "2026-08-08T08:21:00Z",
+    "sender": "Rodrigo – Tech Lead",
+    "text": "Identificamos uma vulnerabilidade crítica no endpoint de autenticação (CVE pendente). Já aplicamos o hotfix no staging. Precisamos da sua aprovação para deploy em produção às 14h de hoje. Sem deploy, o ambiente fica exposto."
+  },
+  {
+    "timestamp": "2026-08-08T08:30:00Z",
+    "sender": "Fernanda – RH",
+    "text": "Fernanda aqui. Temos 3 ofertas de emprego para aprovar antes de sexta-feira (10/08): Gerente de Produto (R$ 18k), Engenheiro Sênior (R$ 22k) e Designer UX (R$ 12k). Total de headcount adicional: R$ 52k/mês. Precisa de sua assinatura digital no sistema."
+  },
+  {
+    "timestamp": "2026-08-08T08:45:00Z",
+    "sender": "Marcos – Vendas",
+    "text": "vlw"
+  },
+  {
+    "timestamp": "2026-08-08T08:46:00Z",
+    "sender": "Marcos – Vendas",
+    "text": "Pipeline Q3 em risco. Dos R$ 8,5M em negócios no pipe, R$ 3,2M (38%) estão em stall há mais de 30 dias. Identifiquei que os 5 maiores deals trancados precisam de uma reunião executiva com o cliente. Você consegue participar de pelo menos 2 calls esta semana?"
+  },
+  {
+    "timestamp": "2026-08-08T09:00:00Z",
+    "sender": "Juliana – Jurídico",
+    "text": "Dário, o processo trabalhista referente ao ex-colaborador Xpto entrou em fase de conciliação. O advogado recomenda aceitar acordo de R$ 85.000 para evitar risco de condenação de até R$ 320.000. Precisamos de decisão até 09/08 (amanhã). Qual orientação?"
+  },
+  {
+    "timestamp": "2026-08-08T09:10:00Z",
+    "sender": "Grupo – Board Semanal",
+    "text": "👍"
+  },
+  {
+    "timestamp": "2026-08-08T09:11:00Z",
+    "sender": "Grupo – Board Semanal",
+    "text": "Confirmando: reunião do Board de terça-feira (12/08) foi adiantada para segunda (11/08) às 09h. Pauta inclui revisão do budget Q4 e decisão sobre abertura da filial Porto Alegre (CAPEX estimado R$ 1,2M). Favor confirmar presença."
+  }
+]
