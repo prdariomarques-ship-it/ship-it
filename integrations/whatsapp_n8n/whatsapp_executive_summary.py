@@ -10,6 +10,9 @@ Usage:
     # From a JSON file
     python whatsapp_executive_summary.py --input messages.json
 
+    # From the SQLite buffer (populated by receiver.py)
+    python whatsapp_executive_summary.py --from-buffer
+
     # From stdin (pipe)
     cat messages.json | python whatsapp_executive_summary.py --stdin
 
@@ -18,12 +21,14 @@ Usage:
         --webhook https://your-n8n.example.com/webhook/XXXX
 
 Environment variables (override CLI flags):
-    N8N_WEBHOOK_URL   – full n8n webhook endpoint
-    N8N_API_KEY       – shared-secret header for webhook auth
-    ANTHROPIC_API_KEY – Claude API key  (used when LLM_PROVIDER=anthropic)
-    GEMINI_API_KEY    – Gemini API key  (used when LLM_PROVIDER=gemini)
-    LLM_PROVIDER      – "anthropic" (default) | "gemini"
-    LLM_MODEL         – model override (defaults per provider below)
+    N8N_WEBHOOK_URL     – full n8n webhook endpoint
+    N8N_API_KEY         – shared-secret header for webhook auth
+    ANTHROPIC_API_KEY   – Claude API key  (used when LLM_PROVIDER=anthropic)
+    GEMINI_API_KEY      – Gemini API key  (used when LLM_PROVIDER=gemini)
+    LLM_PROVIDER        – "anthropic" (default) | "gemini"
+    LLM_MODEL           – model override (defaults per provider below)
+    BUFFER_DB_PATH      – SQLite buffer file (used with --from-buffer)
+    BUFFER_WINDOW_HOURS – hours to look back in buffer (default: 8)
 """
 
 from __future__ import annotations
@@ -342,11 +347,30 @@ def parse_args() -> argparse.Namespace:
     src = p.add_mutually_exclusive_group()
     src.add_argument("--input", "-i", metavar="FILE", help="JSON file with raw messages array")
     src.add_argument("--stdin", action="store_true", help="Read JSON from stdin")
+    src.add_argument("--from-buffer", action="store_true", help="Read pending messages from SQLite buffer (populated by receiver.py)")
+    p.add_argument("--window-hours", type=float, metavar="N", help="Hours to look back when using --from-buffer (overrides BUFFER_WINDOW_HOURS)")
     p.add_argument("--webhook", "-w", metavar="URL", help="n8n Webhook URL (overrides env)")
     p.add_argument("--dry-run", action="store_true", help="Generate summary but do NOT call n8n")
     p.add_argument("--mock-llm", action="store_true", help="Use built-in mock summary (no API key needed — for testing)")
     p.add_argument("--output-json", metavar="FILE", help="Write n8n payload to a JSON file instead of (or in addition to) posting")
     return p.parse_args()
+
+
+def _load_from_buffer(window_hours: float | None) -> list[dict]:
+    """Import buffer module lazily to keep standalone usage dependency-free."""
+    try:
+        import buffer as _buf
+    except ImportError:
+        sys.exit("❌  buffer.py not found. Make sure it's in the same directory as this script.")
+
+    _buf.init_db()
+    effective_window = window_hours or _buf.BUFFER_WINDOW_HOURS
+    rows = _buf.get_pending(window_hours=effective_window)
+    print(f"[buffer]  {len(rows)} pending messages in window ({effective_window}h).")
+    return [
+        {"timestamp": r["received_at"], "sender": r["sender"], "text": r["text"]}
+        for r in rows
+    ], rows, _buf, effective_window
 
 
 def main() -> None:
@@ -358,19 +382,30 @@ def main() -> None:
         sys.exit("❌  N8N_WEBHOOK_URL is not set. Pass --webhook or export the env var.")
 
     # --- load messages ---
-    if args.stdin or not args.input:
-        raw_json = sys.stdin.read()
+    _buf_module = None
+    _buf_rows: list[dict] = []
+    _buf_window: float = 0.0
+
+    if args.from_buffer:
+        result = _load_from_buffer(args.window_hours)
+        raw_list, _buf_rows, _buf_module, _buf_window = result
+        if not _buf_rows:
+            print("ℹ️  Buffer is empty for the current time window. Nothing to process.")
+            sys.exit(0)
+        messages = load_messages(raw_list)
     else:
-        with open(args.input, encoding="utf-8") as fh:
-            raw_json = fh.read()
+        if args.stdin or not args.input:
+            raw_json = sys.stdin.read()
+        else:
+            with open(args.input, encoding="utf-8") as fh:
+                raw_json = fh.read()
+        try:
+            raw_data = json.loads(raw_json)
+        except json.JSONDecodeError as exc:
+            sys.exit(f"❌  Invalid JSON input: {exc}")
+        print(f"[load]    Parsing {len(raw_data) if isinstance(raw_data, list) else '?'} raw messages…")
+        messages = load_messages(raw_data)
 
-    try:
-        raw_data = json.loads(raw_json)
-    except json.JSONDecodeError as exc:
-        sys.exit(f"❌  Invalid JSON input: {exc}")
-
-    print(f"[load]    Parsing {len(raw_data) if isinstance(raw_data, list) else '?'} raw messages…")
-    messages = load_messages(raw_data)
     print(f"[filter]  {len(messages)} messages remain after noise removal.")
 
     if not messages:
@@ -402,6 +437,12 @@ def main() -> None:
     else:
         result = post_to_n8n(payload, webhook_url, N8N_API_KEY)
         print(f"[n8n]     Response: {json.dumps(result, ensure_ascii=False)}")
+
+    # --- mark buffer messages as processed (after successful send) ---
+    if _buf_module and _buf_rows and not args.dry_run:
+        _buf_module.mark_processed([r["msg_id"] for r in _buf_rows])
+        _buf_module.log_flush(len(messages), _buf_window, "cli")
+        print(f"[buffer]  Marked {len(_buf_rows)} messages as processed.")
 
 
 if __name__ == "__main__":

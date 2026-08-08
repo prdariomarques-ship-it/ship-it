@@ -1,6 +1,55 @@
 {
-  "name": "WhatsApp Executive Summary",
+  "name": "WhatsApp Executive Summary v2",
   "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 12,18 * * *"
+            }
+          ]
+        },
+        "timezone": "America/Sao_Paulo"
+      },
+      "id": "node-schedule",
+      "name": "Schedule (12h e 18h BRT)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 160],
+      "notes": "Dispara às 12:00 e 18:00 (horário de Brasília). Ajuste o cron para seu fuso."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RECEIVER_BASE_URL }}/api/flush",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.N8N_API_KEY }}" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "trigger", "value": "schedule" }
+          ]
+        },
+        "options": {
+          "timeout": 180000,
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "id": "node-flush",
+      "name": "Flush Buffer (receiver.py)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 160],
+      "notes": "RECEIVER_BASE_URL e N8N_API_KEY devem estar nas variáveis de ambiente do n8n (Settings → Variables)."
+    },
     {
       "parameters": {
         "httpMethod": "POST",
@@ -10,27 +59,28 @@
         "options": {}
       },
       "id": "node-webhook",
-      "name": "Webhook Receiver",
+      "name": "Webhook Manual / Externo",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [240, 300],
+      "position": [240, 380],
       "webhookId": "whatsapp-executive-summary",
       "credentials": {
         "httpHeaderAuth": {
           "id": "1",
           "name": "WhatsApp Summary API Key"
         }
-      }
+      },
+      "notes": "Gatilho alternativo: POST manual ou chamada externa (cron externo, script CLI)."
     },
     {
       "parameters": {
-        "jsCode": "// Validate and unpack the incoming payload\nconst body = $input.first().json.body ?? $input.first().json;\n\nif (!body.event || body.event !== 'whatsapp_executive_summary') {\n  throw new Error('Unexpected event type: ' + body.event);\n}\n\nconst summary = body.summary_markdown ?? '';\nconst stats = body.stats ?? {};\nconst meta = body.metadata ?? {};\nconst generatedAt = body.generated_at ?? new Date().toISOString();\n\n// Build a plain-text version (strip Markdown bold/italic for plain channels)\nconst plainText = summary\n  .replace(/\\*([^*]+)\\*/g, '$1')\n  .replace(/_([^_]+)_/g, '$1');\n\nreturn [{\n  json: {\n    summary_markdown: summary,\n    summary_plain: plainText,\n    stats,\n    meta,\n    generated_at: generatedAt,\n    date_label: new Date(generatedAt).toLocaleDateString('pt-BR', {\n      timeZone: 'America/Sao_Paulo',\n      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'\n    })\n  }\n}];"
+        "jsCode": "// Unifica a saída do Schedule Trigger (via flush) e do Webhook manual.\n// Ambos entregam o mesmo shape de payload.\nconst body = $input.first().json;\n\n// O HTTP Request node aninha a resposta em 'data', o Webhook não.\nconst raw = body.data ?? body.body ?? body;\n\nif (!raw.event || raw.event !== 'whatsapp_executive_summary') {\n  throw new Error('Payload inesperado: event=' + raw.event);\n}\n\nconst summary = raw.summary_markdown ?? '';\nconst stats   = raw.stats    ?? {};\nconst meta    = raw.metadata ?? {};\nconst genAt   = raw.generated_at ?? new Date().toISOString();\n\nconst plainText = summary\n  .replace(/\\*([^*]+)\\*/g, '$1')\n  .replace(/_([^_]+)_/g, '$1');\n\nreturn [{\n  json: {\n    summary_markdown: summary,\n    summary_plain: plainText,\n    stats,\n    meta,\n    generated_at: genAt,\n    date_label: new Date(genAt).toLocaleDateString('pt-BR', {\n      timeZone: 'America/Sao_Paulo',\n      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'\n    })\n  }\n}];"
       },
       "id": "node-transform",
       "name": "Parse & Validate",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [700, 270]
     },
     {
       "parameters": {
@@ -40,8 +90,14 @@
             {
               "id": "cond-has-actions",
               "leftValue": "={{ $json.summary_markdown }}",
-              "rightValue": "Nenhuma ação",
+              "rightValue": "Nenhuma",
               "operator": { "type": "string", "operation": "notContains" }
+            },
+            {
+              "id": "cond-not-empty-buffer",
+              "leftValue": "={{ $json.stats.total_messages_processed }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
             }
           ],
           "combinator": "and"
@@ -49,39 +105,28 @@
         "options": {}
       },
       "id": "node-has-actions",
-      "name": "Has actionable content?",
+      "name": "Tem conteúdo acionável?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [920, 270]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={ \"status\": \"received\", \"messages_processed\": {{ $('Parse & Validate').first().json.stats.total_messages_processed }}, \"generated_at\": \"{{ $('Parse & Validate').first().json.generated_at }}\" }",
+        "responseBody": "={{ JSON.stringify({ status: 'received', messages_processed: $('Parse & Validate').first().json.stats.total_messages_processed, generated_at: $('Parse & Validate').first().json.generated_at }) }}",
         "options": { "responseCode": 200 }
       },
       "id": "node-respond",
-      "name": "Respond 200",
+      "name": "Respond 200 (webhook path)",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [900, 200]
+      "position": [1140, 160],
+      "notes": "Só executado quando o Webhook Manual aciona o fluxo."
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={ \"status\": \"no_actions\", \"generated_at\": \"{{ $('Parse & Validate').first().json.generated_at }}\" }",
-        "options": { "responseCode": 200 }
-      },
-      "id": "node-respond-empty",
-      "name": "Respond 200 (no actions)",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [900, 420]
-    },
-    {
-      "parameters": {
-        "chatId": "YOUR_TELEGRAM_CHAT_ID",
-        "text": "=📋 *Briefing Executivo WhatsApp*\n_{{ $json.date_label }}_\n\n{{ $json.summary_markdown }}\n\n—\n✉️ {{ $json.stats.total_messages_processed }} mensagens · {{ $json.stats.unique_senders }} remetentes",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=📋 *Briefing Executivo WhatsApp*\n_{{ $json.date_label }}_\n\n{{ $json.summary_markdown }}\n\n—\n✉️ {{ $json.stats.total_messages_processed }} mensagens · {{ $json.stats.unique_senders }} remetentes · _{{ $json.meta.trigger ?? 'manual' }}_",
         "additionalFields": {
           "parse_mode": "Markdown",
           "disable_notification": false
@@ -91,28 +136,30 @@
       "name": "Send Telegram",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1120, 200],
+      "position": [1140, 320],
       "credentials": {
         "telegramApi": {
           "id": "2",
           "name": "Telegram Bot"
         }
-      }
+      },
+      "notes": "TELEGRAM_CHAT_ID deve estar nas variáveis de ambiente do n8n."
     },
     {
       "parameters": {
         "operation": "appendOrUpdate",
-        "documentId": { "mode": "list", "value": "YOUR_GOOGLE_SHEET_ID" },
+        "documentId": { "mode": "list", "value": "={{ $env.GOOGLE_SHEET_ID }}" },
         "sheetName": { "mode": "list", "value": "Briefings" },
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "Data": "={{ $json.date_label }}",
-            "Gerado_em": "={{ $json.generated_at }}",
-            "Mensagens": "={{ $json.stats.total_messages_processed }}",
-            "Remetentes": "={{ $json.stats.senders.join(', ') }}",
-            "Resumo": "={{ $json.summary_markdown }}",
-            "Modelo_LLM": "={{ $json.meta.llm_model }}"
+            "Data":        "={{ $json.date_label }}",
+            "Gerado_em":   "={{ $json.generated_at }}",
+            "Mensagens":   "={{ $json.stats.total_messages_processed }}",
+            "Remetentes":  "={{ $json.stats.senders.join(', ') }}",
+            "Resumo":      "={{ $json.summary_markdown }}",
+            "Modelo_LLM":  "={{ $json.meta.llm_model }}",
+            "Trigger":     "={{ $json.meta.trigger ?? 'manual' }}"
           }
         },
         "options": {}
@@ -121,40 +168,62 @@
       "name": "Log to Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1120, 340],
+      "position": [1140, 480],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "3",
           "name": "Google Sheets"
         }
-      }
+      },
+      "notes": "GOOGLE_SHEET_ID deve estar nas variáveis de ambiente do n8n."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"no_actions\", \"generated_at\": \"{{ $('Parse & Validate').first().json.generated_at }}\" }",
+        "options": { "responseCode": 200 }
+      },
+      "id": "node-respond-empty",
+      "name": "Respond 200 (sem ações)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1140, 640]
     }
   ],
   "connections": {
-    "Webhook Receiver": {
+    "Schedule (12h e 18h BRT)": {
+      "main": [[{ "node": "Flush Buffer (receiver.py)", "type": "main", "index": 0 }]]
+    },
+    "Flush Buffer (receiver.py)": {
+      "main": [[{ "node": "Parse & Validate", "type": "main", "index": 0 }]]
+    },
+    "Webhook Manual / Externo": {
       "main": [[{ "node": "Parse & Validate", "type": "main", "index": 0 }]]
     },
     "Parse & Validate": {
-      "main": [[{ "node": "Has actionable content?", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Tem conteúdo acionável?", "type": "main", "index": 0 }]]
     },
-    "Has actionable content?": {
+    "Tem conteúdo acionável?": {
       "main": [
         [
-          { "node": "Respond 200", "type": "main", "index": 0 },
-          { "node": "Send Telegram", "type": "main", "index": 0 },
-          { "node": "Log to Google Sheets", "type": "main", "index": 0 }
+          { "node": "Respond 200 (webhook path)", "type": "main", "index": 0 },
+          { "node": "Send Telegram",              "type": "main", "index": 0 },
+          { "node": "Log to Google Sheets",       "type": "main", "index": 0 }
         ],
-        [{ "node": "Respond 200 (no actions)", "type": "main", "index": 0 }]
+        [
+          { "node": "Respond 200 (sem ações)", "type": "main", "index": 0 }
+        ]
       ]
     }
   },
   "pinData": {},
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
   },
   "staticData": null,
-  "tags": ["whatsapp", "executive-summary", "automation"],
+  "tags": ["whatsapp", "executive-summary", "automation", "evolution-api"],
   "triggerCount": 0,
   "updatedAt": "2026-08-08T00:00:00.000Z",
-  "versionId": "1"
+  "versionId": "2"
 }

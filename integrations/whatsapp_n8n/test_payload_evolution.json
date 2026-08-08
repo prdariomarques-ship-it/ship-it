@@ -1,0 +1,288 @@
+[
+  {
+    "_comment": "--- Mensagem de texto simples (chat individual) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511991110001@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F601AA"
+      },
+      "pushName": "Carlos Mendes",
+      "message": {
+        "conversation": "Dário, preciso de aprovação para fechar o contrato com a Infraco. Valor total de R$ 2.400.000. Deadline para assinatura é 12/08. Sem retorno até amanhã eles cancelam a proposta."
+      },
+      "messageType": "conversation",
+      "messageTimestamp": 1754625720,
+      "instanceId": "inst-abc123",
+      "source": "ios"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T08:02:00.000Z",
+    "sender": "5511991110001@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- DUPLICATA intencional (mesmo msg_id) — deve ser descartada ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511991110001@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F601AA"
+      },
+      "pushName": "Carlos Mendes",
+      "message": {
+        "conversation": "Dário, preciso de aprovação para fechar o contrato com a Infraco. Valor total de R$ 2.400.000. Deadline para assinatura é 12/08. Sem retorno até amanhã eles cancelam a proposta."
+      },
+      "messageType": "conversation",
+      "messageTimestamp": 1754625720,
+      "instanceId": "inst-abc123",
+      "source": "ios"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T08:02:05.000Z",
+    "sender": "5511991110001@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Saudação informal (deve ser filtrada pelo noise filter) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511992220002@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60200"
+      },
+      "pushName": "Ana Paula – Financeiro",
+      "message": { "conversation": "Oi" },
+      "messageType": "conversation",
+      "messageTimestamp": 1754626200,
+      "instanceId": "inst-abc123",
+      "source": "android"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T08:10:00.000Z",
+    "sender": "5511992220002@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Mensagem de texto estendida (extendedTextMessage) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511992220002@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60201"
+      },
+      "pushName": "Ana Paula – Financeiro",
+      "message": {
+        "extendedTextMessage": {
+          "text": "Fechamos o mês de julho com margem EBITDA de 18,3%, abaixo do target de 22%. Principal driver foi aumento de 34% no CAC no canal digital. Preciso de sua ok para redirecionar R$ 180k do budget de mídia para inbound."
+        }
+      },
+      "messageType": "extendedTextMessage",
+      "messageTimestamp": 1754626260,
+      "instanceId": "inst-abc123",
+      "source": "android"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T08:11:00.000Z",
+    "sender": "5511992220002@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Áudio COM transcrição (speechToText via Whisper) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511993330003@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60300"
+      },
+      "pushName": "Rodrigo – Tech Lead",
+      "message": {
+        "audioMessage": {
+          "url": "https://mmg.whatsapp.net/v/audio/fake-url",
+          "mimetype": "audio/ogg; codecs=opus",
+          "seconds": 28,
+          "ptt": true
+        }
+      },
+      "messageType": "audioMessage",
+      "messageTimestamp": 1754626860,
+      "instanceId": "inst-abc123",
+      "source": "ios",
+      "speechToText": "Identificamos uma vulnerabilidade crítica no endpoint de autenticação. CVE ainda pendente de publicação. Já aplicamos o hotfix no staging e testamos. Precisamos da sua aprovação para deploy em produção às 14h de hoje. Sem o deploy o ambiente fica exposto."
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T08:21:00.000Z",
+    "sender": "5511993330003@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Áudio SEM transcrição (Whisper desativado) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511994440004@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60400"
+      },
+      "pushName": "Fernanda – RH",
+      "message": {
+        "audioMessage": {
+          "url": "https://mmg.whatsapp.net/v/audio/fake-url-2",
+          "mimetype": "audio/ogg; codecs=opus",
+          "seconds": 45,
+          "ptt": true
+        }
+      },
+      "messageType": "audioMessage",
+      "messageTimestamp": 1754627400,
+      "instanceId": "inst-abc123",
+      "source": "android"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T08:30:00.000Z",
+    "sender": "5511994440004@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Mensagem de texto do RH (chat individual seguinte) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511994440004@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60401"
+      },
+      "pushName": "Fernanda – RH",
+      "message": {
+        "conversation": "Temos 3 ofertas de emprego para aprovar antes de sexta-feira 10/08: Gerente de Produto R$18k, Engenheiro Sênior R$22k e Designer UX R$12k. Total headcount adicional R$52k/mês. Precisa de sua assinatura digital no sistema."
+      },
+      "messageType": "conversation",
+      "messageTimestamp": 1754627460,
+      "instanceId": "inst-abc123",
+      "source": "android"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T08:31:00.000Z",
+    "sender": "5511994440004@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Mensagem de GRUPO (remoteJid termina em @g.us) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "120363123456789012@g.us",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60500",
+        "participant": "5511995550005@s.whatsapp.net"
+      },
+      "pushName": "Juliana – Jurídico",
+      "message": {
+        "conversation": "Dário, o processo trabalhista referente ao ex-colaborador entrou em fase de conciliação. O advogado recomenda aceitar acordo de R$85.000 para evitar risco de condenação de até R$320.000. Precisamos de decisão até 09/08 (amanhã). Qual orientação?"
+      },
+      "messageType": "conversation",
+      "messageTimestamp": 1754628000,
+      "instanceId": "inst-abc123",
+      "source": "web"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T09:00:00.000Z",
+    "sender": "5511995550005@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Mensagem própria (fromMe: true) — deve ser ignorada ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511991110001@s.whatsapp.net",
+        "fromMe": true,
+        "id": "3EB0A1B2C3D4E5F60600"
+      },
+      "pushName": "Dário Marques",
+      "message": {
+        "conversation": "Ok, vou verificar e te retorno até as 18h."
+      },
+      "messageType": "conversation",
+      "messageTimestamp": 1754628120,
+      "instanceId": "inst-abc123",
+      "source": "ios"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T09:02:00.000Z",
+    "sender": "5511991110001@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Mensagem de vendas (texto longo) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "5511996660006@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60700"
+      },
+      "pushName": "Marcos – Vendas",
+      "message": {
+        "conversation": "Pipeline Q3 em risco. Dos R$8,5M em negócios no pipe, R$3,2M (38%) estão em stall há mais de 30 dias. Os 5 maiores deals trancados precisam de uma reunião executiva com o cliente. Você consegue participar de pelo menos 2 calls esta semana?"
+      },
+      "messageType": "conversation",
+      "messageTimestamp": 1754628360,
+      "instanceId": "inst-abc123",
+      "source": "android"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T09:06:00.000Z",
+    "sender": "5511996660006@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  },
+  {
+    "_comment": "--- Emoji isolado (deve ser filtrado) ---",
+    "event": "messages.upsert",
+    "instance": "dario-main",
+    "data": {
+      "key": {
+        "remoteJid": "120363123456789012@g.us",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F60800",
+        "participant": "5511997770007@s.whatsapp.net"
+      },
+      "pushName": "Pedro",
+      "message": { "conversation": "👍" },
+      "messageType": "conversation",
+      "messageTimestamp": 1754628600,
+      "instanceId": "inst-abc123",
+      "source": "ios"
+    },
+    "destination": "https://meu-servidor.com/webhook/evolution",
+    "date_time": "2026-08-08T09:10:00.000Z",
+    "sender": "5511997770007@s.whatsapp.net",
+    "server_url": "https://evolution-api.example.com",
+    "apikey": "evo-api-key-here"
+  }
+]

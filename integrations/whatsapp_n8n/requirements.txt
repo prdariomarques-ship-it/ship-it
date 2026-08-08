@@ -1,0 +1,6 @@
+# WhatsApp → n8n integration — runtime dependencies
+# Install with: pip install -r integrations/whatsapp_n8n/requirements.txt
+
+fastapi>=0.115,<1          # receiver.py API server
+uvicorn[standard]>=0.32,<1 # ASGI runner for receiver.py
+httpx>=0.27,<1             # outgoing HTTP (LLM + n8n POST)
