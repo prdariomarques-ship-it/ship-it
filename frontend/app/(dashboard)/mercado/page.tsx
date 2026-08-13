@@ -26,10 +26,18 @@ interface MarketEvent {
   payload: Record<string, unknown>;
 }
 
+interface RegimeSignal {
+  dimension: string;
+  regime: string;
+  score: number;
+  threshold: number;
+  computed_at?: string;
+}
+
 const DIMENSION_LABELS: Record<string, string> = {
   commodities: "Commodities",
   liquidity: "Liquidez",
-  risk: "Sentimento de risco",
+  risk_sentiment: "Sentimento de risco",
 };
 
 const SYMBOL_LABELS: Record<string, string> = {
@@ -59,6 +67,7 @@ function formatTimestamp(iso?: string): string {
 export default function MercadoPage() {
   const scoresApi = useApi<{ scores: Score[] }>("/mercado/scores");
   const eventsApi = useApi<{ events: MarketEvent[] }>("/mercado/events");
+  const regimeApi = useApi<{ signals: RegimeSignal[] }>("/mercado/regime");
   const healthApi = useApi<{ backend: string; flowcore: boolean; flowcore_url: string }>(
     "/mercado/health"
   );
@@ -75,6 +84,31 @@ export default function MercadoPage() {
           FlowCore indisponível em {healthApi.data.flowcore_url}. Os dados de
           mercado dependem do FlowCore estar rodando nesta máquina.
         </p>
+      )}
+
+      <h2 className="section-title">Regime atual (SCPX)</h2>
+      {regimeApi.loading && <p className="muted">Carregando regime…</p>}
+      {regimeApi.error && <p className="error">Erro: {regimeApi.error}</p>}
+      {regimeApi.data && (
+        <div className="stat-grid">
+          {regimeApi.data.signals.length === 0 && (
+            <p className="muted">Sem sinais de regime disponíveis.</p>
+          )}
+          {regimeApi.data.signals.map((signal) => (
+            <div key={signal.dimension} className="stat-card market-score-card">
+              <div className="label">
+                {DIMENSION_LABELS[signal.dimension] ?? signal.dimension}
+              </div>
+              <div className="value">{signal.regime ?? "—"}</div>
+              <div className="sub">
+                <span className="z-tag">
+                  score: {formatNumber(signal.score)} · limiar ±{formatNumber(signal.threshold)}
+                </span>
+              </div>
+              <div className="meta">{formatTimestamp(signal.computed_at)}</div>
+            </div>
+          ))}
+        </div>
       )}
 
       <h2 className="section-title">Scores macroeconômicos</h2>

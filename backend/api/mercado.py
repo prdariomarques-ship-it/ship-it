@@ -75,8 +75,10 @@ async def mercado_events() -> dict:
 
 @router.get("/regime")
 async def mercado_regime() -> dict:
-    """Current market regime classification, when computable."""
-    return await _proxy("/api/regime/current", {"regime": None})
+    """Current market regime classification (deterministic z-score
+    threshold rules — same no-network, no-502 property as the other
+    routes). FlowCore exposes it at /api/regime/signals (Sprint 20)."""
+    return await _proxy("/api/regime/signals", {"signals": None})
 
 
 @router.get("/health")
