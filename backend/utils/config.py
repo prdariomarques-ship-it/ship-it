@@ -137,6 +137,14 @@ class Settings(BaseSettings):
     baileys_api_key: str = ""
     baileys_session: str = "darioos"
 
+    # FlowCore market-intelligence engine — the personal agent reaches it via
+    # a REST tool shim (`agents/tools/flowcore_tools.py`), so no shared DB or
+    # runtime dependency. Empty string disables the tools gracefully (they
+    # return structured JSON errors instead of crashing).
+    flowcore_base_url: str = "http://localhost:8080"
+    flowcore_request_max_attempts: int = 3
+    flowcore_request_backoff_seconds: float = 1.0
+
     official_api_base_url: str = "https://graph.facebook.com/v22.0"
     official_access_token: str = ""
     official_phone_number_id: str = ""
