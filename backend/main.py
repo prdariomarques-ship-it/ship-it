@@ -27,6 +27,7 @@ from api.routes import (
     store_router,
     tasks_router,
 )
+from api.mercado import router as mercado_router
 from api.whatsapp import router as whatsapp_router
 from auth.router import router as auth_router
 from chat.router import router as chat_router
@@ -233,6 +234,9 @@ def create_app() -> FastAPI:
     app.include_router(workflows_router, prefix=prefix)
     app.include_router(webhooks_router, prefix=prefix)
     app.include_router(whatsapp_router, prefix=prefix)
+    # Mercado: read-only proxy over the FlowCore market API (scores, events,
+    # regime). Registered next to the other outbound integrations.
+    app.include_router(mercado_router, prefix=prefix)
     app.include_router(jobs_router, prefix=prefix)
     # contact_workspace_router before contacts_router: it now owns
     # GET /contacts/priority (P0-3), a single-segment literal path that
