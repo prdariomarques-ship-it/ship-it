@@ -34,6 +34,27 @@ interface RegimeSignal {
   computed_at?: string;
 }
 
+interface BriefingPoint {
+  lines: string[];
+  generated_at?: string;
+}
+
+interface AlertItem {
+  label: string;
+  severity?: string;
+  detail?: string;
+  fired_at?: string;
+}
+
+interface NewsItem {
+  headline: string;
+  publisher: string;
+  category: string;
+  related_region: string;
+  timestamp: string;
+  link?: string;
+}
+
 const DIMENSION_LABELS: Record<string, string> = {
   commodities: "Commodities",
   liquidity: "Liquidez",
@@ -71,6 +92,9 @@ export default function MercadoPage() {
   const healthApi = useApi<{ backend: string; flowcore: boolean; flowcore_url: string }>(
     "/mercado/health"
   );
+  const briefingApi = useApi<BriefingPoint>("/mercado/briefing");
+  const alertsApi = useApi<{ fired_now: AlertItem[]; history: AlertItem[] }>("/mercado/alerts");
+  const newsApi = useApi<{ items: NewsItem[] }>("/mercado/news");
 
   return (
     <>
@@ -147,6 +171,66 @@ export default function MercadoPage() {
                       .map(([k, v]) => `${k}: ${v} amostras`)
                       .join(" · ")
                   : `janela ${score.window_days}d`}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h2 className="section-title">Briefing diário</h2>
+      {briefingApi.loading && <p className="muted">Carregando briefing…</p>}
+      {briefingApi.error && <p className="error">Erro: {briefingApi.error}</p>}
+      {briefingApi.data && (
+        <div className="briefing-card">
+          {briefingApi.data.lines.map((line, idx) => (
+            <p key={idx} className={idx === 0 ? "briefing-line main" : "briefing-line"}>
+              {line}
+            </p>
+          ))}
+          <div className="meta">{formatTimestamp(briefingApi.data.generated_at)}</div>
+        </div>
+      )}
+
+      <h2 className="section-title">Alertas ativos</h2>
+      {alertsApi.loading && <p className="muted">Carregando alertas…</p>}
+      {alertsApi.error && <p className="error">Erro: {alertsApi.error}</p>}
+      {alertsApi.data && (
+        <div className="events-list">
+          {alertsApi.data.fired_now.length === 0 && (
+            <p className="muted">Nenhum alerta disparado neste momento.</p>
+          )}
+          {alertsApi.data.fired_now.map((alert, idx) => (
+            <div key={idx} className="event-row">
+              <div className="event-main">
+                <span className="event-symbol">{alert.severity ?? "info"}</span>
+                <span className="event-name">{alert.label}</span>
+              </div>
+              <div className="event-meta">
+                {alert.detail ? <span title={alert.detail}>{alert.detail.slice(0, 60)}</span> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h2 className="section-title">Notícias de mercado</h2>
+      {newsApi.loading && <p className="muted">Carregando notícias…</p>}
+      {newsApi.error && <p className="error">Erro: {newsApi.error}</p>}
+      {newsApi.data && (
+        <div className="events-list">
+          {newsApi.data.items.length === 0 && (
+            <p className="muted">Nenhuma notícia disponível no momento.</p>
+          )}
+          {newsApi.data.items.map((item, idx) => (
+            <div key={idx} className="event-row">
+              <div className="event-main">
+                <span className="event-symbol">{item.category}</span>
+                <span className="event-name">{item.headline}</span>
+              </div>
+              <div className="event-meta">
+                <span>{item.related_region}</span>
+                <span>{item.publisher}</span>
+                <span title={item.timestamp}>{formatTimestamp(item.timestamp)}</span>
               </div>
             </div>
           ))}

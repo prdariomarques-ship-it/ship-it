@@ -81,6 +81,51 @@ async def mercado_regime() -> dict:
     return await _proxy("/api/regime/signals", {"signals": None})
 
 
+@router.get("/yield-curve")
+async def mercado_yield_curve() -> dict:
+    """US yield curve (2Y/5Y/10Y/30Y) with shape classification."""
+    return await _proxy("/api/market/yield-curve", {"state": None})
+
+
+@router.get("/fx")
+async def mercado_fx() -> dict:
+    """DXY and major FX pairs with per-pair USD regime."""
+    return await _proxy("/api/market/fx", {"pairs": []})
+
+
+@router.get("/asset-classes")
+async def mercado_asset_classes() -> dict:
+    """Asset-class posture: rate/FX/equities/commodities/volatility."""
+    return await _proxy("/api/market/asset-classes", {"classes": {}})
+
+
+@router.get("/briefing")
+async def mercado_briefing() -> dict:
+    """Daily deterministic market briefing from real numbers."""
+    return await _proxy("/api/market/briefing", {"lines": []})
+
+
+@router.get("/alerts")
+async def mercado_alerts() -> dict:
+    """Currently firing alerts and history."""
+    return await _proxy("/api/market/alerts", {"fired_now": [], "history": []})
+
+
+@router.get("/news")
+async def mercado_news(groups: str = "") -> dict:
+    """Market news with deterministic categorization."""
+    return await _proxy("/api/market/news" + (f"?groups={groups}" if groups else ""),
+                        {"items": []})
+
+
+@router.get("/scores/history")
+async def mercado_scores_history(dimension: str = "") -> dict:
+    """Macro-score history (D-1/D-5/D-20/D-60 trend windows)."""
+    return await _proxy("/api/market/scores/history"
+                        + (f"?dimension={dimension}" if dimension else ""),
+                        {"windows": {}})
+
+
 @router.get("/health")
 async def mercado_health() -> dict:
     """Combined health: Dario OS backend + FlowCore reachability."""
