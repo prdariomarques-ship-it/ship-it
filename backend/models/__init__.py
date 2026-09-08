@@ -14,6 +14,7 @@ from models.log import LogEntry
 from models.message import Message, MessageDirection, MessageMediaType
 from models.note import Note
 from models.password_reset_token import PasswordResetToken
+from models.product import Product
 from models.refresh_token import RefreshToken
 from models.store import StoreCustomer
 from models.task import Task, TaskPriority, TaskStatus
@@ -42,6 +43,7 @@ __all__ = [
     "MessageMediaType",
     "Note",
     "PasswordResetToken",
+    "Product",
     "RefreshToken",
     "StoreCustomer",
     "Task",

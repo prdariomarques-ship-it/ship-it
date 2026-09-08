@@ -13,3 +13,7 @@ class StoreCustomer(Base, TimestampMixin):
     email: Mapped[str | None] = mapped_column(String(255))
     orders: Mapped[list] = mapped_column(JSON, default=list)
     notes: Mapped[str | None] = mapped_column(Text)
+    # Qualificação comercial: "pintor", "lojista" ou "consumidor_final".
+    # Mesma convenção de ChurchMember.role -- string livre, validada em
+    # código (agents/tools/domain.py::_VALID_SEGMENTS), não enum de banco.
+    segment: Mapped[str | None] = mapped_column(String(50), index=True)

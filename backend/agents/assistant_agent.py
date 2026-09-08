@@ -11,8 +11,13 @@ from agents.tools.communication import (
 from agents.tools.domain import (
     add_prayer_request_tool,
     add_store_customer_tool,
+    create_quote_tool,
     list_church_members_tool,
+    list_products_tool,
     list_store_customers_tool,
+    record_order_tool,
+    search_products_tool,
+    update_store_customer_segment_tool,
 )
 from agents.tools.gcalendar import (
     check_google_calendar_availability_tool,
@@ -109,6 +114,11 @@ class AssistantAgent(BaseAgent):
             add_prayer_request_tool,
             list_store_customers_tool,
             add_store_customer_tool,
+            update_store_customer_segment_tool,
+            list_products_tool,
+            search_products_tool,
+            create_quote_tool,
+            record_order_tool,
             search_emails_tool,
             read_email_thread_tool,
             summarize_email_thread_tool,

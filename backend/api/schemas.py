@@ -1,12 +1,15 @@
 """Pydantic schemas for the CRUD resources."""
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from models.message import MessageDirection, MessageMediaType
 from models.task import TaskPriority, TaskStatus
 from services.validation import validate_phone_e164
+
+_STORE_SEGMENTS = ("pintor", "lojista", "consumidor_final")
 
 
 class _Read(BaseModel):
@@ -164,20 +167,31 @@ class ChurchMemberRead(_Read):
 
 
 # --- Store ------------------------------------------------------------------
-class StoreCustomerCreate(_PhoneValidated, BaseModel):
+class _SegmentValidated:
+    @field_validator("segment")
+    @classmethod
+    def _validate_segment(cls, value: str | None) -> str | None:
+        if value is not None and value not in _STORE_SEGMENTS:
+            raise ValueError(f"segment must be one of {_STORE_SEGMENTS}")
+        return value
+
+
+class StoreCustomerCreate(_PhoneValidated, _SegmentValidated, BaseModel):
     name: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     email: EmailStr | None = None
     orders: list = []
     notes: str | None = None
+    segment: str | None = None
 
 
-class StoreCustomerUpdate(_PhoneValidated, BaseModel):
+class StoreCustomerUpdate(_PhoneValidated, _SegmentValidated, BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=32)
     email: EmailStr | None = None
     orders: list | None = None
     notes: str | None = None
+    segment: str | None = None
 
 
 class StoreCustomerRead(_Read):
@@ -186,6 +200,38 @@ class StoreCustomerRead(_Read):
     email: str | None
     orders: list
     notes: str | None
+    segment: str | None
+
+
+# --- Products -----------------------------------------------------------
+class ProductCreate(BaseModel):
+    sku: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=255)
+    category: str | None = Field(default=None, max_length=100)
+    unit: str = Field(default="un", max_length=32)
+    unit_price: Decimal = Field(gt=0, decimal_places=2)
+    stock_quantity: int = Field(default=0, ge=0)
+    active: bool = True
+
+
+class ProductUpdate(BaseModel):
+    sku: str | None = Field(default=None, min_length=1, max_length=64)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    category: str | None = Field(default=None, max_length=100)
+    unit: str | None = Field(default=None, max_length=32)
+    unit_price: Decimal | None = Field(default=None, gt=0, decimal_places=2)
+    stock_quantity: int | None = Field(default=None, ge=0)
+    active: bool | None = None
+
+
+class ProductRead(_Read):
+    sku: str
+    name: str
+    category: str | None
+    unit: str
+    unit_price: Decimal
+    stock_quantity: int
+    active: bool
 
 
 # --- Logs ---------------------------------------------------------------

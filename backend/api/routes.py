@@ -13,6 +13,7 @@ from auth.permissions import require_admin
 from database.session import get_db
 from repositories.church import ChurchMemberRepository
 from repositories.contact import ContactRepository
+from repositories.product import ProductRepository
 from services.cache import cache_service
 from models import (
     CalendarEvent,
@@ -21,6 +22,7 @@ from models import (
     LogEntry,
     Message,
     Note,
+    Product,
     StoreCustomer,
     Task,
     TaskStatus,
@@ -75,6 +77,16 @@ store_router = create_crud_router(
     create_schema=schemas.StoreCustomerCreate,
     update_schema=schemas.StoreCustomerUpdate,
     read_schema=schemas.StoreCustomerRead,
+)
+
+products_router = create_crud_router(
+    model=Product,
+    prefix="/store/products",
+    tag="store",
+    create_schema=schemas.ProductCreate,
+    update_schema=schemas.ProductUpdate,
+    read_schema=schemas.ProductRead,
+    repository_cls=ProductRepository,
 )
 
 
@@ -171,6 +183,7 @@ async def dashboard_summary(db: DbSession, current_user: CurrentUser) -> dict:
         _count(CalendarEvent, CalendarEvent.user_id == current_user.id).label("events"),
         _count(ChurchMember).label("church_members"),
         _count(StoreCustomer).label("store_customers"),
+        _count(Product, Product.active.is_(True)).label("products"),
     )
     summary = dict((await db.execute(statement)).one()._mapping)
     await cache_service.set(cache_key, summary, ttl_seconds=30)

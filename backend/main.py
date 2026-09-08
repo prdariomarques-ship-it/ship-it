@@ -24,6 +24,7 @@ from api.routes import (
     dashboard_router,
     logs_router,
     messages_router,
+    products_router,
     store_router,
     tasks_router,
 )
@@ -250,6 +251,7 @@ def create_app() -> FastAPI:
     app.include_router(notes_router, prefix=prefix)
     app.include_router(church_router, prefix=prefix)
     app.include_router(store_router, prefix=prefix)
+    app.include_router(products_router, prefix=prefix)
     app.include_router(logs_router, prefix=prefix)
     app.include_router(dashboard_router, prefix=prefix)
     app.include_router(mail_router, prefix=prefix)
