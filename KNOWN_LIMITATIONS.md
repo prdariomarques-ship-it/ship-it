@@ -7,17 +7,19 @@ quando (se) cada uma será endereçada, ver `ROADMAP_v2.md`.
 
 ## Integrações externas
 
-- **Retry Google ainda não implementado.** Gmail, Google Calendar, Google
-  Contacts e Google Drive não têm retry/backoff configurável — uma falha
-  transitória de rede ou um 5xx passageiro do Google propaga direto,
-  sem nova tentativa automática.
-- **Circuit Breaker inexistente.** Nenhuma integração externa (Google,
-  LLM, WhatsApp) interrompe automaticamente o tráfego para um provider
+- ~~**Retry Google ainda não implementado.**~~ **Resolvido** desde a v1.3.1
+  (`providers/google_http.py`, commit `8ed3b52`) — Gmail, Google Calendar,
+  Google Contacts e Google Drive já têm retry com backoff exponencial
+  configurável para falhas transitórias.
+- **Circuit Breaker inexistente para LLM/WhatsApp.** Nenhuma dessas duas
+  integrações interrompe automaticamente o tráfego para um provider
   degradado — cada chamada tenta normalmente, mesmo que as últimas N
-  tenham falhado.
-- **`Retry-After` não é respeitado.** Uma resposta 429 de qualquer
-  provider externo é tratada como erro genérico, sem usar o tempo de
-  espera que o próprio serviço informa.
+  tenham falhado. **Google já tem circuit breaker** desde a Release 1.6
+  (M2, `providers/google_http.py`) — este item foi restrito ao que
+  continua sem, não removido por completo.
+- ~~**`Retry-After` não é respeitado.**~~ **Resolvido** desde a v1.3.1
+  (`providers/google_http.py::_backoff_seconds`) — uma resposta 429/503 do
+  Google com header `Retry-After` já sobrepõe o backoff calculado.
 - **Um mailbox Gmail por usuário.** Múltiplas contas Gmail simultâneas
   para o mesmo usuário não são suportadas.
 - **Google Calendar**: sem edição de série de eventos recorrentes; uma
