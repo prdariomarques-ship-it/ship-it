@@ -170,6 +170,20 @@ class Settings(BaseSettings):
     # Loop/flood breaker: max automatic replies per contact per minute.
     auto_reply_max_per_contact_per_minute: int = 6
 
+    # Deployment-scoped agent routing: each WhatsApp number is its own
+    # deployment (separate docker compose stack/backend, see
+    # docker-compose.marquescolor.yml as the template for adding another
+    # one). All deployments share the same image and therefore the same
+    # Agent Registry, so without this setting every number's automatic
+    # planner could route to *any* registered agent (e.g. the personal
+    # number picking the store agent). Comma-separated agent names this
+    # deployment's automatic WhatsApp planner may choose from; empty
+    # (default) keeps every registered agent available, matching prior
+    # behaviour. Never restricts explicit invocation (dashboard,
+    # /api/agents/{name}/run) -- only the LLM-driven routing in
+    # orchestrator.planning.CognitivePlanner.
+    whatsapp_enabled_agents: str = ""
+
     # Job queue
     jobs_enabled: bool = True
     jobs_poll_interval_seconds: float = 2.0

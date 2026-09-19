@@ -5,9 +5,10 @@ import pytest
 
 from agents.registry import list_agents
 from orchestrator.intent import Intent, IntentHypothesis, IntentResult
-from orchestrator.planning import CognitivePlanner, _MAX_PLAN_STEPS
+from orchestrator.planning import CognitivePlanner, _MAX_PLAN_STEPS, _enabled_agent_names
 from orchestrator.priority import Priority, PriorityResult
 from providers.llm.base import LLMProvider, LLMResult, ToolCallRequest
+from utils.config import get_settings
 
 
 class ScriptedLLM(LLMProvider):
@@ -257,3 +258,73 @@ async def test_fallback_plan_has_low_confidence():
         "oi", _intent(Intent.GREETING), _PRIORITY
     )
     assert plan.confidence == 0.3
+
+
+# --- Deployment-scoped agent routing (WHATSAPP_ENABLED_AGENTS) --------------
+# Every WhatsApp number is its own docker compose deployment sharing one
+# backend image/Agent Registry (docker-compose.yml vs
+# docker-compose.marquescolor.yml). Without this scope a number's planner
+# could route to *any* registered agent, e.g. a personal number picking the
+# `store` agent. See utils.config.Settings.whatsapp_enabled_agents.
+def test_enabled_agent_names_defaults_to_full_registry(monkeypatch):
+    monkeypatch.setattr(get_settings(), "whatsapp_enabled_agents", "")
+    all_names = [a.name for a in list_agents()]
+    assert _enabled_agent_names() == all_names
+
+
+def test_enabled_agent_names_narrows_to_the_allowlist(monkeypatch):
+    monkeypatch.setattr(get_settings(), "whatsapp_enabled_agents", "personal, content")
+    assert set(_enabled_agent_names()) == {"personal", "content"}
+
+
+def test_enabled_agent_names_ignores_blank_entries_and_whitespace(monkeypatch):
+    monkeypatch.setattr(get_settings(), "whatsapp_enabled_agents", " personal ,, church ")
+    assert set(_enabled_agent_names()) == {"personal", "church"}
+
+
+def test_enabled_agent_names_degrades_to_full_registry_when_allowlist_matches_nothing(
+    monkeypatch,
+):
+    """A typo'd/renamed agent name in the env var must never leave the
+    deployment with zero plannable agents."""
+    monkeypatch.setattr(get_settings(), "whatsapp_enabled_agents", "nao-existe")
+    all_names = [a.name for a in list_agents()]
+    assert _enabled_agent_names() == all_names
+
+
+@pytest.mark.asyncio
+async def test_scoping_restricts_the_llm_tool_call_path(monkeypatch):
+    """The scoped agent_names list is what's offered to the LLM's create_plan
+    tool -- an out-of-scope agent name coming back from the model must be
+    rejected exactly like an unknown one (falls back to the intent hint)."""
+    monkeypatch.setattr(get_settings(), "whatsapp_enabled_agents", "personal")
+    llm = ScriptedLLM(
+        LLMResult(
+            tool_calls=[
+                ToolCallRequest(
+                    id="c1",
+                    name="create_plan",
+                    arguments={
+                        "steps": [{"objective": "comprar item", "agent": "store"}]
+                    },
+                )
+            ]
+        )
+    )
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "comprar produto", _intent(Intent.STORE), _PRIORITY
+    )
+    # "store" isn't in scope for this deployment, and the STORE intent hint
+    # ("store") is also out of scope, so it degrades further to "assistant"
+    # only if in scope -- here it must land on something within {"personal"}.
+    assert plan.steps[0].agent == "personal"
+
+
+@pytest.mark.asyncio
+async def test_scoping_restricts_the_fallback_path(monkeypatch):
+    monkeypatch.setattr(get_settings(), "whatsapp_enabled_agents", "personal")
+    llm = ScriptedLLM(LLMResult(content="stub, sem tool call"))
+    plan = await CognitivePlanner(llm=llm).create_plan(
+        "marca uma tarefa", _intent(Intent.TASK), _PRIORITY
+    )
+    assert plan.steps[0].agent == "personal"

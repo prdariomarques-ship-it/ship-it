@@ -29,6 +29,7 @@ from orchestrator.intent import Intent, IntentResult
 from orchestrator.priority import PriorityResult
 from providers.llm.base import ChatMessage, LLMProvider, ToolSpec
 from providers.llm.factory import get_llm_provider
+from utils.config import get_settings
 
 _MAX_PLAN_STEPS = 5
 
@@ -73,6 +74,38 @@ class Plan(BaseModel):
     # guess, never a reasoned decision; on the primary path it comes straight
     # from the model's own self-reported confidence in the create_plan call.
     confidence: float = 1.0
+
+
+def _enabled_agent_names() -> list[str]:
+    """Deployment-scoped subset of registered agents the automatic WhatsApp
+    planner may choose from.
+
+    The Agent Registry (`agents.registry.list_agents`) is global to the
+    codebase/image, not to a deployment -- every WhatsApp number runs the
+    same backend image as its own docker compose project (see
+    docker-compose.marquescolor.yml vs docker-compose.yml), so without this
+    scope every number's planner could route to *any* registered agent
+    (e.g. a personal number's message landing on the `store` agent).
+
+    `WHATSAPP_ENABLED_AGENTS` (comma-separated) narrows that per deployment.
+    Empty/unset (default) keeps every registered agent available -- matches
+    behaviour before this setting existed, so existing single-number
+    deployments are unaffected. A misconfigured allowlist (typo, agent
+    renamed/removed) that matches nothing must not brick the pipeline, so it
+    degrades back to the full registry rather than leaving zero agents
+    plannable. This only scopes automatic LLM-driven routing -- explicit
+    invocation (dashboard, /api/agents/{name}/run) is untouched.
+    """
+    all_names = [agent.name for agent in list_agents()]
+    allowed = {
+        name.strip()
+        for name in get_settings().whatsapp_enabled_agents.split(",")
+        if name.strip()
+    }
+    if not allowed:
+        return all_names
+    scoped = [name for name in all_names if name in allowed]
+    return scoped or all_names
 
 
 def _fallback_agent_for_intent(intent: Intent, agent_names: list[str]) -> str:
@@ -154,7 +187,7 @@ class CognitivePlanner:
     async def create_plan(
         self, message: str, intent: IntentResult, priority: PriorityResult
     ) -> Plan:
-        agent_names = [agent.name for agent in list_agents()]
+        agent_names = _enabled_agent_names()
         if not agent_names:
             return Plan(steps=[])
 

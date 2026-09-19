@@ -4,6 +4,7 @@ from agents.tools.base import Tool
 from agents.tools.communication import (
     find_contact_tool,
     search_memory_tool,
+    send_whatsapp_tool,
     store_memory_tool,
     update_contact_preference_tool,
 )
@@ -82,4 +83,5 @@ class StoreAgent(BaseAgent):
             search_memory_tool,
             store_memory_tool,
             update_contact_preference_tool,
+            send_whatsapp_tool,
         ]
