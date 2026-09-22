@@ -6,7 +6,14 @@ async def test_list_agents(client, auth_headers):
     response = await client.get("/api/agents", headers=auth_headers)
     assert response.status_code == 200
     agents = {agent["name"]: agent for agent in response.json()}
-    assert set(agents) == {"personal", "church", "store", "content", "assistant"}
+    assert set(agents) == {
+        "personal",
+        "church",
+        "store",
+        "content",
+        "assistant",
+        "twin",
+    }
     assert "create_task" in agents["personal"]["tools"]
     assert "send_whatsapp_message" in agents["assistant"]["tools"]
 

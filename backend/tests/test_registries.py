@@ -47,9 +47,16 @@ def test_registering_a_different_tool_with_the_same_name_raises():
 
 
 # --- Agent Registry -------------------------------------------------------------
-def test_all_five_business_agents_are_auto_discovered():
+def test_all_business_agents_are_auto_discovered():
     names = {agent.name for agent in list_agents()}
-    assert names == {"personal", "church", "store", "content", "assistant"}
+    assert names == {
+        "personal",
+        "church",
+        "store",
+        "content",
+        "assistant",
+        "twin",
+    }
 
 
 def test_get_agent_unknown_name_raises():

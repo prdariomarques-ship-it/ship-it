@@ -31,7 +31,13 @@ from orchestrator.context_sources import (
 from orchestrator.intent import Intent, IntentResult
 from orchestrator.priority import Priority, PriorityResult
 from providers.llm.base import ChatMessage
-from services.descriptions import describe_calendar_event, describe_goal, describe_task
+from repositories.contact import ContactRepository
+from services.descriptions import (
+    describe_calendar_event,
+    describe_contact_identity,
+    describe_goal,
+    describe_task,
+)
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -114,6 +120,8 @@ class ContextBuilder:
         ]
 
         memories: list[dict] = []
+        memories.extend(await self._gather_contact_identity(db, contact_id))
+
         preferences = await memory_manager.get_preferences(db, contact_id)
         record_memory_lookup("preferences")
         if preferences:
@@ -125,6 +133,25 @@ class ContextBuilder:
             memories.append({"source": "summary", "content": summary})
 
         return history, memories
+
+    async def _gather_contact_identity(
+        self, db: AsyncSession, contact_id: int
+    ) -> list[dict]:
+        """Who the agent is talking to, as saved in the address book -- see
+        `services.descriptions.describe_contact_identity`. Several agent
+        prompts (the Darius Twin manual most explicitly) key their opening
+        behaviour off this being *given*, not fetched on demand via the
+        `find_contact` tool, so this is unconditional context, not an
+        opt-in a prompt has to request."""
+        try:
+            contact = await ContactRepository(db).get(contact_id)
+        except Exception as exc:  # noqa: BLE001 - context is an enhancement, never a requirement
+            logger.warning("Contact identity lookup skipped: %s", exc)
+            return []
+        if contact is None:
+            return []
+        record_memory_lookup("contact")
+        return [{"source": "contact", "content": describe_contact_identity(contact)}]
 
     async def _gather_goals(self, db: AsyncSession, user: User) -> list[dict]:
         try:

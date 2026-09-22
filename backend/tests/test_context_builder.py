@@ -204,6 +204,70 @@ async def test_owner_scoped_sources_are_gathered_even_without_a_contact(
     assert context.history == []  # no contact_id -> no conversation history to load
 
 
+# --- Contact identity (agent prompts, e.g. the Darius Twin manual, assume this
+# is given up front rather than fetched on demand via the find_contact tool) ---
+@pytest.mark.asyncio
+async def test_contact_identity_is_gathered_into_context(session_factory, user, contact):
+    async with session_factory() as session:
+        context = await ContextBuilder().build(
+            session, user, contact.id, "oi", _INTENT, _PRIORITY
+        )
+
+    assert "contact" in _sources(context)
+    identity_entry = next(m for m in context.memories if m["source"] == "contact")
+    assert "Contato Contexto" in identity_entry["content"]
+
+
+@pytest.mark.asyncio
+async def test_contact_identity_includes_categories_when_present(session_factory, user):
+    async with session_factory() as session:
+        categorized = Contact(
+            name="Irmã Erika", phone="5511933334444", categories=["igreja"]
+        )
+        session.add(categorized)
+        await session.commit()
+        await session.refresh(categorized)
+
+    async with session_factory() as session:
+        context = await ContextBuilder().build(
+            session, user, categorized.id, "oi", _INTENT, _PRIORITY
+        )
+
+    identity_entry = next(m for m in context.memories if m["source"] == "contact")
+    assert "Irmã Erika" in identity_entry["content"]
+    assert "igreja" in identity_entry["content"]
+
+
+@pytest.mark.asyncio
+async def test_contact_identity_is_absent_without_a_contact_id(session_factory, user):
+    async with session_factory() as session:
+        context = await ContextBuilder().build(
+            session, user, None, "oi", _INTENT, _PRIORITY
+        )
+
+    assert "contact" not in _sources(context)
+
+
+@pytest.mark.asyncio
+async def test_contact_identity_lookup_failure_does_not_block_context_building(
+    session_factory, contact
+):
+    # Unit-level (not through build()): ContactRepository.get is shared with
+    # memory_manager.get_preferences, which build() also calls for a
+    # contact-scoped message and doesn't itself guard against a raise --
+    # patching the class method globally would make this test exercise that
+    # unrelated call's lack of resilience instead of this one's.
+    with patch(
+        "orchestrator.context.ContactRepository.get",
+        new=AsyncMock(side_effect=RuntimeError("db down")),
+    ):
+        async with session_factory() as session:
+            result = await ContextBuilder()._gather_contact_identity(
+                session, contact.id
+            )
+    assert result == []  # never raises, just skips this source
+
+
 # --- Contact-scoped sources (regression: moved from CognitivePipeline._load_context) --
 @pytest.mark.asyncio
 async def test_short_term_history_and_preferences_are_still_gathered(
