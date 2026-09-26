@@ -73,3 +73,11 @@ async def test_long_term_search_returns_results_from_query_points(_mock_qdrant):
     hits = await memory_manager.long_term_search("atendimento", contact_id=1, limit=5)
     assert len(hits) == 1
     assert hits[0]["content"] == "Prefere atendimento pela manhã"
+
+
+@pytest.mark.asyncio
+async def test_search_and_store_are_off_when_embedding_provider_is_none(monkeypatch):
+    monkeypatch.setattr(memory_service._settings, "embedding_provider", "none")
+    assert await memory_service.search("qualquer coisa") == []
+    with pytest.raises(RuntimeError):
+        await memory_service.store(MagicMock(), content="x", source="agent")

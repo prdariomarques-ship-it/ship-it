@@ -74,7 +74,6 @@ class EmbeddingsNotSupportedError(RuntimeError):
 _PRICING_PER_MILLION_TOKENS: dict[str, tuple[float, float]] = {
     "openai": (0.15, 0.60),  # gpt-4o-mini
     "anthropic": (3.00, 15.00),  # claude-sonnet family
-    "gemini": (0.075, 0.30),  # gemini-2.0-flash
     "glm": (0.0, 0.0),
     "deepseek": (0.0, 0.0),  # not tracked yet — fill in from current list price
     "ollama": (0.0, 0.0),

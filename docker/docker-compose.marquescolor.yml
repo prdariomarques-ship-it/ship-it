@@ -1,0 +1,127 @@
+# Store number deployment (Oficina das Tintas / Marquescolor).
+#
+# Each WhatsApp number is its own stack sharing the same backend image (see
+# WHATSAPP_ENABLED_AGENTS in backend/utils/config.py). This one only routes
+# automatic WhatsApp replies to the `store` agent, with its own Postgres,
+# Redis and Qdrant so store customers never share state with the personal
+# number (docker-compose-evolution.yml).
+#
+# Reads the same docker/.env for shared secrets (LLM keys, JWT, webhook);
+# store-specific values use the MARQUESCOLOR_* variables below.
+#
+#   docker compose -f docker-compose.marquescolor.yml up -d
+#   curl http://localhost:8001/health
+name: darioos-marquescolor
+
+services:
+  backend:
+    build: ../backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      LOG_JSON: "true"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/marquescolor
+      REDIS_URL: redis://redis:6379/0
+      N8N_ENABLED: "false"  # no n8n in this stack
+      QDRANT_URL: http://qdrant:6333
+      # LLM providers (Strategy: openai | anthropic | glm | deepseek | ollama)
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      # Retried once when LLM_PROVIDER raises (outage, 5xx, expired key); empty = off
+      LLM_FALLBACK_PROVIDER: ${LLM_FALLBACK_PROVIDER:-}
+      # "none" switches semantic memory off (e.g. DeepSeek-only, no embeddings key)
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GLM_API_KEY: ${GLM_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      # WhatsApp: the store number is its own Evolution instance
+      WHATSAPP_PROVIDER: evolution
+      EVOLUTION_BASE_URL: ${MARQUESCOLOR_EVOLUTION_BASE_URL:-${EVOLUTION_BASE_URL:-http://evolution-api:8080}}
+      EVOLUTION_API_KEY: ${MARQUESCOLOR_EVOLUTION_API_KEY:-${EVOLUTION_API_KEY:-}}
+      EVOLUTION_INSTANCE: ${MARQUESCOLOR_EVOLUTION_INSTANCE:-marquescolor}
+      WHATSAPP_ENABLED_AGENTS: ${MARQUESCOLOR_WHATSAPP_ENABLED_AGENTS:-store}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      WEBHOOK_SECRET: ${MARQUESCOLOR_WEBHOOK_SECRET:-${WEBHOOK_SECRET:?set WEBHOOK_SECRET in .env}}
+      # WhatsApp auto-reply
+      AUTO_REPLY_ENABLED: ${AUTO_REPLY_ENABLED:-true}
+      AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE: ${AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE:-6}
+      AGENT_RUN_TIMEOUT_SECONDS: ${AGENT_RUN_TIMEOUT_SECONDS:-60}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
+      OTEL_ENABLED: "false"
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    networks:
+      marquescolor:
+      # Shared with docker-compose.evolution-api.yml (webhooks come in here)
+      evolution:
+        aliases: [marquescolor-backend]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dario}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: marquescolor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dario} -d marquescolor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [marquescolor]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks: [marquescolor]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [marquescolor]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+
+networks:
+  marquescolor:
+  evolution:
+    name: evolution
+    external: true

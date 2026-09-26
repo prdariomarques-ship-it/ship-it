@@ -31,7 +31,7 @@ Edite `docker/.env` para configurar o provedor de LLM (`OPENAI_API_KEY`, `ANTHRO
 | Cache / filas / eventos | Redis |
 | Automação | n8n |
 | WhatsApp | OpenWA, Baileys, Evolution API ou WhatsApp Cloud API (plugável) |
-| IA | OpenAI, Anthropic, GLM, Gemini ou Ollama (plugável) |
+| IA | OpenAI, Anthropic, GLM, DeepSeek ou Ollama (plugável) |
 | Autenticação | JWT + Refresh Token rotativo + RBAC |
 | Observabilidade | Logs estruturados, Prometheus, health/readiness |
 | Reverse proxy | Caddy (HTTPS automático) |
@@ -82,7 +82,7 @@ backend/
   gcontacts/      # Rotas OAuth do Google Contacts (admin-only)
   gdrive/         # Rotas OAuth do Google Drive (admin-only)
   providers/
-    llm/          # openai / anthropic / glm / gemini / ollama  (contrato LLMProvider)
+    llm/          # openai / anthropic / glm / deepseek / ollama  (contrato LLMProvider)
     whatsapp/     # openwa / baileys / evolution / official  (contrato WhatsAppProvider)
     mail/         # gmail  (contrato MailProvider) — somente leitura, ver docs/EMAIL.md
     calendar/     # google  (contrato CalendarProvider) — leitura+escrita, ver docs/CALENDAR.md
@@ -229,10 +229,10 @@ Nenhuma outra parte da aplicação muda — rotas, agentes e jobs dependem apena
 | `openai` | ✅ | ✅ (1536 dim, padrão) | |
 | `anthropic` | ✅ | ❌ | Sem API de embeddings; use outro provedor para `EMBEDDING_PROVIDER` |
 | `glm` | ✅ (via endpoint OpenAI-compatible) | ❌ | Dimensão do modelo padrão não bate com a coleção Qdrant configurada |
-| `gemini` | ✅ (REST direto, sem SDK novo) | ✅ (768 dim) | Ajuste `EMBEDDING_DIMENSIONS` se usar para embeddings |
+| `deepseek` | ✅ (via endpoint OpenAI-compatible) | ❌ | Sem API de embeddings; use `openai` ou `EMBEDDING_PROVIDER=none` |
 | `ollama` | ✅ (via endpoint OpenAI-compatible, local) | ❌ | Dimensão varia por modelo local; use outro provedor para embeddings |
 
-Trocar de modelo é só configuração: `LLM_PROVIDER=gemini` (ou `ollama`, `glm`, `anthropic`) — nenhum código muda.
+Trocar de modelo é só configuração: `LLM_PROVIDER=deepseek` (ou `anthropic`, `glm`, `ollama`) — nenhum código muda.
 
 **Troca automática em caso de falha** (Fase 4.2): `LLM_FALLBACK_PROVIDER=<nome>` faz o `AgentExecutor` tentar esse provedor uma vez sempre que `LLM_PROVIDER` levantar uma exceção em vez de simplesmente degradar (ex.: rede fora do ar, chave expirada) — vazio por padrão, comportamento idêntico ao de antes da Fase 4.2.
 

@@ -60,17 +60,20 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     contact_summary_every_n_messages: int = 10
 
-    # LLM providers ("openai", "anthropic", "glm", "deepseek", "gemini" or "ollama")
+    # LLM providers ("openai", "anthropic", "glm", "deepseek" or "ollama")
     llm_provider: str = "openai"
     embedding_provider: str = (
         "openai"  # Anthropic has no embeddings API; keep these separate
     )
+    # EMBEDDING_PROVIDER=none turns semantic memory off entirely (no
+    # memory.embed jobs, search returns nothing) for deployments without an
+    # embeddings-capable key -- e.g. DeepSeek-only.
     # Automatic provider switch (AgentExecutor): when the primary LLM_PROVIDER
     # raises mid-run, retry once with this provider instead. Empty (default)
     # means no fallback — a provider exception propagates, same as before.
     llm_fallback_provider: str = ""
 
-    # Per-call timeout for every LLM provider (openai/anthropic/gemini and
+    # Per-call timeout for every LLM provider (openai/anthropic and
     # their subclasses glm/ollama). Without this, the openai/anthropic SDKs
     # default to a 600s read timeout — longer than jobs_execution_timeout_seconds
     # (240s), so the job-level timeout was the only thing bounding a slow call
@@ -98,11 +101,6 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str = "llama3.1"
-
-    gemini_api_key: str = ""
-    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    gemini_model: str = "gemini-2.0-flash"
-    gemini_embedding_model: str = "text-embedding-004"
 
     # Agents
     agent_max_iterations: int = 6
@@ -163,6 +161,9 @@ class Settings(BaseSettings):
 
     # n8n
     n8n_base_url: str = "http://localhost:5678"
+    # When false, inbound WhatsApp messages are not handed off to the n8n
+    # `whatsapp-inbound` workflow (the built-in auto-reply still runs).
+    n8n_enabled: bool = True
 
     # Inbound webhooks (when set, POST /webhooks/* requires X-Webhook-Token)
     webhook_secret: str = ""

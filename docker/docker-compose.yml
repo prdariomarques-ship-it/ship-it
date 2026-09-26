@@ -11,14 +11,17 @@ services:
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       N8N_BASE_URL: http://n8n:5678
-      # LLM providers (Strategy: openai | anthropic | glm | deepseek | gemini | ollama)
+      N8N_ENABLED: ${N8N_ENABLED:-true}
+      # LLM providers (Strategy: openai | anthropic | glm | deepseek | ollama)
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      # Retried once when LLM_PROVIDER raises (outage, 5xx, expired key); empty = off
+      LLM_FALLBACK_PROVIDER: ${LLM_FALLBACK_PROVIDER:-}
+      # "none" switches semantic memory off (e.g. DeepSeek-only, no embeddings key)
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       # WhatsApp providers (Strategy: openwa | baileys | evolution | official)
       WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-openwa}

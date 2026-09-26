@@ -65,7 +65,7 @@ graph TB
 
     subgraph Providers["Providers (Strategy + Factory)"]
         LLMFactory["LLM Factory"]
-        LLMs["openai · anthropic · glm · gemini · ollama"]
+        LLMs["openai · anthropic · glm · deepseek · ollama"]
         WAFactory["WhatsApp Factory"]
         WAProviders["openwa · baileys · evolution · official"]
     end
@@ -326,7 +326,7 @@ providers/
     openai/     chat completions + tools + embeddings
     anthropic/  messages API + tool_use (sem embeddings — EmbeddingsNotSupportedError)
     glm/        endpoint OpenAI-compatível da Zhipu (reaproveita OpenAIProvider por herança)
-    gemini/     REST direto via httpx — sem SDK novo; function calling + embeddings próprios
+    deepseek/   endpoint OpenAI-compatível da DeepSeek (reaproveita OpenAIProvider por herança; sem embeddings)
     ollama/     endpoint OpenAI-compatível local (reaproveita OpenAIProvider por herança)
   whatsapp/   base.py (WhatsAppProvider, InboundMessage, ConnectionEvent, DeliveryAck)
     openwa/     wa-automate easy-api
@@ -392,8 +392,6 @@ exemplo mínimo, checklist de testes). Resumo arquitetural:
   `api/whatsapp.py`. Essa suíte encontrou e corrigiu 3 bugs reais de robustez
   (OpenWA/Baileys/Evolution derrubavam com `AttributeError` ao receber
   `{"data": null}` — um payload malformado plausível de um gateway real).
-
-Gemini foi implementado com `httpx` puro (já era dependência, usada pelos providers de WhatsApp) em vez do SDK oficial do Google — zero dependência nova. A única particularidade de tradução: Gemini não dá um `id` para cada chamada de função (diferente de OpenAI/Anthropic), então o provider sintetiza um id e mantém um mapa local `id → nome` ao converter a conversa, para devolver o resultado da ferramenta no formato `functionResponse` correto.
 
 ## Email (Gmail) — Sprint 1
 

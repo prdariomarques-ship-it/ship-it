@@ -51,7 +51,9 @@ class ContactMemoryService:
         contacts = ContactRepository(db)
         await contacts.touch_last_interaction(contact, datetime.now(timezone.utc))
 
-        if content.strip():
+        from memory.service import memory_service
+
+        if content.strip() and memory_service.enabled:
             await JobService(db).enqueue(
                 "memory.embed",
                 {"content": content, "source": source, "contact_id": contact.id},

@@ -29,6 +29,11 @@ class MemoryService:
         self._collection_ready = False
 
     @property
+    def enabled(self) -> bool:
+        """False when EMBEDDING_PROVIDER=none: semantic memory is switched off."""
+        return self._settings.embedding_provider != "none"
+
+    @property
     def client(self) -> AsyncQdrantClient:
         if self._client is None:
             self._client = AsyncQdrantClient(url=self._settings.qdrant_url)
@@ -56,6 +61,8 @@ class MemoryService:
         contact_id: int | None = None,
     ) -> Embedding:
         """Embed the content, upsert it into Qdrant and persist its metadata."""
+        if not self.enabled:
+            raise RuntimeError("Semantic memory is disabled (EMBEDDING_PROVIDER=none)")
         await self._ensure_collection()
         vector = await get_embedding_provider().embed(content)
         vector_id = str(uuid.uuid4())
@@ -112,6 +119,8 @@ class MemoryService:
         self, query: str, limit: int = 5, contact_id: int | None = None
     ) -> list[dict]:
         """Semantic search over the memory. Returns content + score, best first."""
+        if not self.enabled:
+            return []
         await self._ensure_collection()
         vector = await get_embedding_provider().embed(query)
 

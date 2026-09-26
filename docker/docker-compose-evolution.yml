@@ -11,20 +11,26 @@ services:
       REDIS_URL: redis://redis:6379/0
       QDRANT_URL: http://qdrant:6333
       N8N_BASE_URL: http://n8n:5678
-      # LLM providers (Strategy: openai | anthropic | glm | deepseek | gemini | ollama)
+      N8N_ENABLED: ${N8N_ENABLED:-true}
+      # LLM providers (Strategy: openai | anthropic | glm | deepseek | ollama)
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      # Retried once when LLM_PROVIDER raises (outage, 5xx, expired key); empty = off
+      LLM_FALLBACK_PROVIDER: ${LLM_FALLBACK_PROVIDER:-}
+      # "none" switches semantic memory off (e.g. DeepSeek-only, no embeddings key)
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GLM_API_KEY: ${GLM_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       # WhatsApp providers (Strategy: evolution)
       WHATSAPP_PROVIDER: evolution
-      EVOLUTION_BASE_URL: ${EVOLUTION_BASE_URL:?set EVOLUTION_BASE_URL in .env}
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
+      EVOLUTION_BASE_URL: ${EVOLUTION_BASE_URL:-http://evolution-api:8080}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-darioos}
+      # Personal number deployment: automatic WhatsApp routing only reaches
+      # the Twin (see docker-compose.marquescolor.yml for the store number)
+      WHATSAPP_ENABLED_AGENTS: ${WHATSAPP_ENABLED_AGENTS:-twin}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set WEBHOOK_SECRET in .env}
       # Gmail (optional)
@@ -60,7 +66,13 @@ services:
         condition: service_started
       jaeger:
         condition: service_started
-    networks: [darioos]
+    ports:
+      - "8000:8000"
+    networks:
+      darioos:
+      # Shared with docker-compose.evolution-api.yml (webhooks come in here)
+      evolution:
+        aliases: [darioos-backend]
     healthcheck:
       test:
         [
@@ -260,3 +272,6 @@ volumes:
 networks:
   darioos:
     driver: bridge
+  evolution:
+    name: evolution
+    external: true

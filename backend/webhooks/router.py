@@ -274,20 +274,21 @@ async def whatsapp_webhook(
     )
 
     jobs = JobService(db)
-    await jobs.enqueue(
-        "workflow.trigger",
-        {
-            "workflow": "whatsapp-inbound",
-            "data": {
-                "contact_id": contact.id,
-                "message_id": message.id,
-                "phone": inbound.phone,
-                "name": contact.name,
-                "body": inbound.text,
-                "media_type": media_type,
+    if get_settings().n8n_enabled:
+        await jobs.enqueue(
+            "workflow.trigger",
+            {
+                "workflow": "whatsapp-inbound",
+                "data": {
+                    "contact_id": contact.id,
+                    "message_id": message.id,
+                    "phone": inbound.phone,
+                    "name": contact.name,
+                    "body": inbound.text,
+                    "media_type": media_type,
+                },
             },
-        },
-    )
+        )
     if summary_due:
         await jobs.enqueue("contact.summarize", {"contact_id": contact.id})
 

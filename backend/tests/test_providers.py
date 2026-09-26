@@ -16,7 +16,6 @@ from providers.llm.base import (
 )
 from providers.llm.deepseek.provider import DeepSeekProvider
 from providers.llm.factory import _build, get_llm_provider
-from providers.llm.gemini.provider import GeminiProvider
 from providers.llm.glm.provider import GLMProvider
 from providers.llm.ollama.provider import OllamaProvider
 from providers.llm.openai.provider import OpenAIProvider
@@ -342,52 +341,6 @@ def test_llm_request_timeout_is_configurable(monkeypatch):
     assert AnthropicProvider(api_key="test-key").client.timeout == 12.5
 
 
-@pytest.mark.asyncio
-async def test_gemini_chat_uses_the_configured_timeout(monkeypatch):
-    settings = get_settings()
-    monkeypatch.setattr(settings, "llm_request_timeout_seconds", 12.5)
-
-    fake_response = MagicMock()
-    fake_response.raise_for_status = MagicMock()
-    fake_response.json = MagicMock(
-        return_value={"candidates": [{"content": {"parts": [{"text": "oi"}]}}]}
-    )
-    fake_client = MagicMock()
-    fake_client.post = AsyncMock(return_value=fake_response)
-    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
-    fake_client.__aexit__ = AsyncMock(return_value=False)
-
-    with patch(
-        "providers.llm.gemini.provider.httpx.AsyncClient", return_value=fake_client
-    ) as mock_async_client:
-        provider = GeminiProvider(api_key="test-key")
-        await provider.chat([ChatMessage(role="user", content="oi")])
-
-    assert mock_async_client.call_args.kwargs["timeout"] == 12.5
-
-
-@pytest.mark.asyncio
-async def test_gemini_embed_uses_the_configured_timeout(monkeypatch):
-    settings = get_settings()
-    monkeypatch.setattr(settings, "llm_request_timeout_seconds", 12.5)
-
-    fake_response = MagicMock()
-    fake_response.raise_for_status = MagicMock()
-    fake_response.json = MagicMock(return_value={"embedding": {"values": [0.1, 0.2]}})
-    fake_client = MagicMock()
-    fake_client.post = AsyncMock(return_value=fake_response)
-    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
-    fake_client.__aexit__ = AsyncMock(return_value=False)
-
-    with patch(
-        "providers.llm.gemini.provider.httpx.AsyncClient", return_value=fake_client
-    ) as mock_async_client:
-        provider = GeminiProvider(api_key="test-key")
-        await provider.embed("texto")
-
-    assert mock_async_client.call_args.kwargs["timeout"] == 12.5
-
-
 # --- Multi-LLM: factory selection -------------------------------------------
 def test_llm_factory_resolves_every_registered_provider():
     for name, expected_cls in (
@@ -395,7 +348,6 @@ def test_llm_factory_resolves_every_registered_provider():
         ("anthropic", AnthropicProvider),
         ("glm", GLMProvider),
         ("deepseek", DeepSeekProvider),
-        ("gemini", GeminiProvider),
         ("ollama", OllamaProvider),
     ):
         assert isinstance(_build(name), expected_cls)
@@ -449,128 +401,6 @@ async def test_ollama_without_configured_base_url_returns_stub():
     provider = OllamaProvider(base_url="")
     result = await provider.chat([ChatMessage(role="user", content="oi")])
     assert result.content == STUB_REPLY
-
-
-# --- Gemini: REST via httpx, no new SDK dependency ---------------------------
-def _mock_httpx_response(json_body: dict) -> MagicMock:
-    response = MagicMock()
-    response.raise_for_status = MagicMock()
-    response.json = MagicMock(return_value=json_body)
-    return response
-
-
-def _patch_httpx_post(response: MagicMock):
-    client = MagicMock()
-    client.post = AsyncMock(return_value=response)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=False)
-    return patch("providers.llm.gemini.provider.httpx.AsyncClient", return_value=client)
-
-
-@pytest.mark.asyncio
-async def test_gemini_disabled_without_api_key_returns_stub():
-    provider = GeminiProvider(api_key="")
-    result = await provider.chat([ChatMessage(role="user", content="oi")])
-    assert result.content == STUB_REPLY
-
-
-@pytest.mark.asyncio
-async def test_gemini_chat_plain_text_reply():
-    provider = GeminiProvider(api_key="test-key")
-    body = {"candidates": [{"content": {"parts": [{"text": "Bom dia!"}]}}]}
-    with _patch_httpx_post(_mock_httpx_response(body)):
-        result = await provider.chat([ChatMessage(role="user", content="oi")])
-    assert result.content == "Bom dia!"
-    assert result.tool_calls == []
-
-
-@pytest.mark.asyncio
-async def test_gemini_chat_returns_function_call():
-    provider = GeminiProvider(api_key="test-key")
-    body = {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [
-                        {
-                            "functionCall": {
-                                "name": "create_task",
-                                "args": {"title": "Comprar pão"},
-                            }
-                        }
-                    ]
-                }
-            }
-        ]
-    }
-    with _patch_httpx_post(_mock_httpx_response(body)):
-        result = await provider.chat(
-            [ChatMessage(role="user", content="crie uma tarefa")],
-            tools=[ToolSpec(name="create_task", description="d", parameters={})],
-        )
-    assert len(result.tool_calls) == 1
-    assert result.tool_calls[0].name == "create_task"
-    assert result.tool_calls[0].arguments == {"title": "Comprar pão"}
-
-
-@pytest.mark.asyncio
-async def test_gemini_tool_result_round_trips_by_synthesized_id():
-    """Gemini has no call id; the provider must track name via its own synthesized id."""
-    provider = GeminiProvider(api_key="test-key")
-    messages = [
-        ChatMessage(role="system", content="prompt"),
-        ChatMessage(role="user", content="crie uma tarefa"),
-        ChatMessage(
-            role="assistant",
-            content="",
-            tool_calls=[
-                ToolCallRequest(
-                    id="gemini_call_0", name="create_task", arguments={"title": "x"}
-                )
-            ],
-        ),
-        ChatMessage(role="tool", content='{"ok": true}', tool_call_id="gemini_call_0"),
-    ]
-    system_instruction, contents = provider._to_gemini_contents(messages)
-    assert system_instruction == {"parts": [{"text": "prompt"}]}
-    tool_result_turn = contents[-1]
-    assert tool_result_turn["role"] == "user"
-    assert tool_result_turn["parts"][0]["functionResponse"]["name"] == "create_task"
-
-
-@pytest.mark.asyncio
-async def test_gemini_embed_returns_vector():
-    provider = GeminiProvider(api_key="test-key")
-    body = {"embedding": {"values": [0.1, 0.2, 0.3]}}
-    with _patch_httpx_post(_mock_httpx_response(body)):
-        vector = await provider.embed("texto")
-    assert vector == [0.1, 0.2, 0.3]
-
-
-@pytest.mark.asyncio
-async def test_gemini_embed_disabled_returns_zero_vector():
-    provider = GeminiProvider(api_key="")
-    vector = await provider.embed("texto")
-    assert vector == [0.0] * len(vector)
-    assert all(value == 0.0 for value in vector)
-
-
-@pytest.mark.asyncio
-async def test_gemini_chat_reports_token_usage():
-    provider = GeminiProvider(api_key="test-key")
-    body = {
-        "candidates": [{"content": {"parts": [{"text": "oi"}]}}],
-        "usageMetadata": {
-            "promptTokenCount": 12,
-            "candidatesTokenCount": 4,
-            "totalTokenCount": 16,
-        },
-    }
-    with _patch_httpx_post(_mock_httpx_response(body)):
-        result = await provider.chat([ChatMessage(role="user", content="oi")])
-    assert result.usage.prompt_tokens == 12
-    assert result.usage.completion_tokens == 4
-    assert result.usage.total_tokens == 16
 
 
 # --- Token usage / cost estimate ---------------------------------------------

@@ -62,7 +62,7 @@ Nenhuma outra mudança de código é necessária — a troca é só configuraç�
 
 ```bash
 cd docker
-# Editar LLM_PROVIDER=<openai|anthropic|glm|gemini|ollama> e a chave
+# Editar LLM_PROVIDER=<openai|anthropic|glm|deepseek|ollama> e a chave
 # correspondente em .env
 docker compose up -d backend
 ```

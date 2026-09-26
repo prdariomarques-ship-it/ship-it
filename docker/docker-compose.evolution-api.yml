@@ -1,0 +1,78 @@
+# Evolution API (WhatsApp gateway) shared by both number deployments.
+#
+# One Evolution server hosts one *instance* per WhatsApp number:
+#   darioos       -> personal number, backend in docker-compose-evolution.yml
+#   marquescolor  -> store number, backend in docker-compose.marquescolor.yml
+#
+# Backends reach it over the shared `evolution` network at
+# http://evolution-api:8080, and it posts webhooks back to them at
+# http://darioos-backend:8000 / http://marquescolor-backend:8000.
+#
+# Start this stack first (it creates the `evolution` network):
+#   docker compose -f docker-compose.evolution-api.yml up -d
+name: evolution-api
+
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    environment:
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:8080}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?set EVOLUTION_DB_PASSWORD in .env}@evolution-postgres:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/0
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+      LOG_LEVEL: ERROR,WARN,INFO
+    ports:
+      # Manager UI / QR pairing: http://localhost:8080/manager
+      - "${EVOLUTION_PORT:-8080}:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_started
+    networks: [evolution]
+
+  evolution-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:?set EVOLUTION_DB_PASSWORD in .env}
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [evolution]
+
+  evolution-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - evolution_redis_data:/data
+    networks: [evolution]
+
+volumes:
+  evolution_instances:
+  evolution_postgres_data:
+  evolution_redis_data:
+
+networks:
+  evolution:
+    name: evolution

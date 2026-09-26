@@ -50,6 +50,28 @@ async def test_webhook_enqueues_workflow_job(client, db_engine):
 
 
 @pytest.mark.asyncio
+async def test_webhook_skips_n8n_and_memory_jobs_when_disabled(
+    client, db_engine, monkeypatch
+):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "n8n_enabled", False)
+    monkeypatch.setattr(get_settings(), "embedding_provider", "none")
+    await client.post(
+        "/api/webhooks/whatsapp",
+        json={"from": "5511933335555@c.us", "body": "oi", "notifyName": "Caio"},
+    )
+
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with factory() as session:
+        jobs = (await session.execute(select(Job))).scalars().all()
+    names = [job.name for job in jobs]
+    assert "workflow.trigger" not in names
+    assert "memory.embed" not in names
+    assert "whatsapp.process_inbound" in names
+
+
+@pytest.mark.asyncio
 async def test_webhook_reuses_existing_contact(client, auth_headers):
     for body in ("primeira", "segunda"):
         await client.post(
