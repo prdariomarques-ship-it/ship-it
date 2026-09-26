@@ -14,6 +14,7 @@ from providers.llm.base import (
     ToolSpec,
     estimate_cost_usd,
 )
+from providers.llm.deepseek.provider import DeepSeekProvider
 from providers.llm.factory import _build, get_llm_provider
 from providers.llm.gemini.provider import GeminiProvider
 from providers.llm.glm.provider import GLMProvider
@@ -318,6 +319,17 @@ def test_glm_inherits_the_configured_timeout():
     assert provider.client.timeout == get_settings().llm_request_timeout_seconds
 
 
+def test_deepseek_inherits_the_configured_timeout():
+    provider = DeepSeekProvider(api_key="test-key")
+    assert provider.client.timeout == get_settings().llm_request_timeout_seconds
+
+
+@pytest.mark.asyncio
+async def test_deepseek_has_no_embeddings():
+    with pytest.raises(EmbeddingsNotSupportedError):
+        await DeepSeekProvider(api_key="x").embed("texto")
+
+
 def test_ollama_inherits_the_configured_timeout():
     provider = OllamaProvider(base_url="http://localhost:11434/v1")
     assert provider.client.timeout == get_settings().llm_request_timeout_seconds
@@ -382,6 +394,7 @@ def test_llm_factory_resolves_every_registered_provider():
         ("openai", OpenAIProvider),
         ("anthropic", AnthropicProvider),
         ("glm", GLMProvider),
+        ("deepseek", DeepSeekProvider),
         ("gemini", GeminiProvider),
         ("ollama", OllamaProvider),
     ):

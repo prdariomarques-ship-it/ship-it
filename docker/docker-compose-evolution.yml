@@ -1,4 +1,4 @@
-name: darioos
+name: darioos-evolution
 
 services:
   backend:
@@ -20,48 +20,35 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
-      # WhatsApp providers (Strategy: openwa | baileys | evolution | official)
-      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-openwa}
-      OPENWA_BASE_URL: http://openwa:8002
-      OPENWA_API_KEY: ${OPENWA_API_KEY:-}
-      # Browser-reachable URL for openwa's QR pairing popup (its own container
-      # port 8002, mapped to the host below) -- deliberately NOT derived from
-      # OPENWA_BASE_URL, which is the backend's internal Docker-network
-      # address and unreachable from a browser. Empty by default: no link is
-      # shown in the dashboard until an operator sets this explicitly.
-      OPENWA_PUBLIC_QR_URL: ${OPENWA_PUBLIC_QR_URL:-}
-      EVOLUTION_BASE_URL: ${EVOLUTION_BASE_URL:-}
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      # WhatsApp providers (Strategy: evolution)
+      WHATSAPP_PROVIDER: evolution
+      EVOLUTION_BASE_URL: ${EVOLUTION_BASE_URL:?set EVOLUTION_BASE_URL in .env}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-darioos}
-      BAILEYS_BASE_URL: ${BAILEYS_BASE_URL:-}
-      BAILEYS_API_KEY: ${BAILEYS_API_KEY:-}
-      OFFICIAL_ACCESS_TOKEN: ${OFFICIAL_ACCESS_TOKEN:-}
-      OFFICIAL_PHONE_NUMBER_ID: ${OFFICIAL_PHONE_NUMBER_ID:-}
-      OFFICIAL_APP_SECRET: ${OFFICIAL_APP_SECRET:-}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set WEBHOOK_SECRET in .env}
-      # Gmail (opcional — só necessário para usar a integração de e-mail; ver docs/EMAIL.md)
+      # Gmail (optional)
       MAIL_PROVIDER: ${MAIL_PROVIDER:-gmail}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       EMAIL_TOKEN_ENCRYPTION_KEY: ${EMAIL_TOKEN_ENCRYPTION_KEY:-}
-      # Google Calendar (opcional — reusa GOOGLE_CLIENT_ID/SECRET acima; ver docs/CALENDAR.md)
+      # Google Calendar (optional)
       CALENDAR_PROVIDER: ${CALENDAR_PROVIDER:-google}
       GOOGLE_CALENDAR_REDIRECT_URI: ${GOOGLE_CALENDAR_REDIRECT_URI:-}
-      # Google Contacts (opcional — reusa GOOGLE_CLIENT_ID/SECRET acima; ver docs/CONTACTS.md)
+      # Google Contacts (optional)
       CONTACTS_PROVIDER: ${CONTACTS_PROVIDER:-google}
       GOOGLE_CONTACTS_REDIRECT_URI: ${GOOGLE_CONTACTS_REDIRECT_URI:-}
-      # Google Drive (opcional — reusa GOOGLE_CLIENT_ID/SECRET acima; ver docs/DRIVE.md)
+      # Google Drive (optional)
       DRIVE_PROVIDER: ${DRIVE_PROVIDER:-google}
       GOOGLE_DRIVE_REDIRECT_URI: ${GOOGLE_DRIVE_REDIRECT_URI:-}
       GDRIVE_MAX_FILE_SIZE_BYTES: ${GDRIVE_MAX_FILE_SIZE_BYTES:-20000000}
-      # WhatsApp end-to-end auto-reply (webhook -> AI Orchestrator -> send)
+      # WhatsApp auto-reply
       AUTO_REPLY_ENABLED: ${AUTO_REPLY_ENABLED:-true}
       AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE: ${AUTO_REPLY_MAX_PER_CONTACT_PER_MINUTE:-6}
       AGENT_RUN_TIMEOUT_SECONDS: ${AGENT_RUN_TIMEOUT_SECONDS:-60}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000}
-      # OpenTelemetry tracing (optional — disabled by default for dev environments without a collector)
+      # OpenTelemetry tracing (optional)
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
     depends_on:
@@ -95,11 +82,6 @@ services:
     depends_on: [backend]
     networks: [darioos]
     healthcheck:
-      # Next.js's standalone server binds to $HOSTNAME (Docker sets this to
-      # the container's own hostname, resolving to its network IP), not to
-      # 127.0.0.1/localhost -- confirmed live, a plain `wget localhost` here
-      # gets connection refused even though the app is up and Caddy reaches
-      # it fine externally (via the container's Docker-network alias).
       test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://$$(hostname):3000/ || exit 1"]
       interval: 10s
       timeout: 5s
@@ -140,11 +122,6 @@ services:
       - qdrant_data:/qdrant/storage
     networks: [darioos]
     healthcheck:
-      # Qdrant's image (Debian-based) has neither wget nor curl (confirmed
-      # live -- same reason scripts/backup.sh routes its own HTTP calls to
-      # Qdrant through the backend container instead); bash's /dev/tcp is
-      # the only dependency-free way to check the port is accepting
-      # connections here.
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
       timeout: 5s
@@ -184,31 +161,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  openwa:
-    build: ./openwa
-    restart: unless-stopped
-    # If you set OPENWA_API_KEY in .env, also append: --key <the same value>
-    command: >-
-      --socket
-      --port 8002
-      --api-host http://openwa:8002
-      --webhook http://backend:8000/api/webhooks/whatsapp
-    ports:
-      - "8002:8002"
-    volumes:
-      - openwa_data:/sessions
-    networks: [darioos]
-    healthcheck:
-      # Reachability only (any HTTP response, even a 404 -- confirmed live
-      # that GET / does return one -- proves the server is up); real
-      # session/business-logic health is what OpenWAProvider.health_check()
-      # already checks at the application level via /health/ready.
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8002/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
   prometheus:
     image: prom/prometheus:v2.45.0
@@ -299,7 +251,6 @@ volumes:
   qdrant_data:
   jaeger_data:
   n8n_data:
-  openwa_data:
   prometheus_data:
   alertmanager_data:
   grafana_data:

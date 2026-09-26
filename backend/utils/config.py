@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     contact_summary_every_n_messages: int = 10
 
-    # LLM providers ("openai", "anthropic" or "glm")
+    # LLM providers ("openai", "anthropic", "glm", "deepseek", "gemini" or "ollama")
     llm_provider: str = "openai"
     embedding_provider: str = (
         "openai"  # Anthropic has no embeddings API; keep these separate
@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     glm_api_key: str = ""
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
     glm_model: str = "glm-4-plus"
+
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
 
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str = "llama3.1"
