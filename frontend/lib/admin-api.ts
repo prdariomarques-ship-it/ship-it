@@ -11,6 +11,7 @@ import type {
   ExecutionEntry,
   ExecutionsPeriod,
   GoogleWorkspaceStatus,
+  JobRead,
   MemoryStats,
   MetricsSnapshot,
   SystemInfo,
@@ -138,6 +139,14 @@ export function useAdminMetrics() {
     queryKey: ["admin", "metrics"],
     queryFn: () => apiFetch<MetricsSnapshot>("/admin/metrics"),
     refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
+
+export function useAdminJobs(limit = 200) {
+  return useQuery({
+    queryKey: ["admin", "jobs", limit],
+    queryFn: () => apiFetch<JobRead[]>(`/jobs?limit=${limit}`),
+    refetchInterval: NORMAL_INTERVAL_MS,
   });
 }
 

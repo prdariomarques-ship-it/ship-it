@@ -129,6 +129,22 @@ export interface UserAdminRead {
   created_at: string;
 }
 
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface JobRead {
+  id: number;
+  name: string;
+  payload: Record<string, unknown>;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  scheduled_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
 export interface WhatsAppStatus {
   provider: string;
   connected: boolean;
