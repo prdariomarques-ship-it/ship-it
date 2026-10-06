@@ -5,7 +5,9 @@ a delay, so the chain keeps itself alive across worker restarts and retries.
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from investments.b3_calendar import is_pregao_now
-from investments.spcx34_monitor import MarketDataError, check_spcx34
+from investments.b3_summary import check_b3_summary, format_b3_summary_message
+from investments.spcx34_monitor import check_spcx34
+from investments.yahoo_finance import MarketDataError
 from jobs.registry import job_handler
 from jobs.service import JobService
 from models.job import JobStatus
@@ -16,6 +18,7 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 SPCX34_JOB_NAME = "market.check_spcx34"
+B3_SUMMARY_JOB_NAME = "market.send_b3_summary"
 
 
 @job_handler(SPCX34_JOB_NAME)
@@ -67,6 +70,44 @@ async def _run_spcx34_check(db: AsyncSession, settings) -> None:
     )
 
 
+@job_handler(B3_SUMMARY_JOB_NAME)
+async def send_b3_summary_job(db: AsyncSession, payload: dict) -> None:
+    """Port of the original FlowCore PMX (@dariozcodebot) feed: IBOVESPA +
+    USD/BRL, sent every check during pregão — a radar, not a threshold alert."""
+    settings = get_settings()
+    try:
+        if settings.market_monitors_enabled and is_pregao_now():
+            await _run_b3_summary(db, settings)
+    finally:
+        if settings.market_monitors_enabled:
+            await JobService(db).enqueue(
+                B3_SUMMARY_JOB_NAME, {}, delay_seconds=settings.market_check_interval_seconds
+            )
+
+
+async def _run_b3_summary(db: AsyncSession, settings) -> None:
+    try:
+        summary = await check_b3_summary()
+    except MarketDataError as exc:
+        logger.warning("B3 summary skipped (no real data): %s", exc)
+        return
+
+    logger.info(
+        "B3 summary: ibovespa=%.0f (%s) usdbrl=%.4f (%s)",
+        summary.ibovespa_points, summary.ibovespa_delta_pct,
+        summary.usdbrl_level, summary.usdbrl_delta_pct,
+    )
+
+    if not settings.market_alert_whatsapp_number:
+        logger.warning("B3 summary ready but MARKET_ALERT_WHATSAPP_NUMBER is not configured — not sent.")
+        return
+
+    await JobService(db).enqueue(
+        "whatsapp.send_text",
+        {"to": settings.market_alert_whatsapp_number, "content": format_b3_summary_message(summary)},
+    )
+
+
 async def seed_market_monitor_jobs(db: AsyncSession) -> None:
     """Enqueue the first run of each monitor if no instance of its chain is
     already queued/running — called once on app startup so restarts never
@@ -75,9 +116,10 @@ async def seed_market_monitor_jobs(db: AsyncSession) -> None:
     if not settings.market_monitors_enabled:
         return
     repository = JobRepository(db)
-    existing = await repository.find_one(name=SPCX34_JOB_NAME, status=JobStatus.QUEUED)
-    if existing is None:
-        existing = await repository.find_one(name=SPCX34_JOB_NAME, status=JobStatus.RUNNING)
-    if existing is None:
-        await JobService(db).enqueue(SPCX34_JOB_NAME, {})
-        logger.info("Seeded market monitor job %s", SPCX34_JOB_NAME)
+    for job_name in (SPCX34_JOB_NAME, B3_SUMMARY_JOB_NAME):
+        existing = await repository.find_one(name=job_name, status=JobStatus.QUEUED)
+        if existing is None:
+            existing = await repository.find_one(name=job_name, status=JobStatus.RUNNING)
+        if existing is None:
+            await JobService(db).enqueue(job_name, {})
+            logger.info("Seeded market monitor job %s", job_name)

@@ -5,7 +5,8 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from investments.b3_calendar import is_pregao_now
-from investments.jobs import SPCX34_JOB_NAME, check_spcx34_job, seed_market_monitor_jobs
+from investments.b3_summary import B3Summary
+from investments.jobs import B3_SUMMARY_JOB_NAME, SPCX34_JOB_NAME, seed_market_monitor_jobs
 from investments.spcx34_monitor import MarketDataError, SPCX34Check, bollinger_upper_band
 from jobs.service import JobService
 from jobs.worker import JobWorker
@@ -148,5 +149,57 @@ async def test_seed_market_monitor_jobs_is_idempotent(session_factory):
         from sqlalchemy import select
         from models.job import Job
 
-        result = await session.execute(select(Job).where(Job.name == SPCX34_JOB_NAME))
-        assert len(result.scalars().all()) == 1
+        for job_name in (SPCX34_JOB_NAME, B3_SUMMARY_JOB_NAME):
+            result = await session.execute(select(Job).where(Job.name == job_name))
+            assert len(result.scalars().all()) == 1
+
+
+# ── send_b3_summary_job (PMX / @dariozcodebot port) ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_b3_summary_job_sends_message_when_number_configured(session_factory, worker, monkeypatch):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "5511999999999")
+
+    async def _fake_check():
+        return B3Summary(ibovespa_points=166934.2, ibovespa_delta_pct=1.23, usdbrl_level=5.4321, usdbrl_delta_pct=-0.5)
+
+    monkeypatch.setattr("investments.jobs.check_b3_summary", _fake_check)
+
+    async with session_factory() as session:
+        await JobService(session).enqueue(B3_SUMMARY_JOB_NAME, {})
+
+    assert await worker.run_once() == 1
+
+    async with session_factory() as session:
+        sent = await JobRepository(session).find_one(name="whatsapp.send_text")
+        assert sent is not None
+        assert sent.payload["to"] == "5511999999999"
+        assert "166.934" in sent.payload["content"]
+        assert "5.4321" in sent.payload["content"]
+
+        rescheduled = await JobRepository(session).find_one(name=B3_SUMMARY_JOB_NAME, status=JobStatus.QUEUED)
+        assert rescheduled is not None
+
+
+@pytest.mark.asyncio
+async def test_b3_summary_job_skips_without_configured_number(session_factory, worker, monkeypatch):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "")
+
+    async def _fake_check():
+        return B3Summary(ibovespa_points=166934.2, ibovespa_delta_pct=1.23, usdbrl_level=5.4321, usdbrl_delta_pct=-0.5)
+
+    monkeypatch.setattr("investments.jobs.check_b3_summary", _fake_check)
+
+    async with session_factory() as session:
+        await JobService(session).enqueue(B3_SUMMARY_JOB_NAME, {})
+
+    assert await worker.run_once() == 1
+
+    async with session_factory() as session:
+        sent = await JobRepository(session).find_one(name="whatsapp.send_text")
+        assert sent is None
