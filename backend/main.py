@@ -5,7 +5,8 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# import jobs.handlers  # noqa: F401 - disabled for development without database
+import investments.jobs  # noqa: F401 - register the market monitor job handlers
+import jobs.handlers  # noqa: F401 - register the built-in job handlers
 from admin.router import router as admin_router
 from agents.router import router as agents_router
 from api.routes import (
@@ -22,10 +23,14 @@ from api.routes import (
 from api.whatsapp import router as whatsapp_router
 from auth.router import router as auth_router
 from chat.router import router as chat_router
+from database.session import async_session_factory
 from gcalendar.router import router as gcalendar_router
 from gcontacts.router import router as gcontacts_router
 from gdrive.router import router as gdrive_router
+from investments.jobs import seed_market_monitor_jobs
+from jobs.handlers import register_event_subscribers
 from jobs.router import router as jobs_router
+from jobs.worker import job_worker
 from mail.router import router as mail_router
 from memory.router import router as memory_router
 from middleware.error_sanitization import ErrorSanitizationMiddleware
@@ -63,13 +68,16 @@ OPENAPI_TAGS = [
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(json_output=settings.log_json)
-    # register_event_subscribers()  # disabled for development without database
-    # if settings.jobs_enabled and settings.environment != "test":
-    #     job_worker.start()
+    register_event_subscribers()
+    if settings.jobs_enabled and settings.environment != "test":
+        job_worker.start()
+        async with async_session_factory() as session:
+            await seed_market_monitor_jobs(session)
+            await session.commit()
     logger.info("%s v%s started (%s)", settings.app_name, settings.app_version, settings.environment)
     yield
-    # if settings.jobs_enabled and settings.environment != "test":
-    #     await job_worker.stop()
+    if settings.jobs_enabled and settings.environment != "test":
+        await job_worker.stop()
 
 
 def _validate_production_settings(settings) -> None:

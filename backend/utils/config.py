@@ -118,6 +118,17 @@ class Settings(BaseSettings):
     # Loop/flood breaker: max automatic replies per contact per minute.
     auto_reply_max_per_contact_per_minute: int = 6
 
+    # Market monitors — periodic checks replacing the old Termux cron scripts,
+    # self-rescheduled through the job queue below (see investments/jobs.py).
+    market_monitors_enabled: bool = True
+    # WhatsApp number that receives monitor alerts, e.g. "5511999999999".
+    # Alerts are skipped (logged only) while this is unset.
+    market_alert_whatsapp_number: str = ""
+    market_check_interval_seconds: int = 1200  # 20 min, same cadence as the old cron
+    spcx34_ticker: str = "SPCX34.SA"
+    spcx34_bollinger_window: int = 20
+    spcx34_bollinger_std_mult: float = 2.0
+
     # Job queue
     jobs_enabled: bool = True
     jobs_poll_interval_seconds: float = 2.0
