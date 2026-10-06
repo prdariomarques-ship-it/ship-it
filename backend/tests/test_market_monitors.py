@@ -1,4 +1,6 @@
-"""Market monitors: Bollinger math, pregão gate, and the self-rescheduling job."""
+"""Market monitors: Bollinger math, pregão gate, and the self-rescheduling
+jobs — delivery goes through telegram.send_message, which looks up each
+feed's bot/chat from settings at execution time (never stored in payload)."""
 from datetime import datetime
 
 import pytest
@@ -6,7 +8,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from investments.b3_calendar import is_pregao_now
 from investments.b3_summary import B3Summary
-from investments.jobs import B3_SUMMARY_JOB_NAME, SPCX34_JOB_NAME, seed_market_monitor_jobs
+from investments.jobs import (
+    B3_SUMMARY_JOB_NAME,
+    SPCX34_JOB_NAME,
+    TELEGRAM_SEND_JOB_NAME,
+    seed_market_monitor_jobs,
+)
 from investments.spcx34_monitor import MarketDataError, SPCX34Check, bollinger_upper_band
 from jobs.service import JobService
 from jobs.worker import JobWorker
@@ -61,7 +68,7 @@ def test_pregao_weekend():
     assert is_pregao_now(now) is False
 
 
-# ── check_spcx34_job ──────────────────────────────────────────────────────────
+# ── check_spcx34_job / send_b3_summary_job ────────────────────────────────────
 
 
 @pytest.fixture(autouse=True)
@@ -69,14 +76,15 @@ def _always_pregao(monkeypatch):
     monkeypatch.setattr("investments.jobs.is_pregao_now", lambda: True)
 
 
-@pytest.mark.asyncio
-async def test_check_spcx34_job_sends_alert_when_triggered_and_number_configured(
-    session_factory, worker, monkeypatch
-):
+@pytest.fixture(autouse=True)
+def _monitors_enabled(monkeypatch):
     from utils.config import get_settings
 
-    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "5511999999999")
+    monkeypatch.setattr(get_settings(), "market_monitors_enabled", True)
 
+
+@pytest.mark.asyncio
+async def test_check_spcx34_job_enqueues_telegram_message_when_triggered(session_factory, worker, monkeypatch):
     async def _fake_check(ticker, window, std_mult):
         return SPCX34Check(ticker=ticker, price=60.0, upper_band=57.74, triggered=True)
 
@@ -88,24 +96,19 @@ async def test_check_spcx34_job_sends_alert_when_triggered_and_number_configured
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        jobs = await JobRepository(session).find_one(name="whatsapp.send_text")
-        assert jobs is not None
-        assert jobs.payload["to"] == "5511999999999"
-        assert "60.00" in jobs.payload["content"]
+        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        assert sent is not None
+        assert sent.payload["feed"] == "spcx"
+        assert "60.00" in sent.payload["text"]
 
-        # The chain re-arms itself.
         rescheduled = await JobRepository(session).find_one(name=SPCX34_JOB_NAME, status=JobStatus.QUEUED)
         assert rescheduled is not None
 
 
 @pytest.mark.asyncio
-async def test_check_spcx34_job_skips_alert_without_configured_number(session_factory, worker, monkeypatch):
-    from utils.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "")
-
+async def test_check_spcx34_job_sends_nothing_when_not_triggered(session_factory, worker, monkeypatch):
     async def _fake_check(ticker, window, std_mult):
-        return SPCX34Check(ticker=ticker, price=60.0, upper_band=57.74, triggered=True)
+        return SPCX34Check(ticker=ticker, price=50.0, upper_band=57.74, triggered=False)
 
     monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
 
@@ -115,8 +118,8 @@ async def test_check_spcx34_job_skips_alert_without_configured_number(session_fa
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        alert = await JobRepository(session).find_one(name="whatsapp.send_text")
-        assert alert is None
+        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        assert sent is None
 
 
 @pytest.mark.asyncio
@@ -154,15 +157,29 @@ async def test_seed_market_monitor_jobs_is_idempotent(session_factory):
             assert len(result.scalars().all()) == 1
 
 
+@pytest.mark.asyncio
+async def test_seed_market_monitor_jobs_noop_when_disabled(session_factory, monkeypatch):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "market_monitors_enabled", False)
+
+    async with session_factory() as session:
+        await seed_market_monitor_jobs(session)
+        await session.commit()
+
+    async with session_factory() as session:
+        from sqlalchemy import select
+        from models.job import Job
+
+        result = await session.execute(select(Job).where(Job.name == SPCX34_JOB_NAME))
+        assert result.scalars().all() == []
+
+
 # ── send_b3_summary_job (PMX / @dariozcodebot port) ──────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_b3_summary_job_sends_message_when_number_configured(session_factory, worker, monkeypatch):
-    from utils.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "5511999999999")
-
+async def test_b3_summary_job_enqueues_telegram_message(session_factory, worker, monkeypatch):
     async def _fake_check():
         return B3Summary(ibovespa_points=166934.2, ibovespa_delta_pct=1.23, usdbrl_level=5.4321, usdbrl_delta_pct=-0.5)
 
@@ -174,32 +191,59 @@ async def test_b3_summary_job_sends_message_when_number_configured(session_facto
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        sent = await JobRepository(session).find_one(name="whatsapp.send_text")
+        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
         assert sent is not None
-        assert sent.payload["to"] == "5511999999999"
-        assert "166.934" in sent.payload["content"]
-        assert "5.4321" in sent.payload["content"]
+        assert sent.payload["feed"] == "b3"
+        assert "166.934" in sent.payload["text"]
+        assert "5.4321" in sent.payload["text"]
 
         rescheduled = await JobRepository(session).find_one(name=B3_SUMMARY_JOB_NAME, status=JobStatus.QUEUED)
         assert rescheduled is not None
 
 
+# ── send_telegram_message_job: per-feed credential lookup ───────────────────
+
+
 @pytest.mark.asyncio
-async def test_b3_summary_job_skips_without_configured_number(session_factory, worker, monkeypatch):
+async def test_telegram_send_job_sends_when_feed_configured(session_factory, worker, monkeypatch):
     from utils.config import get_settings
 
-    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "telegram_bot_token_spcx", "tok")
+    monkeypatch.setattr(settings, "telegram_chat_id_spcx", "chat-1")
 
-    async def _fake_check():
-        return B3Summary(ibovespa_points=166934.2, ibovespa_delta_pct=1.23, usdbrl_level=5.4321, usdbrl_delta_pct=-0.5)
+    sent_calls = []
 
-    monkeypatch.setattr("investments.jobs.check_b3_summary", _fake_check)
+    async def _fake_send(token, chat_id, text):
+        sent_calls.append((token, chat_id, text))
+        return {}
+
+    monkeypatch.setattr("investments.jobs.send_telegram_message", _fake_send)
 
     async with session_factory() as session:
-        await JobService(session).enqueue(B3_SUMMARY_JOB_NAME, {})
+        await JobService(session).enqueue(TELEGRAM_SEND_JOB_NAME, {"feed": "spcx", "text": "oi"})
 
     assert await worker.run_once() == 1
+    assert sent_calls == [("tok", "chat-1", "oi")]
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_job_skips_when_feed_not_configured(session_factory, worker, monkeypatch):
+    sent_calls = []
+
+    async def _fake_send(token, chat_id, text):
+        sent_calls.append((token, chat_id, text))
+        return {}
+
+    monkeypatch.setattr("investments.jobs.send_telegram_message", _fake_send)
 
     async with session_factory() as session:
-        sent = await JobRepository(session).find_one(name="whatsapp.send_text")
-        assert sent is None
+        await JobService(session).enqueue(TELEGRAM_SEND_JOB_NAME, {"feed": "spcx", "text": "oi"})
+
+    assert await worker.run_once() == 1
+    assert sent_calls == []
+
+    async with session_factory() as session:
+        job = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        # Missing config is a no-op, not a retryable failure.
+        assert job.status == JobStatus.SUCCEEDED

@@ -10,7 +10,7 @@ from investments.daily_briefing import (
     _classify_state,
     format_briefing_message,
 )
-from investments.jobs import DAILY_BRIEFING_JOB_NAME
+from investments.jobs import DAILY_BRIEFING_JOB_NAME, TELEGRAM_SEND_JOB_NAME
 from jobs.service import JobService
 from jobs.worker import JobWorker
 from models.job import JobStatus
@@ -31,6 +31,13 @@ def worker(session_factory, monkeypatch):
 @pytest.fixture(autouse=True)
 def _always_pregao(monkeypatch):
     monkeypatch.setattr("investments.jobs.is_pregao_now", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _monitors_enabled(monkeypatch):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "market_monitors_enabled", True)
 
 
 # ── curve classification ─────────────────────────────────────────────────────
@@ -82,11 +89,7 @@ def test_format_briefing_message_includes_sections():
 
 
 @pytest.mark.asyncio
-async def test_daily_briefing_job_sends_when_number_configured(session_factory, worker, monkeypatch):
-    from utils.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "5511999999999")
-
+async def test_daily_briefing_job_enqueues_telegram_message(session_factory, worker, monkeypatch):
     fake_snapshot = BriefingSnapshot(
         quotes={"dollar": Quote("dollar", "fx", "USDBRL=X", "price", 5.40, 5.35, 0.93)}, curve=None
     )
@@ -102,9 +105,9 @@ async def test_daily_briefing_job_sends_when_number_configured(session_factory, 
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        sent = await JobRepository(session).find_one(name="whatsapp.send_text")
+        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
         assert sent is not None
-        assert sent.payload["to"] == "5511999999999"
+        assert sent.payload["feed"] == "mercado"
 
         rescheduled = await JobRepository(session).find_one(name=DAILY_BRIEFING_JOB_NAME, status=JobStatus.QUEUED)
         assert rescheduled is not None
@@ -112,10 +115,6 @@ async def test_daily_briefing_job_sends_when_number_configured(session_factory, 
 
 @pytest.mark.asyncio
 async def test_daily_briefing_job_skips_when_no_tickers_resolved(session_factory, worker, monkeypatch):
-    from utils.config import get_settings
-
-    monkeypatch.setattr(get_settings(), "market_alert_whatsapp_number", "5511999999999")
-
     async def _fake_fetch():
         return BriefingSnapshot(quotes={}, curve=None)
 
@@ -127,5 +126,5 @@ async def test_daily_briefing_job_skips_when_no_tickers_resolved(session_factory
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        sent = await JobRepository(session).find_one(name="whatsapp.send_text")
+        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
         assert sent is None

@@ -12,8 +12,9 @@ import type { JobRead, JobStatus } from "@/lib/admin-types";
 import { formatDateTime, formatRelativeTime } from "@/lib/format";
 
 // The three legacy Telegram bots (spcx-monitor, @dariozcodebot/PMX,
-// "Mercado") consolidated into DarioOS — each a self-rescheduling job,
-// not a dedicated page's own table (see backend/investments/jobs.py).
+// "Mercado") managed from DarioOS — each its own self-rescheduling job,
+// still delivering to its own separate Telegram bot/chat (see
+// backend/investments/jobs.py) rather than one shared destination.
 const MONITORS: { jobName: string; label: string; description: string }[] = [
   {
     jobName: "market.check_spcx34",
@@ -133,8 +134,8 @@ export default function AdminMonitorsPage() {
           ) : null}
 
           <p className="text-xs text-muted-foreground">
-            Alertas saem por WhatsApp para o número em MARKET_ALERT_WHATSAPP_NUMBER — configure-o em docker/.env se
-            ainda não enviou nenhuma mensagem.
+            Cada monitor entrega no seu próprio bot/chat do Telegram (TELEGRAM_BOT_TOKEN_SPCX, _B3, _MERCADO — ver
+            docker/.env). MARKET_MONITORS_ENABLED fica desligado até os bots antigos serem confirmados parados.
           </p>
         </div>
       )}

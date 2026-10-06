@@ -120,14 +120,24 @@ class Settings(BaseSettings):
 
     # Market monitors — periodic checks replacing the old Termux cron scripts,
     # self-rescheduled through the job queue below (see investments/jobs.py).
-    market_monitors_enabled: bool = True
-    # WhatsApp number that receives monitor alerts, e.g. "5511999999999".
-    # Alerts are skipped (logged only) while this is unset.
-    market_alert_whatsapp_number: str = ""
+    # Off by default: this stays false until the old Telegram-based monitors
+    # are confirmed stopped, so nobody gets the same alert twice.
+    market_monitors_enabled: bool = False
     market_check_interval_seconds: int = 1200  # 20 min, same cadence as the old cron
     spcx34_ticker: str = "SPCX34.SA"
     spcx34_bollinger_window: int = 20
     spcx34_bollinger_std_mult: float = 2.0
+
+    # Telegram — each feed keeps its own bot/chat, matching the three
+    # separate bots this replaces (Monitor SPCX Dário, @dariozcodebot/PMX,
+    # Mercado/Small11). A feed with no token+chat id configured is skipped
+    # (logged only), never silently merged into another feed's destination.
+    telegram_bot_token_spcx: str = ""
+    telegram_chat_id_spcx: str = ""
+    telegram_bot_token_b3: str = ""
+    telegram_chat_id_b3: str = ""
+    telegram_bot_token_mercado: str = ""
+    telegram_chat_id_mercado: str = ""
 
     # Job queue
     jobs_enabled: bool = True

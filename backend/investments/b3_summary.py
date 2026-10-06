@@ -46,10 +46,10 @@ async def check_b3_summary() -> B3Summary:
 
 def format_b3_summary_message(summary: B3Summary) -> str:
     lines = [
-        "🇧🇷 *DARIO OS — RADAR B3*",
+        "🇧🇷 <b>DARIO OS — RADAR B3</b>",
         "",
-        f"📊 *IBOVESPA*: {_fmt_index_value(summary.ibovespa_points)} pts "
+        f"📊 <b>IBOVESPA</b>: {_fmt_index_value(summary.ibovespa_points)} pts "
         f"({_fmt_delta_pct(summary.ibovespa_delta_pct)})",
-        f"💵 *USD/BRL*: R$ {summary.usdbrl_level:.4f} ({_fmt_delta_pct(summary.usdbrl_delta_pct)})",
+        f"💵 <b>USD/BRL</b>: R$ {summary.usdbrl_level:.4f} ({_fmt_delta_pct(summary.usdbrl_delta_pct)})",
     ]
     return "\n".join(lines)

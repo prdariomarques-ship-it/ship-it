@@ -163,7 +163,7 @@ def _classify_shape(points: dict[str, float], prev: dict[str, float]) -> tuple[s
 
 
 def format_briefing_message(snapshot: BriefingSnapshot) -> str:
-    lines = ["🇧🇷 *DARIO OS — RADAR DE MERCADO*", ""]
+    lines = ["🇧🇷 <b>DARIO OS — RADAR DE MERCADO</b>", ""]
 
     curve = snapshot.curve
     if curve and curve.state != "insufficient_data":
