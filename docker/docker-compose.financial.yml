@@ -1,0 +1,47 @@
+# PROPOSTA — não aplicado, não mesclado no docker-compose.yml principal.
+#
+# Serviço separado para os monitores financeiros: mesma imagem do backend
+# (nenhuma imagem nova pra manter), mas processo e comando próprios
+# (`python -m investments`, não uvicorn/main.py) — não é um segundo
+# backend genérico, é só o worker financeiro isolado.
+#
+# Isolamento real, não só "processo separado":
+#   - Tabela própria (financial_jobs), nunca toca `jobs`.
+#   - Sem rota HTTP, sem depender do WhatsApp provider/worker.
+#   - Limites de CPU/memória explícitos, pra não disputar recurso com o
+#     atendimento ao vivo mesmo sob carga.
+#
+# Uso (só depois de autorizado — ver plano de implantação):
+#   docker compose -f docker-compose.yml -f docker-compose.financial.yml up -d financial-worker
+
+services:
+  financial-worker:
+    build: ../backend
+    command: ["python", "-m", "investments"]
+    restart: unless-stopped
+    environment:
+      LOG_JSON: "true"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:-dario}@postgres:5432/${POSTGRES_DB:-darioos}
+      MARKET_MONITORS_ENABLED: ${MARKET_MONITORS_ENABLED:-false}
+      MARKET_CHECK_INTERVAL_SECONDS: ${MARKET_CHECK_INTERVAL_SECONDS:-1200}
+      SPCX34_TICKER: ${SPCX34_TICKER:-SPCX34.SA}
+      SPCX34_BOLLINGER_WINDOW: ${SPCX34_BOLLINGER_WINDOW:-20}
+      SPCX34_BOLLINGER_STD_MULT: ${SPCX34_BOLLINGER_STD_MULT:-2.0}
+      TELEGRAM_BOT_TOKEN_SPCX: ${TELEGRAM_BOT_TOKEN_SPCX:-}
+      TELEGRAM_CHAT_ID_SPCX: ${TELEGRAM_CHAT_ID_SPCX:-}
+      TELEGRAM_BOT_TOKEN_B3: ${TELEGRAM_BOT_TOKEN_B3:-}
+      TELEGRAM_CHAT_ID_B3: ${TELEGRAM_CHAT_ID_B3:-}
+      TELEGRAM_BOT_TOKEN_MERCADO: ${TELEGRAM_BOT_TOKEN_MERCADO:-}
+      TELEGRAM_CHAT_ID_MERCADO: ${TELEGRAM_CHAT_ID_MERCADO:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [darioos]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M

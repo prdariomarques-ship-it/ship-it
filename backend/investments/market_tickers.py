@@ -24,7 +24,13 @@ CLASS_LABELS = {
 TICKERS: list[TickerSpec] = [
     TickerSpec(source="treasury", category="rates", symbol="^TNX", unit="pct"),
     TickerSpec(source="treasury_5y", category="rates", symbol="^FVX", unit="pct"),
-    TickerSpec(source="treasury_2y", category="rates", symbol="^IRX", unit="pct"),
+    # NOT a 2-year Treasury: ^IRX is a 13-week T-bill, annualized. Yahoo has
+    # no reliable standalone 2Y constant-maturity ticker (the FlowCore
+    # investigation this was ported from reached the same conclusion — see
+    # runtime/market_intelligence/yield_curve.py's docstring in that repo).
+    # Named tbill_13wk, not treasury_2y, so nothing downstream can present
+    # it as the real 2Y rate even by accident.
+    TickerSpec(source="tbill_13wk", category="rates", symbol="^IRX", unit="pct"),
     TickerSpec(source="treasury_30y", category="rates", symbol="^TYX", unit="pct"),
     TickerSpec(source="dollar", category="fx", symbol="USDBRL=X", unit="price"),
     TickerSpec(source="dxy", category="fx", symbol="DX-Y.NYB", unit="price"),
@@ -50,9 +56,12 @@ TICKERS: list[TickerSpec] = [
     TickerSpec(source="vix", category="volatility", symbol="^VIX", unit="price"),
 ]
 
-# US Treasury curve, ascending maturity — mirrors yield_curve.py's CURVE_SOURCES.
+# US rates curve, ascending maturity — mirrors yield_curve.py's CURVE_SOURCES.
+# The short end is a 13-week T-bill proxy, not a genuine 2-year Treasury —
+# see the tbill_13wk comment above. Every label below says so explicitly;
+# nothing in this package may shorten it to "2Y" in user-facing text.
 CURVE_SOURCES = [
-    ("treasury_2y", "2Y (IRX ~13wk proxy)"),
+    ("tbill_13wk", "T-bill 13 sem. (proxy curto, não é Treasury de 2 anos)"),
     ("treasury_5y", "5Y"),
     ("treasury", "10Y"),
     ("treasury_30y", "30Y"),

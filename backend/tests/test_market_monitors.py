@@ -1,6 +1,7 @@
 """Market monitors: Bollinger math, pregão gate, and the self-rescheduling
-jobs — delivery goes through telegram.send_message, which looks up each
-feed's bot/chat from settings at execution time (never stored in payload)."""
+jobs on the isolated financial worker — delivery goes through
+telegram.send_message, which looks up each feed's bot/chat from settings
+at execution time (never stored in payload)."""
 from datetime import datetime
 
 import pytest
@@ -12,13 +13,12 @@ from investments.jobs import (
     B3_SUMMARY_JOB_NAME,
     SPCX34_JOB_NAME,
     TELEGRAM_SEND_JOB_NAME,
-    seed_market_monitor_jobs,
+    seed_financial_monitor_jobs,
 )
+from investments.models import FinancialJobStatus
+from investments.repository import FinancialJobRepository
 from investments.spcx34_monitor import MarketDataError, SPCX34Check, bollinger_upper_band
-from jobs.service import JobService
-from jobs.worker import JobWorker
-from models.job import JobStatus
-from repositories.job import JobRepository
+from investments.worker import FinancialWorker
 
 
 @pytest.fixture
@@ -28,8 +28,8 @@ async def session_factory(db_engine):
 
 @pytest.fixture
 def worker(session_factory, monkeypatch):
-    monkeypatch.setattr("jobs.worker.async_session_factory", session_factory)
-    return JobWorker()
+    monkeypatch.setattr("investments.worker.async_session_factory", session_factory)
+    return FinancialWorker()
 
 
 # ── bollinger_upper_band ────────────────────────────────────────────────────
@@ -91,17 +91,19 @@ async def test_check_spcx34_job_enqueues_telegram_message_when_triggered(session
     monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
 
     async with session_factory() as session:
-        await JobService(session).enqueue(SPCX34_JOB_NAME, {})
+        await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
 
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        sent = await FinancialJobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
         assert sent is not None
         assert sent.payload["feed"] == "spcx"
         assert "60.00" in sent.payload["text"]
 
-        rescheduled = await JobRepository(session).find_one(name=SPCX34_JOB_NAME, status=JobStatus.QUEUED)
+        rescheduled = await FinancialJobRepository(session).find_one(
+            name=SPCX34_JOB_NAME, status=FinancialJobStatus.QUEUED
+        )
         assert rescheduled is not None
 
 
@@ -113,12 +115,12 @@ async def test_check_spcx34_job_sends_nothing_when_not_triggered(session_factory
     monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
 
     async with session_factory() as session:
-        await JobService(session).enqueue(SPCX34_JOB_NAME, {})
+        await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
 
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        sent = await FinancialJobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
         assert sent is None
 
 
@@ -130,48 +132,79 @@ async def test_check_spcx34_job_reschedules_even_on_market_data_error(session_fa
     monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
 
     async with session_factory() as session:
-        await JobService(session).enqueue(SPCX34_JOB_NAME, {})
+        await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
 
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        rescheduled = await JobRepository(session).find_one(name=SPCX34_JOB_NAME, status=JobStatus.QUEUED)
+        rescheduled = await FinancialJobRepository(session).find_one(
+            name=SPCX34_JOB_NAME, status=FinancialJobStatus.QUEUED
+        )
         assert rescheduled is not None
 
 
 @pytest.mark.asyncio
-async def test_seed_market_monitor_jobs_is_idempotent(session_factory):
+async def test_check_spcx34_job_reschedules_even_on_unexpected_exception(session_factory, worker, monkeypatch):
+    """The dual-chain bug this guards against: an unexpected (non-MarketDataError)
+    exception must still only leave ONE queued row for this job name — the
+    handler must never let it escape to the worker's own retry mechanism
+    while the `finally` reschedule also fires."""
+    async def _fake_check(ticker, window, std_mult):
+        raise ValueError("something nobody anticipated")
+
+    monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
+
     async with session_factory() as session:
-        await seed_market_monitor_jobs(session)
-        await session.commit()
-    async with session_factory() as session:
-        await seed_market_monitor_jobs(session)
-        await session.commit()
+        await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
+
+    assert await worker.run_once() == 1
 
     async with session_factory() as session:
         from sqlalchemy import select
-        from models.job import Job
+
+        from investments.models import FinancialJob
+
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == SPCX34_JOB_NAME))
+        ).scalars().all()
+        # The original run (terminal, SUCCEEDED despite the caught exception)
+        # plus exactly one new chain — never two competing QUEUED/RUNNING rows.
+        queued = [r for r in rows if r.status == FinancialJobStatus.QUEUED]
+        assert len(queued) == 1
+
+
+@pytest.mark.asyncio
+async def test_seed_financial_monitor_jobs_is_idempotent(session_factory):
+    async with session_factory() as session:
+        await seed_financial_monitor_jobs(session)
+    async with session_factory() as session:
+        await seed_financial_monitor_jobs(session)  # second call: DuplicateChainError caught internally
+
+    async with session_factory() as session:
+        from sqlalchemy import select
+
+        from investments.models import FinancialJob
 
         for job_name in (SPCX34_JOB_NAME, B3_SUMMARY_JOB_NAME):
-            result = await session.execute(select(Job).where(Job.name == job_name))
+            result = await session.execute(select(FinancialJob).where(FinancialJob.name == job_name))
             assert len(result.scalars().all()) == 1
 
 
 @pytest.mark.asyncio
-async def test_seed_market_monitor_jobs_noop_when_disabled(session_factory, monkeypatch):
+async def test_seed_financial_monitor_jobs_noop_when_disabled(session_factory, monkeypatch):
     from utils.config import get_settings
 
     monkeypatch.setattr(get_settings(), "market_monitors_enabled", False)
 
     async with session_factory() as session:
-        await seed_market_monitor_jobs(session)
-        await session.commit()
+        await seed_financial_monitor_jobs(session)
 
     async with session_factory() as session:
         from sqlalchemy import select
-        from models.job import Job
 
-        result = await session.execute(select(Job).where(Job.name == SPCX34_JOB_NAME))
+        from investments.models import FinancialJob
+
+        result = await session.execute(select(FinancialJob).where(FinancialJob.name == SPCX34_JOB_NAME))
         assert result.scalars().all() == []
 
 
@@ -186,22 +219,24 @@ async def test_b3_summary_job_enqueues_telegram_message(session_factory, worker,
     monkeypatch.setattr("investments.jobs.check_b3_summary", _fake_check)
 
     async with session_factory() as session:
-        await JobService(session).enqueue(B3_SUMMARY_JOB_NAME, {})
+        await FinancialJobRepository(session).create(name=B3_SUMMARY_JOB_NAME, payload={})
 
     assert await worker.run_once() == 1
 
     async with session_factory() as session:
-        sent = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        sent = await FinancialJobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
         assert sent is not None
         assert sent.payload["feed"] == "b3"
         assert "166.934" in sent.payload["text"]
         assert "5.4321" in sent.payload["text"]
 
-        rescheduled = await JobRepository(session).find_one(name=B3_SUMMARY_JOB_NAME, status=JobStatus.QUEUED)
+        rescheduled = await FinancialJobRepository(session).find_one(
+            name=B3_SUMMARY_JOB_NAME, status=FinancialJobStatus.QUEUED
+        )
         assert rescheduled is not None
 
 
-# ── send_telegram_message_job: per-feed credential lookup ───────────────────
+# ── send_telegram_message_job: disablement, credentials, delivery outcome ───
 
 
 @pytest.mark.asyncio
@@ -216,15 +251,21 @@ async def test_telegram_send_job_sends_when_feed_configured(session_factory, wor
 
     async def _fake_send(token, chat_id, text):
         sent_calls.append((token, chat_id, text))
-        return {}
+        return {"message_id": 7}
 
     monkeypatch.setattr("investments.jobs.send_telegram_message", _fake_send)
 
     async with session_factory() as session:
-        await JobService(session).enqueue(TELEGRAM_SEND_JOB_NAME, {"feed": "spcx", "text": "oi"})
+        await FinancialJobRepository(session).create(
+            name=TELEGRAM_SEND_JOB_NAME, payload={"feed": "spcx", "text": "oi"}
+        )
 
     assert await worker.run_once() == 1
     assert sent_calls == [("tok", "chat-1", "oi")]
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        assert job.result == {"delivered": True, "message_id": 7}
 
 
 @pytest.mark.asyncio
@@ -238,12 +279,54 @@ async def test_telegram_send_job_skips_when_feed_not_configured(session_factory,
     monkeypatch.setattr("investments.jobs.send_telegram_message", _fake_send)
 
     async with session_factory() as session:
-        await JobService(session).enqueue(TELEGRAM_SEND_JOB_NAME, {"feed": "spcx", "text": "oi"})
+        await FinancialJobRepository(session).create(
+            name=TELEGRAM_SEND_JOB_NAME, payload={"feed": "spcx", "text": "oi"}
+        )
 
     assert await worker.run_once() == 1
     assert sent_calls == []
 
     async with session_factory() as session:
-        job = await JobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
-        # Missing config is a no-op, not a retryable failure.
-        assert job.status == JobStatus.SUCCEEDED
+        job = await FinancialJobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        # Completed, but result says plainly it was never sent — the thing
+        # the review flagged: a skip must never look like a delivered SUCCEEDED.
+        assert job.status == FinancialJobStatus.SUCCEEDED
+        assert job.result == {"delivered": False, "reason": "missing_credential"}
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_job_blocked_when_monitors_disabled_even_if_already_queued(
+    session_factory, worker, monkeypatch
+):
+    """The exact bug the review caught: MARKET_MONITORS_ENABLED=false must
+    stop a telegram.send_message job that was already queued before the
+    flag flipped — not just prevent new check cycles."""
+    from utils.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "telegram_bot_token_spcx", "tok")
+    monkeypatch.setattr(settings, "telegram_chat_id_spcx", "chat-1")
+
+    sent_calls = []
+
+    async def _fake_send(token, chat_id, text):
+        sent_calls.append((token, chat_id, text))
+        return {"message_id": 1}
+
+    monkeypatch.setattr("investments.jobs.send_telegram_message", _fake_send)
+
+    async with session_factory() as session:
+        await FinancialJobRepository(session).create(
+            name=TELEGRAM_SEND_JOB_NAME, payload={"feed": "spcx", "text": "oi"}
+        )
+
+    # Disabled AFTER the send was already queued.
+    monkeypatch.setattr(settings, "market_monitors_enabled", False)
+
+    assert await worker.run_once() == 1
+    assert sent_calls == []  # never actually called send_telegram_message
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        assert job.status == FinancialJobStatus.SUCCEEDED
+        assert job.result == {"delivered": False, "reason": "monitors_disabled"}

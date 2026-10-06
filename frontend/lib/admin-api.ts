@@ -10,8 +10,8 @@ import type {
   ComponentStatus,
   ExecutionEntry,
   ExecutionsPeriod,
+  FinancialJobRead,
   GoogleWorkspaceStatus,
-  JobRead,
   MemoryStats,
   MetricsSnapshot,
   SystemInfo,
@@ -142,10 +142,12 @@ export function useAdminMetrics() {
   });
 }
 
-export function useAdminJobs(limit = 200) {
+// financial_jobs — a separate table/worker/endpoint from /jobs (WhatsApp's
+// queue). Never merge this with useAdminJobs or /jobs.
+export function useFinancialJobs(limit = 200) {
   return useQuery({
-    queryKey: ["admin", "jobs", limit],
-    queryFn: () => apiFetch<JobRead[]>(`/jobs?limit=${limit}`),
+    queryKey: ["admin", "investments", "jobs", limit],
+    queryFn: () => apiFetch<FinancialJobRead[]>(`/investments/jobs?limit=${limit}`),
     refetchInterval: NORMAL_INTERVAL_MS,
   });
 }

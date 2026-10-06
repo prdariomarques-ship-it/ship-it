@@ -129,21 +129,28 @@ export interface UserAdminRead {
   created_at: string;
 }
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+// financial_jobs — a separate table/worker from `jobs` (see
+// backend/investments/). FinancialJobStatus has no "cancelled".
+export type FinancialJobStatus = "queued" | "running" | "succeeded" | "failed";
 
-export interface JobRead {
+export interface FinancialJobRead {
   id: number;
   name: string;
   payload: Record<string, unknown>;
-  status: JobStatus;
+  status: FinancialJobStatus;
   attempts: number;
   max_attempts: number;
   scheduled_at: string;
   started_at: string | null;
   finished_at: string | null;
   last_error: string | null;
+  // Present only on telegram.send_message jobs. A SUCCEEDED job's status
+  // alone is never proof of delivery — only result.delivered is. See
+  // backend/investments/jobs.py::send_telegram_message_job.
+  result: { delivered: boolean | null; message_id?: number; reason?: string; detail?: string } | null;
   created_at: string;
 }
+
 
 export interface WhatsAppStatus {
   provider: string;

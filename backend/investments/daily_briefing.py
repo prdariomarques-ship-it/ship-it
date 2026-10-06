@@ -10,11 +10,19 @@ the original uses yfinance's undocumented `Ticker.news` scraping, which
 couldn't be verified live from this environment (Yahoo Finance is
 blocked by the sandbox's egress policy) — a future addition once that's
 confirmed against the real deployment.
+
+Known gap, not yet solved: is_pregao_now() only gates on weekday + B3
+trading hours. It does not know about B3 holidays, nor about holidays on
+any of the US/European/Asian exchanges this briefing also quotes — a
+holiday on one of those markets can still produce a "stale" quote (see
+yahoo_finance.StaleDataError, which catches the case but doesn't
+distinguish "market closed for a holiday" from "data feed is actually
+broken").
 """
 from dataclasses import dataclass, field
 
 from investments.market_tickers import CLASS_LABELS, CURVE_SOURCES, TICKERS
-from investments.yahoo_finance import fetch_many_daily_closes, latest_and_delta_pct
+from investments.yahoo_finance import fetch_many_price_series, latest_and_delta_bps, latest_and_delta_pct
 
 
 @dataclass
@@ -25,13 +33,16 @@ class Quote:
     unit: str
     value: float
     previous_close: float | None
-    delta: float | None  # delta_pct for "price" unit, delta_bps for "pct" unit
+    delta: float | None  # delta_pct for "price" unit, delta_bps (absolute, not relative) for "pct" unit
+    timestamp: int  # unix seconds of the quote itself, from Yahoo
 
 
 @dataclass
 class YieldCurveSummary:
     points: dict[str, float]  # source -> yield_pct, only sources with data
-    slope_10y_2y_bps: float | None
+    # 10Y minus the short-end proxy (tbill_13wk — NOT a 2-year Treasury,
+    # see market_tickers.py). Never call this "10Y-2Y" in output.
+    slope_10y_shortend_bps: float | None
     state: str
     shape: str | None
     interpretation: str | None
@@ -45,19 +56,21 @@ class BriefingSnapshot:
 
 async def fetch_briefing_snapshot() -> BriefingSnapshot:
     tickers = [t.symbol for t in TICKERS]
-    closes_by_ticker = await fetch_many_daily_closes(tickers)
+    series_by_ticker = await fetch_many_price_series(tickers)
 
     quotes: dict[str, Quote] = {}
     for spec in TICKERS:
-        closes = closes_by_ticker.get(spec.symbol)
-        if not closes:
+        series = series_by_ticker.get(spec.symbol)
+        if series is None:
             continue
-        value, delta_pct = latest_and_delta_pct(closes)
-        previous_close = closes[-2] if len(closes) >= 2 else None
-        delta = delta_pct * 100 if (spec.unit == "pct" and delta_pct is not None) else delta_pct
+        if spec.unit == "pct":
+            value, delta = latest_and_delta_bps(series.closes)
+        else:
+            value, delta = latest_and_delta_pct(series.closes)
+        previous_close = series.closes[-2] if len(series.closes) >= 2 else None
         quotes[spec.source] = Quote(
-            source=spec.source, category=spec.category, symbol=spec.symbol,
-            unit=spec.unit, value=value, previous_close=previous_close, delta=delta,
+            source=spec.source, category=spec.category, symbol=spec.symbol, unit=spec.unit,
+            value=value, previous_close=previous_close, delta=delta, timestamp=series.latest_timestamp,
         )
 
     return BriefingSnapshot(quotes=quotes, curve=_build_curve(quotes))
@@ -66,11 +79,13 @@ async def fetch_briefing_snapshot() -> BriefingSnapshot:
 def _build_curve(quotes: dict[str, Quote]) -> YieldCurveSummary:
     points = {src: q.value for src, _label in CURVE_SOURCES if (q := quotes.get(src)) is not None}
     if len(points) < 2:
-        return YieldCurveSummary(points=points, slope_10y_2y_bps=None, state="insufficient_data", shape=None, interpretation=None)
+        return YieldCurveSummary(
+            points=points, slope_10y_shortend_bps=None, state="insufficient_data", shape=None, interpretation=None
+        )
 
-    slope_10y_2y = (
-        round((points["treasury"] - points["treasury_2y"]) * 100, 1)
-        if "treasury" in points and "treasury_2y" in points else None
+    slope = (
+        round((points["treasury"] - points["tbill_13wk"]) * 100, 1)
+        if "treasury" in points and "tbill_13wk" in points else None
     )
 
     prev = {
@@ -79,14 +94,14 @@ def _build_curve(quotes: dict[str, Quote]) -> YieldCurveSummary:
         if (q := quotes.get(src)) is not None and q.previous_close is not None
     }
     prev_slope = (
-        round((prev["treasury"] - prev["treasury_2y"]) * 100, 1)
-        if "treasury" in prev and "treasury_2y" in prev else None
+        round((prev["treasury"] - prev["tbill_13wk"]) * 100, 1)
+        if "treasury" in prev and "tbill_13wk" in prev else None
     )
 
-    state = _classify_state(slope_10y_2y, prev_slope)
+    state = _classify_state(slope, prev_slope)
     shape, interpretation = _classify_shape(points, prev)
     return YieldCurveSummary(
-        points=points, slope_10y_2y_bps=slope_10y_2y, state=state, shape=shape, interpretation=interpretation
+        points=points, slope_10y_shortend_bps=slope, state=state, shape=shape, interpretation=interpretation
     )
 
 
@@ -107,8 +122,9 @@ def _classify_state(slope_bps: float | None, prev_bps: float | None) -> str:
 
 def _classify_shape(points: dict[str, float], prev: dict[str, float]) -> tuple[str | None, str | None]:
     """Bull/bear steepening|flattening — only classifies when both the level
-    move (long-end average) and the slope move (10Y-2Y spread change) exceed
-    5 bps; below that there's no evidence to support a conclusion."""
+    move (long-end average) and the slope move (10Y vs. short-end proxy
+    spread change) exceed 5 bps; below that there's no evidence to support
+    a conclusion."""
     if len(prev) < 2:
         return None, None
 
@@ -117,7 +133,7 @@ def _classify_shape(points: dict[str, float], prev: dict[str, float]) -> tuple[s
         return None, None
 
     longs = [v for src, v in delta.items() if src in ("treasury", "treasury_30y")]
-    short = delta.get("treasury_2y")
+    short = delta.get("tbill_13wk")
     if not longs or short is None:
         return None, None
 
@@ -167,7 +183,10 @@ def format_briefing_message(snapshot: BriefingSnapshot) -> str:
 
     curve = snapshot.curve
     if curve and curve.state != "insufficient_data":
-        slope_txt = f" (10Y-2Y {curve.slope_10y_2y_bps} bps)" if curve.slope_10y_2y_bps is not None else ""
+        slope_txt = (
+            f" (10Y vs. T-bill 13 sem.: {curve.slope_10y_shortend_bps} bps)"
+            if curve.slope_10y_shortend_bps is not None else ""
+        )
         lines.append(f"CURVA EUA: {curve.state}{slope_txt}")
         if curve.interpretation:
             lines.append(f"  {curve.interpretation}")
@@ -175,7 +194,6 @@ def format_briefing_message(snapshot: BriefingSnapshot) -> str:
             if source in curve.points:
                 lines.append(f"  {label}: {curve.points[source]:.2f}%")
 
-    dollar = snapshot.quotes.get("dollar")
     dxy = snapshot.quotes.get("dxy")
     if dxy:
         lines.append(f"DÓLAR: DXY {_fmt(dxy.delta)}% no dia")
