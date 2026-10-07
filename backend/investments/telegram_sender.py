@@ -119,6 +119,16 @@ async def send_telegram_message(bot_token: str, chat_id: str, text: str, timeout
 
     if data.get("ok"):
         message_id = (data.get("result") or {}).get("message_id")
+        if not isinstance(message_id, int):
+            # ok:true with no usable message_id would never normally
+            # happen per Telegram's documented contract, but "the API said
+            # ok" is not by itself proof of delivery — only a real
+            # message_id is. Treated as uncertain, not confidently
+            # delivered, so the caller never marks this SUCCEEDED-as-sent
+            # on a response that doesn't actually back that up.
+            raise TelegramUncertainOutcomeError(
+                "Telegram responded ok:true but with no usable message_id"
+            )
         return {"message_id": message_id}
 
     description = str(data.get("description", ""))

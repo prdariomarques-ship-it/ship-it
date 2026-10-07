@@ -108,7 +108,7 @@ async def test_handler_exception_retries_without_creating_a_second_row(session_f
     attempts = []
 
     @financial_job_handler("test.flaky")
-    async def _flaky(db, payload):
+    async def _flaky(db, job):
         attempts.append(1)
         raise RuntimeError("boom")
 
@@ -140,7 +140,7 @@ async def test_handler_exception_retries_without_creating_a_second_row(session_f
 @pytest.mark.asyncio
 async def test_handler_result_is_persisted(session_factory, worker):
     @financial_job_handler("test.with_result")
-    async def _handler(db, payload):
+    async def _handler(db, job):
         return {"delivered": True, "message_id": 123}
 
     async with session_factory() as session:
@@ -158,7 +158,7 @@ async def test_rate_limited_error_backoff_respects_retry_after(session_factory, 
     from investments.telegram_sender import TelegramRateLimitedError
 
     @financial_job_handler("test.rate_limited")
-    async def _handler(db, payload):
+    async def _handler(db, job):
         raise TelegramRateLimitedError(retry_after_seconds=9999)
 
     async with session_factory() as session:
@@ -190,7 +190,8 @@ async def test_stale_running_job_is_recovered_not_duplicated(session_factory, wo
         existing = await repo.get(job.id)
         await repo.update(
             existing, status=FinancialJobStatus.RUNNING,
-            started_at=datetime.now(timezone.utc) - timedelta(seconds=600),  # older than the 300s stale window
+            started_at=datetime.now(timezone.utc) - timedelta(seconds=600),
+            lease_token="stale-lease", lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=300),
             attempts=1,
         )
 
@@ -283,8 +284,8 @@ async def test_stale_telegram_send_job_is_not_auto_retried(session_factory, work
     send_calls = []
 
     @financial_job_handler("telegram.send_message")
-    async def _handler(db, payload):
-        send_calls.append(payload)
+    async def _handler(db, job):
+        send_calls.append(job.payload)
         return {"delivered": True, "message_id": 1}
 
     async with session_factory() as session:
@@ -295,7 +296,9 @@ async def test_stale_telegram_send_job_is_not_auto_retried(session_factory, work
         existing = await repo.get(job.id)
         await repo.update(
             existing, status=FinancialJobStatus.RUNNING,
-            started_at=datetime.now(timezone.utc) - timedelta(seconds=600), attempts=1,
+            started_at=datetime.now(timezone.utc) - timedelta(seconds=600),
+            lease_token="stale-lease", lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=300),
+            attempts=1,
         )
 
     await worker.run_once()  # recovery runs at the top of every tick
@@ -325,7 +328,7 @@ async def test_a_missing_chain_is_reseeded_on_the_next_tick_without_a_restart(se
     # and would otherwise be claimed+executed within this same tick by the
     # real check_spcx34_job, which calls out to Yahoo Finance for real.
     @financial_job_handler("market.check_spcx34")
-    async def _fake_check(db, payload):
+    async def _fake_check(db, job):
         return None
 
     async with session_factory() as session:
@@ -366,3 +369,219 @@ async def test_healing_does_not_touch_a_chain_that_is_already_active(session_fac
             await session.execute(select(FinancialJob).where(FinancialJob.name == "market.check_spcx34"))
         ).scalars().all()
         assert len(rows) == 1  # healing must not create a second row when one is already active
+
+
+# ── ownership/lease: two recoveries racing the same stale job ───────────────
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_recoveries_only_one_wins(session_factory):
+    """Simulates two worker processes both reading the same stale candidate
+    and both attempting to recover it — exactly the race the review asked
+    about. Both READ the same lease_token (as two real processes would,
+    each via its own stale_running_candidates() call); only the FIRST
+    try_recover_stale() may succeed, since it's an atomic
+    UPDATE...WHERE lease_token=:token — the second's WHERE clause no
+    longer matches anything once the first has already changed the row."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).create(name="market.check_spcx34", payload={}, max_attempts=3)
+        repo = FinancialJobRepository(session)
+        existing = await repo.get(job.id)
+        await repo.update(
+            existing, status=FinancialJobStatus.RUNNING, started_at=now - timedelta(seconds=600),
+            lease_token="shared-lease", lease_expires_at=now - timedelta(seconds=300), attempts=1,
+        )
+
+    # Two "processes": each opens its own session/repository, both read the
+    # same lease_token (as stale_running_candidates would independently
+    # hand each of them), then both race to recover it.
+    async with session_factory() as session_a, session_factory() as session_b:
+        repo_a, repo_b = FinancialJobRepository(session_a), FinancialJobRepository(session_b)
+        won_a = await repo_a.try_recover_stale(
+            job.id, "shared-lease", now, failed=False, last_error="recovered by A"
+        )
+        won_b = await repo_b.try_recover_stale(
+            job.id, "shared-lease", now, failed=False, last_error="recovered by B"
+        )
+
+    assert [won_a, won_b].count(True) == 1  # exactly one recovery wins, never both, never neither
+
+    async with session_factory() as session:
+        refreshed = await FinancialJobRepository(session).get(job.id)
+        assert refreshed.status == FinancialJobStatus.QUEUED
+        assert refreshed.last_error in ("recovered by A", "recovered by B")
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_job_cannot_be_clobbered_by_the_original_slow_execution(session_factory, worker):
+    """A slow-but-still-alive execution's lease expires and gets reclaimed
+    by a recovery (so the row now belongs to a NEW lease/attempt). The
+    ORIGINAL execution then finally finishes and tries to write its
+    result — complete_if_owner must refuse (its lease_token is stale), so
+    it can never clobber whatever the new owner does with the row."""
+    from datetime import datetime, timezone
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).create(name="test.slow", payload={})
+        repo = FinancialJobRepository(session)
+        existing = await repo.get(job.id)
+        await repo.update(existing, status=FinancialJobStatus.RUNNING, lease_token="original-lease")
+
+    # Simulate a recovery reclaiming it (new lease, now QUEUED again).
+    async with session_factory() as session:
+        repo = FinancialJobRepository(session)
+        recovered = await repo.try_recover_stale(
+            job.id, "original-lease", datetime.now(timezone.utc), failed=False, last_error="reclaimed"
+        )
+        assert recovered is True
+
+    # The ORIGINAL (stale) execution now finally finishes and tries to
+    # write its result under its now-superseded lease token.
+    async with session_factory() as session:
+        repo = FinancialJobRepository(session)
+        completed = await repo.complete_if_owner(
+            job.id, "original-lease", status=FinancialJobStatus.SUCCEEDED,
+            finished_at=datetime.now(timezone.utc), result={"from": "stale execution"},
+        )
+        assert completed is False  # refused: lease no longer matches
+
+    async with session_factory() as session:
+        refreshed = await FinancialJobRepository(session).get(job.id)
+        # Still in the state the recovery put it in — untouched by the stale write.
+        assert refreshed.status == FinancialJobStatus.QUEUED
+        assert refreshed.result is None
+
+
+# ── cadence: successor creation is atomic with marking the current row done ─
+
+
+@pytest.mark.asyncio
+async def test_complete_and_reschedule_is_one_transaction(session_factory):
+    """complete_and_reschedule marks SUCCEEDED and creates the successor
+    together — there is no committed intermediate state where the current
+    row is terminal but no successor exists yet for another process's
+    healing pass to react to (which is what let a concurrent
+    ensure_chains_seeded call insert an off-cadence immediate successor,
+    before this fix)."""
+    from datetime import datetime, timezone
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).create(name="market.check_spcx34", payload={})
+        repo = FinancialJobRepository(session)
+        existing = await repo.get(job.id)
+        await repo.update(existing, status=FinancialJobStatus.RUNNING, lease_token="lease-1")
+
+    async with session_factory() as session:
+        repo = FinancialJobRepository(session)
+        completed, rescheduled = await repo.complete_and_reschedule(
+            job.id, "lease-1", result={"ok": True}, finished_at=datetime.now(timezone.utc),
+            reschedule_name="market.check_spcx34", reschedule_delay_seconds=1200,
+        )
+        assert completed is True
+        assert rescheduled is True
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "market.check_spcx34"))
+        ).scalars().all()
+        assert len(rows) == 2
+        succeeded = [r for r in rows if r.status == FinancialJobStatus.SUCCEEDED]
+        queued = [r for r in rows if r.status == FinancialJobStatus.QUEUED]
+        assert len(succeeded) == 1 and len(queued) == 1
+        # The successor respects the full 1200s cadence, not an immediate requeue.
+        delay = (queued[0].scheduled_at.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).total_seconds()
+        assert delay > 1000
+
+
+@pytest.mark.asyncio
+async def test_complete_and_reschedule_refuses_a_stale_lease_and_creates_no_successor(session_factory):
+    from datetime import datetime, timezone
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).create(name="market.check_spcx34", payload={})
+        repo = FinancialJobRepository(session)
+        existing = await repo.get(job.id)
+        await repo.update(existing, status=FinancialJobStatus.RUNNING, lease_token="real-lease")
+
+    async with session_factory() as session:
+        repo = FinancialJobRepository(session)
+        completed, rescheduled = await repo.complete_and_reschedule(
+            job.id, "wrong-lease", result={"ok": True}, finished_at=datetime.now(timezone.utc),
+            reschedule_name="market.check_spcx34", reschedule_delay_seconds=1200,
+        )
+        assert completed is False
+        assert rescheduled is False
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "market.check_spcx34"))
+        ).scalars().all()
+        assert len(rows) == 1  # no successor was created for a completion that didn't happen
+
+
+# ── report idempotency: a retried generator must not duplicate its report ───
+
+
+@pytest.mark.asyncio
+async def test_retried_generator_does_not_duplicate_its_telegram_report(session_factory, worker, monkeypatch):
+    """The exact crash the review described: the generator successfully
+    enqueues its telegram.send_message, then (simulated here, since the
+    real sequence spans two DB writes) gets treated as if it crashed and
+    got retried before marking itself done. Re-running the SAME generator
+    job id must not produce a second report."""
+    from investments.jobs import SPCX34_JOB_NAME, _enqueue_telegram
+    from investments.spcx34_monitor import SPCX34Check
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
+
+    # First "attempt": the generator produces its report.
+    async with session_factory() as session:
+        created = await _enqueue_telegram(session, "spcx", "primeira tentativa", idempotency_key=f"spcx:{job.id}")
+        assert created is True
+
+    # Second "attempt" of the SAME generator job id (as a retry after a
+    # crash would be) tries to produce the same report again.
+    async with session_factory() as session:
+        created_again = await _enqueue_telegram(
+            session, "spcx", "segunda tentativa (retry)", idempotency_key=f"spcx:{job.id}"
+        )
+        assert created_again is False  # rejected: already produced
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "telegram.send_message"))
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].payload["text"] == "primeira tentativa"  # the retry's text never landed
+
+
+@pytest.mark.asyncio
+async def test_different_generator_attempts_get_different_idempotency_keys(session_factory):
+    """Two DIFFERENT generator job rows (e.g. two different check cycles)
+    must each be free to produce their own report — idempotency is scoped
+    to one generator job id, not to the feed as a whole."""
+    from investments.jobs import SPCX34_JOB_NAME, _enqueue_telegram
+
+    async with session_factory() as session:
+        job_1 = await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
+    async with session_factory() as session:
+        repo = FinancialJobRepository(session)
+        existing = await repo.get(job_1.id)
+        await repo.update(existing, status=FinancialJobStatus.SUCCEEDED)
+    async with session_factory() as session:
+        job_2 = await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
+
+    async with session_factory() as session:
+        assert await _enqueue_telegram(session, "spcx", "cycle 1", idempotency_key=f"spcx:{job_1.id}") is True
+    async with session_factory() as session:
+        assert await _enqueue_telegram(session, "spcx", "cycle 2", idempotency_key=f"spcx:{job_2.id}") is True
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "telegram.send_message"))
+        ).scalars().all()
+        assert len(rows) == 2

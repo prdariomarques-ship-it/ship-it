@@ -40,6 +40,9 @@ def upgrade() -> None:
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column("result", sa.JSON(), nullable=True),
+        sa.Column("lease_token", sa.String(length=36), nullable=True),
+        sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("idempotency_key", sa.String(length=200), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -47,6 +50,9 @@ def upgrade() -> None:
     op.create_index("ix_financial_jobs_name", "financial_jobs", ["name"])
     op.create_index("ix_financial_jobs_status", "financial_jobs", ["status"])
     op.create_index("ix_financial_jobs_scheduled_at", "financial_jobs", ["scheduled_at"])
+    op.create_index(
+        "ix_financial_jobs_idempotency_key", "financial_jobs", ["idempotency_key"], unique=True
+    )
     # Scoped to the three self-rescheduling chain names only — NOT to
     # telegram.send_message, which every feed shares as its job name and
     # must be free to have several independent rows pending at once.

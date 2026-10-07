@@ -9,10 +9,11 @@ cannot block or compete with the WhatsApp request-handling event loop,
 because it isn't the same process.
 """
 import asyncio
+import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,11 +32,17 @@ async def ensure_chains_seeded(repository: FinancialJobRepository, enabled: bool
     is expected and dropped, not an error.
 
     Called both once at process start AND on every worker tick (see
-    FinancialWorker.run_once) — marking the current row SUCCEEDED and
-    creating its successor are two separate commits (see Reschedule's
-    docstring for why they can't be one), so a crash between them would
-    otherwise leave a chain permanently dead until the next process
-    restart. Calling this every tick heals that without depending on one."""
+    FinancialWorker.run_once) as a backstop for the case where a whole
+    process dies before even claiming a job (so no row, successor or
+    otherwise, was ever written) — the normal successful-completion path
+    no longer has a gap here at all: see
+    FinancialJobRepository.complete_and_reschedule, which marks a chain's
+    current row SUCCEEDED and creates its successor in ONE transaction, so
+    "terminal but no successor" is never a committed, observable state for
+    another process's healing pass to react to. This no-successor case is
+    reseeded immediately (delay_seconds=0) rather than waiting out the
+    full cadence — a legitimate catch-up after an unexplained gap, not a
+    race with the normal cadence."""
     if not enabled:
         return
     for name in CHAIN_JOB_NAMES:
@@ -49,18 +56,17 @@ async def ensure_chains_seeded(repository: FinancialJobRepository, enabled: bool
 @dataclass
 class Reschedule:
     """A handler returns this instead of a plain result dict to re-arm its
-    own chain. The worker applies it only after the current row is already
-    terminal (SUCCEEDED) — the unique partial index on name treats
-    QUEUED/RUNNING as "active", so creating the successor any earlier (e.g.
-    from inside the handler, while its own row is still RUNNING) would
-    always collide with itself, not just under a real race."""
+    own chain. The worker applies it (via complete_and_reschedule) in the
+    SAME transaction that marks the current row SUCCEEDED — never two
+    separate commits, so there is no window where another process could
+    observe "terminal, no successor yet" and react to it."""
 
     delay_seconds: float
     result: dict | None = None
 
 
 FinancialJobResult = dict | Reschedule | None
-FinancialJobHandler = Callable[[AsyncSession, dict], Awaitable[FinancialJobResult]]
+FinancialJobHandler = Callable[[AsyncSession, FinancialJob], Awaitable[FinancialJobResult]]
 
 _HANDLERS: dict[str, FinancialJobHandler] = {}
 
@@ -93,11 +99,23 @@ def resolve_financial_handler(name: str) -> FinancialJobHandler:
         raise UnknownFinancialJobError(name) from None
 
 
-#  Written after every tick, successful or not — the loop being alive is
-# what this proves, not that any particular job succeeded. See
-# docker-compose.financial.yml's healthcheck, which has no HTTP server to
-# poll (this process runs no uvicorn/FastAPI — see __main__.py).
+# Written after every tick, successful or not — on its own this proves only
+# that the loop is alive (liveness), not that anything is actually working
+# (readiness) — see _write_heartbeat and docker-compose.financial.yml's
+# healthcheck, which checks both the file's age and its health_ok field.
+# This process has no HTTP server to poll (see __main__.py), hence a file.
 HEARTBEAT_PATH = "/tmp/financial_worker_heartbeat"
+# Liveness is "the loop is still ticking"; readiness folds in whether the
+# last tick could actually talk to the database and how many ticks in a
+# row have failed outright — a looping-but-broken process (e.g. DB
+# unreachable) must not report the same "healthy" as a looping-and-working
+# one. Still a single combined signal in one file: Docker's HEALTHCHECK has
+# no separate liveness/readiness probe types the way Kubernetes does: a
+# real split would need either two files polled by two different checks,
+# or an actual embedded HTTP server — deferred, not built here, since it
+# would require adding the HTTP surface this package has deliberately
+# avoided (see module docstring).
+CONSECUTIVE_FAILURE_THRESHOLD = 5
 
 
 class FinancialWorker:
@@ -106,6 +124,7 @@ class FinancialWorker:
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
         self._heartbeat_path = heartbeat_path
+        self._consecutive_tick_failures = 0
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -127,22 +146,32 @@ class FinancialWorker:
     async def _run(self) -> None:
         poll_interval = 5.0
         while not self._stopping.is_set():
+            db_ok = True
             try:
                 processed = await self.run_once()
-            except Exception:  # noqa: BLE001 - the loop must survive anything
+                self._consecutive_tick_failures = 0
+            except Exception as exc:  # noqa: BLE001 - the loop must survive anything
                 logger.exception("Financial worker tick failed")
                 processed = 0
-            self._write_heartbeat()
+                db_ok = False
+                self._consecutive_tick_failures += 1
+            self._write_heartbeat(db_ok=db_ok)
             if processed == 0:
                 try:
                     await asyncio.wait_for(self._stopping.wait(), timeout=poll_interval)
                 except asyncio.TimeoutError:
                     pass
 
-    def _write_heartbeat(self) -> None:
+    def _write_heartbeat(self, db_ok: bool) -> None:
+        payload = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "db_ok": db_ok,
+            "consecutive_tick_failures": self._consecutive_tick_failures,
+            "healthy": db_ok and self._consecutive_tick_failures < CONSECUTIVE_FAILURE_THRESHOLD,
+        }
         try:
             with open(self._heartbeat_path, "w") as f:
-                f.write(datetime.now(timezone.utc).isoformat())
+                json.dump(payload, f)
         except OSError:
             logger.warning("Could not write heartbeat file %s", self._heartbeat_path)
 
@@ -151,9 +180,9 @@ class FinancialWorker:
             repository = FinancialJobRepository(session)
             now = datetime.now(timezone.utc)
 
-            await self._recover_stale(session, repository, now)
+            await self._recover_stale(repository, now)
             await ensure_chains_seeded(repository, self._settings.market_monitors_enabled)
-            claimed = await self._claim_due(session, repository, now)
+            claimed = await repository.claim_due(now, limit=10)
             job_ids = [job.id for job in claimed]
 
             for job_id in job_ids:
@@ -162,91 +191,97 @@ class FinancialWorker:
                     job = await job_repository.get(job_id)
                     if job is None:
                         continue
-                    await self._execute(job_session, job_repository, job)
+                    await self._execute(job_repository, job)
 
             return len(job_ids)
 
-    async def _claim_due(
-        self, session: AsyncSession, repository: FinancialJobRepository, now: datetime
-    ) -> list[FinancialJob]:
-        jobs = await repository.due_jobs(now, limit=10, for_update=True)
-        for job in jobs:
-            job.status = FinancialJobStatus.RUNNING
-            job.started_at = now
-            job.attempts += 1
-        await session.commit()
-        return jobs
-
-    async def _recover_stale(
-        self, session: AsyncSession, repository: FinancialJobRepository, now: datetime
-    ) -> None:
-        started_before = now - timedelta(seconds=300)
-        for job in await repository.stale_running_jobs(started_before):
+    async def _recover_stale(self, repository: FinancialJobRepository, now: datetime) -> None:
+        for job in await repository.stale_running_candidates(now):
             logger.warning("Recovering stale financial job %s (%s), attempt %s", job.id, job.name, job.attempts)
             if job.name in AT_MOST_ONCE_JOB_NAMES:
-                await repository.update(
-                    job, status=FinancialJobStatus.FAILED, finished_at=now,
+                recovered = await repository.try_recover_stale(
+                    job.id, job.lease_token, now, failed=True,
                     last_error="Recovered from a stale RUNNING state: the handler may have already "
                                "completed (e.g. Telegram may have already accepted the message) before "
                                "the crash — not auto-retried to avoid a possible duplicate send.",
                     result={"delivered": None, "reason": "uncertain_outcome_process_crash"},
                 )
-                continue
-            if job.attempts >= job.max_attempts:
-                await repository.update(
-                    job, status=FinancialJobStatus.FAILED, finished_at=now,
+            elif job.attempts >= job.max_attempts:
+                recovered = await repository.try_recover_stale(
+                    job.id, job.lease_token, now, failed=True,
                     last_error="worker crashed or timed out while running the job",
                 )
             else:
-                await repository.update(job, status=FinancialJobStatus.QUEUED, scheduled_at=now)
+                recovered = await repository.try_recover_stale(
+                    job.id, job.lease_token, now, failed=False,
+                    last_error="worker crashed or timed out while running the job (requeued)",
+                )
+            if not recovered:
+                # Another process's recovery pass (or this job's own slow-
+                # but-legitimate execution finishing normally) already
+                # changed this row between our read and this UPDATE — not
+                # an error, just means we lost the race and must not act
+                # on stale information.
+                logger.debug("Recovery for job %s no-op: lease already changed by someone else", job.id)
 
-    async def _execute(self, session: AsyncSession, repository: FinancialJobRepository, job: FinancialJob) -> None:
-        job_id, job_name = job.id, job.name
+    async def _execute(self, repository: FinancialJobRepository, job: FinancialJob) -> None:
+        # Captured as locals, not read off `job` again after this point:
+        # session.rollback() (below, on the exception path) expires every
+        # ORM instance in the session by default, so a later `job.attempts`
+        # attribute access would trigger an implicit lazy-reload — which
+        # needs an async context SQLAlchemy's sync attribute-access path
+        # doesn't have here, raising MissingGreenlet. Confirmed by
+        # reproducing it before this fix.
+        job_id, job_name, lease_token = job.id, job.name, job.lease_token
+        attempts, max_attempts = job.attempts, job.max_attempts
         started = time.perf_counter()
         try:
             handler = resolve_financial_handler(job.name)
-            result = await handler(session, dict(job.payload or {}))
+            result = await handler(repository.session, job)
         except Exception as exc:  # noqa: BLE001 - handler failures feed the retry logic
-            await session.rollback()
+            await repository.session.rollback()
             duration = time.perf_counter() - started
             logger.warning("Financial job %s (%s) failed after %.2fs: %s", job_id, job_name, duration, exc)
-            job = await repository.get(job_id) or job
-            await self._handle_failure(repository, job, exc)
+            backoff = 30 * (2 ** (attempts - 1))
+            retry_after = getattr(exc, "retry_after_seconds", None)
+            if retry_after is not None:
+                backoff = max(backoff, retry_after)
+            owned = await repository.retry_or_fail_if_owner(
+                job_id, lease_token, attempts=attempts, max_attempts=max_attempts,
+                backoff_seconds=backoff, error=f"{type(exc).__name__}: {exc}",
+            )
+            if not owned:
+                logger.warning(
+                    "Job %s (%s) finished (with error) after its lease was reclaimed — "
+                    "result discarded, the new owner's state was not touched.", job_id, job_name,
+                )
             return
 
         duration = time.perf_counter() - started
         logger.info("Financial job %s (%s) succeeded in %.2fs", job_id, job_name, duration)
         reschedule = result if isinstance(result, Reschedule) else None
-        await repository.update(
-            job, status=FinancialJobStatus.SUCCEEDED, finished_at=datetime.now(timezone.utc),
-            result=reschedule.result if reschedule else result,
-        )
-        if reschedule is not None:
-            # Only now is the current row terminal — safe against the
-            # unique partial index, which treats QUEUED/RUNNING as active.
-            try:
-                await repository.create(name=job_name, payload={}, delay_seconds=reschedule.delay_seconds)
-            except DuplicateChainError:
-                logger.debug("Reschedule for %s skipped: a chain is already queued/running", job_name)
+        finished_at = datetime.now(timezone.utc)
 
-    async def _handle_failure(self, repository: FinancialJobRepository, job: FinancialJob, exc: Exception) -> None:
-        error = f"{type(exc).__name__}: {exc}"
-        if job.attempts >= job.max_attempts:
-            await repository.update(
-                job, status=FinancialJobStatus.FAILED, finished_at=datetime.now(timezone.utc), last_error=error
+        if reschedule is not None:
+            completed, rescheduled = await repository.complete_and_reschedule(
+                job_id, lease_token, result=reschedule.result, finished_at=finished_at,
+                reschedule_name=job_name, reschedule_delay_seconds=reschedule.delay_seconds,
             )
-            return
-        backoff = 30 * (2 ** (job.attempts - 1))
-        # An exception carrying retry_after_seconds (e.g. Telegram's 429)
-        # sets a floor on the delay — never retry sooner than the API itself
-        # asked for, even if exponential backoff would be shorter.
-        retry_after = getattr(exc, "retry_after_seconds", None)
-        if retry_after is not None:
-            backoff = max(backoff, retry_after)
-        await repository.update(
-            job, status=FinancialJobStatus.QUEUED,
-            scheduled_at=datetime.now(timezone.utc) + timedelta(seconds=backoff), last_error=error,
-        )
+            if not completed:
+                logger.warning(
+                    "Job %s (%s) completed after its lease was reclaimed — "
+                    "result discarded, no successor created by this execution.", job_id, job_name,
+                )
+            elif not rescheduled:
+                logger.debug("Job %s (%s): chain already had an active successor.", job_id, job_name)
+        else:
+            completed = await repository.complete_if_owner(
+                job_id, lease_token, status=FinancialJobStatus.SUCCEEDED, finished_at=finished_at, result=result
+            )
+            if not completed:
+                logger.warning(
+                    "Job %s (%s) completed after its lease was reclaimed — result discarded.", job_id, job_name
+                )
 
 
 financial_worker = FinancialWorker()

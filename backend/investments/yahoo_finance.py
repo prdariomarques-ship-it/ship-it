@@ -109,6 +109,13 @@ async def fetch_price_series(ticker: str, range_: str = "2mo") -> PriceSeries:
     if len(raw_closes) != len(raw_timestamps):
         raise MarketDataError(f"Mismatched closes/timestamps length for {ticker}")
 
+    # Small allowance for clock skew between this process and Yahoo's
+    # servers — anything further ahead than that is malformed/corrupt
+    # data, not a real future trading timestamp, and must be dropped
+    # rather than silently accepted (it would otherwise read as
+    # impossibly "fresh", defeating the whole point of age_disclosure).
+    max_valid_timestamp = datetime.now(timezone.utc).timestamp() + 300
+
     closes: list[float] = []
     timestamps: list[int] = []
     for close, ts in zip(raw_closes, raw_timestamps):
@@ -116,6 +123,9 @@ async def fetch_price_series(ticker: str, range_: str = "2mo") -> PriceSeries:
             continue
         if not math.isfinite(close):
             logger.warning("Dropping non-finite close for %s at ts=%s: %r", ticker, ts, close)
+            continue
+        if ts > max_valid_timestamp:
+            logger.warning("Dropping future-dated point for %s: ts=%s is after now", ticker, ts)
             continue
         closes.append(float(close))
         timestamps.append(int(ts))

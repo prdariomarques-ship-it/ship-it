@@ -43,6 +43,20 @@ async def test_send_telegram_message_returns_message_id_on_ok(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_telegram_message_ok_true_without_message_id_is_uncertain_not_delivered(monkeypatch):
+    """ok:true alone is not proof of delivery — only a real message_id is.
+    Should never normally happen per Telegram's documented contract, but a
+    malformed/unexpected response here must not be read as confident
+    success either."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    _patch_client(monkeypatch, handler)
+    with pytest.raises(TelegramUncertainOutcomeError, match="message_id"):
+        await send_telegram_message(FAKE_TOKEN, "chat-1", "oi")
+
+
+@pytest.mark.asyncio
 async def test_send_telegram_message_raises_permanent_on_4xx(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"ok": False, "description": "Bad Request: chat not found"})

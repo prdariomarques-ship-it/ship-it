@@ -2,13 +2,20 @@
 (investments/worker.py), never on jobs.registry/jobs.worker. Each
 self-rescheduling check (SPCX34, B3 summary, daily briefing) runs once,
 then returns Reschedule(...) to re-arm itself with a delay — applied by
-the worker only after the current row is already terminal, and never lets
-an unexpected exception escape the handler, so the worker's own
-retry/backoff can never fire *in addition to* that reschedule and spawn a
-second chain. The unique partial index on financial_jobs.name (see
-models.py) is the second, DB-enforced line of defense against the same
-thing — and the reason the reschedule can't just happen inside the
-handler itself (its own row is still RUNNING at that point).
+the worker only after the current row is already terminal (in the SAME
+transaction, see FinancialJobRepository.complete_and_reschedule), and
+never lets an unexpected exception escape the handler, so the worker's
+own retry/backoff can never fire *in addition to* that reschedule and
+spawn a second chain. The unique partial index on financial_jobs.name
+(see models.py) is the second, DB-enforced line of defense against the
+same thing.
+
+Every report a generator (SPCX34/B3/briefing check) produces is enqueued
+with an idempotency_key tied to the generator job's own row id — if that
+row crashes before marking itself done and gets retried, re-running the
+generator from scratch must not produce a second telegram.send_message
+for what's logically the same check. Enforced at the DB via a second
+unique index (models.py), not just an app-level check.
 
 market_monitors_enabled is checked both before scheduling a check AND
 inside send_telegram_message_job itself — disabling it stops delivery of
@@ -21,7 +28,7 @@ from investments.b3_calendar import is_pregao_now
 from investments.b3_summary import check_b3_summary, format_b3_summary_message
 from investments.daily_briefing import fetch_briefing_snapshot, format_briefing_message
 from investments.models import CHAIN_JOB_NAMES, FinancialJob
-from investments.repository import FinancialJobRepository
+from investments.repository import DuplicateReportError, FinancialJobRepository
 from investments.spcx34_monitor import check_spcx34
 from investments.telegram_sender import (
     TelegramPermanentError,
@@ -29,7 +36,7 @@ from investments.telegram_sender import (
     send_telegram_message,
 )
 from investments.worker import Reschedule, ensure_chains_seeded, financial_job_handler
-from investments.yahoo_finance import MarketDataError
+from investments.yahoo_finance import MarketDataError, age_disclosure
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -48,31 +55,29 @@ _FEED_CREDENTIALS = {
 }
 
 
-async def _enqueue_telegram(db: AsyncSession, feed: str, text: str) -> None:
-    # telegram.send_message is excluded from the chain-uniqueness index (see
-    # models.CHAIN_JOB_NAMES) — a burst of real alerts, or two different
-    # feeds, must be able to queue up as separate rows, not collide.
-    # The explicit rollback-on-IntegrityError below is defense in depth:
-    # db.add()+commit() does not bypass a DB constraint (an earlier version
-    # of this comment claimed it did — it was wrong), so if some future
-    # constraint ever does apply here, the caller's session must not be
-    # left in a failed state afterward.
-    from sqlalchemy.exc import IntegrityError
-
-    job = FinancialJob(name=TELEGRAM_SEND_JOB_NAME, payload={"feed": feed, "text": text}, max_attempts=3)
-    db.add(job)
+async def _enqueue_telegram(db: AsyncSession, feed: str, text: str, idempotency_key: str) -> bool:
+    """Returns False (and creates nothing) if idempotency_key already
+    exists — this exact report was already produced by an earlier attempt
+    of the same generator job. telegram.send_message itself stays outside
+    the chain-uniqueness index (models.CHAIN_JOB_NAMES) — a burst of real
+    alerts, or two different feeds, must still be able to queue up as
+    separate rows; only an exact (feed, generator-attempt) repeat is
+    rejected."""
     try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        logger.exception("Unexpected IntegrityError enqueueing telegram.send_message for feed %r", feed)
-        raise
+        await FinancialJobRepository(db).create(
+            name=TELEGRAM_SEND_JOB_NAME, payload={"feed": feed, "text": text}, max_attempts=3,
+            idempotency_key=idempotency_key,
+        )
+        return True
+    except DuplicateReportError:
+        logger.info("Report %r already produced (idempotency_key=%r) — not duplicating.", feed, idempotency_key)
+        return False
 
 
 @financial_job_handler(TELEGRAM_SEND_JOB_NAME)
-async def send_telegram_message_job(db: AsyncSession, payload: dict) -> dict:
-    feed = payload["feed"]
-    text = payload["text"]
+async def send_telegram_message_job(db: AsyncSession, job: FinancialJob) -> dict:
+    feed = job.payload["feed"]
+    text = job.payload["text"]
     settings = get_settings()
 
     if not settings.market_monitors_enabled:
@@ -104,23 +109,23 @@ async def send_telegram_message_job(db: AsyncSession, payload: dict) -> dict:
     # TelegramRateLimitedError is allowed to propagate — the worker's
     # retry/backoff (which reads exc.retry_after_seconds) handles it.
 
-    return {"delivered": True, "message_id": result.get("message_id")}
+    return {"delivered": True, "message_id": result["message_id"]}
 
 
 @financial_job_handler(SPCX34_JOB_NAME)
-async def check_spcx34_job(db: AsyncSession, payload: dict) -> Reschedule | None:
+async def check_spcx34_job(db: AsyncSession, job: FinancialJob) -> Reschedule | None:
     settings = get_settings()
     if not settings.market_monitors_enabled:
         return None  # chain intentionally ends, not an error
     try:
         if is_pregao_now():
-            await _run_spcx34_check(db, settings)
+            await _run_spcx34_check(db, settings, job.id)
     except Exception:  # noqa: BLE001 - never let this escape; see module docstring
         logger.exception("SPCX34 check raised unexpectedly")
     return Reschedule(delay_seconds=settings.market_check_interval_seconds)
 
 
-async def _run_spcx34_check(db: AsyncSession, settings) -> None:
+async def _run_spcx34_check(db: AsyncSession, settings, generator_job_id: int) -> None:
     try:
         result = await check_spcx34(
             settings.spcx34_ticker, settings.spcx34_bollinger_window, settings.spcx34_bollinger_std_mult
@@ -136,8 +141,6 @@ async def _run_spcx34_check(db: AsyncSession, settings) -> None:
     if not result.triggered:
         return
 
-    from investments.yahoo_finance import age_disclosure
-
     lines = [
         "🚨 <b>ALERTA SPCX34.SA</b>",
         f"Preço: R$ {result.price:.2f}",
@@ -146,11 +149,11 @@ async def _run_spcx34_check(db: AsyncSession, settings) -> None:
     age_line = age_disclosure(result.quote_age_hours)
     if age_line:
         lines.append(age_line)
-    await _enqueue_telegram(db, "spcx", "\n".join(lines))
+    await _enqueue_telegram(db, "spcx", "\n".join(lines), idempotency_key=f"spcx:{generator_job_id}")
 
 
 @financial_job_handler(B3_SUMMARY_JOB_NAME)
-async def send_b3_summary_job(db: AsyncSession, payload: dict) -> Reschedule | None:
+async def send_b3_summary_job(db: AsyncSession, job: FinancialJob) -> Reschedule | None:
     """Port of the original FlowCore PMX (@dariozcodebot) feed: IBOVESPA +
     USD/BRL, sent every check during pregão — a radar, not a threshold alert."""
     settings = get_settings()
@@ -158,13 +161,13 @@ async def send_b3_summary_job(db: AsyncSession, payload: dict) -> Reschedule | N
         return None
     try:
         if is_pregao_now():
-            await _run_b3_summary(db, settings)
+            await _run_b3_summary(db, settings, job.id)
     except Exception:  # noqa: BLE001 - never let this escape; see module docstring
         logger.exception("B3 summary raised unexpectedly")
     return Reschedule(delay_seconds=settings.market_check_interval_seconds)
 
 
-async def _run_b3_summary(db: AsyncSession, settings) -> None:
+async def _run_b3_summary(db: AsyncSession, settings, generator_job_id: int) -> None:
     try:
         summary = await check_b3_summary()
     except MarketDataError as exc:
@@ -176,11 +179,13 @@ async def _run_b3_summary(db: AsyncSession, settings) -> None:
         summary.ibovespa_points, summary.ibovespa_delta_pct,
         summary.usdbrl_level, summary.usdbrl_delta_pct,
     )
-    await _enqueue_telegram(db, "b3", format_b3_summary_message(summary))
+    await _enqueue_telegram(
+        db, "b3", format_b3_summary_message(summary), idempotency_key=f"b3:{generator_job_id}"
+    )
 
 
 @financial_job_handler(DAILY_BRIEFING_JOB_NAME)
-async def send_daily_briefing_job(db: AsyncSession, payload: dict) -> Reschedule | None:
+async def send_daily_briefing_job(db: AsyncSession, job: FinancialJob) -> Reschedule | None:
     """Port of the original FlowCore "Mercado" feed: yield curve + FX +
     equities + commodities, sent every check during pregão. Macro regime
     and active-alerts sections are not ported (see investments/daily_briefing.py)."""
@@ -189,20 +194,22 @@ async def send_daily_briefing_job(db: AsyncSession, payload: dict) -> Reschedule
         return None
     try:
         if is_pregao_now():
-            await _run_daily_briefing(db, settings)
+            await _run_daily_briefing(db, settings, job.id)
     except Exception:  # noqa: BLE001 - never let this escape; see module docstring
         logger.exception("Daily briefing raised unexpectedly")
     return Reschedule(delay_seconds=settings.market_check_interval_seconds)
 
 
-async def _run_daily_briefing(db: AsyncSession, settings) -> None:
+async def _run_daily_briefing(db: AsyncSession, settings, generator_job_id: int) -> None:
     snapshot = await fetch_briefing_snapshot()
     if not snapshot.quotes:
         logger.warning("Daily briefing skipped: no tickers returned real data")
         return
 
     logger.info("Daily briefing: %d tickers resolved", len(snapshot.quotes))
-    await _enqueue_telegram(db, "mercado", format_briefing_message(snapshot))
+    await _enqueue_telegram(
+        db, "mercado", format_briefing_message(snapshot), idempotency_key=f"mercado:{generator_job_id}"
+    )
 
 
 async def seed_financial_monitor_jobs(db: AsyncSession) -> None:

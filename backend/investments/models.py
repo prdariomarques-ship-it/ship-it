@@ -57,6 +57,14 @@ class FinancialJob(Base, TimestampMixin):
             postgresql_where=text(f"status IN ('QUEUED', 'RUNNING') AND name IN {_CHAIN_NAMES_SQL}"),
             sqlite_where=text(f"status IN ('QUEUED', 'RUNNING') AND name IN {_CHAIN_NAMES_SQL}"),
         ),
+        # A second row can never carry the same idempotency_key — this is
+        # what stops a crashed-and-retried generator from producing a
+        # second telegram.send_message for the same report (see
+        # investments/jobs.py's _enqueue_telegram). NULL values never
+        # conflict with each other in SQL uniqueness (true on both Postgres
+        # and SQLite), so this is a no-op for every row that doesn't set one
+        # (the three chain jobs).
+        Index("ix_financial_jobs_idempotency_key", "idempotency_key", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -74,3 +82,13 @@ class FinancialJob(Base, TimestampMixin):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     result: Mapped[dict | None] = mapped_column(JSON)
+    # Ownership lease for claim/recovery (see worker.py::_claim_due and
+    # _recover_stale) — a random token stamped at claim time; recovery and
+    # the final status write both require a WHERE lease_token=:token match,
+    # so a second process can never recover a job the first is still
+    # legitimately executing, and a reclaimed job's stale original executor
+    # can never clobber the new owner's result.
+    lease_token: Mapped[str | None] = mapped_column(String(36))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Idempotency key for generated reports/messages — see the Index above.
+    idempotency_key: Mapped[str | None] = mapped_column(String(200))

@@ -19,11 +19,15 @@
 #
 # O que NÃO é isolado (declarado, não escondido): mesmo servidor Postgres,
 # mesmo banco, mesmo usuário/credencial do backend principal — isolamento
-# lógico (tabela própria, sem queries cruzadas), não isolamento de
-# instância de banco nem de role com permissão restrita. Uma role Postgres
-# dedicada (somente INSERT/SELECT/UPDATE em financial_jobs) é recomendável
-# como endurecimento adicional, mas não foi criada aqui — criar role/
-# permissão é alteração de banco, fora do que esta etapa autoriza.
+# lógico (tabela própria, sem queries cruzadas no código), não isolamento
+# de permissão a nível de banco. Hoje o worker financeiro TEM permissão de
+# ler/escrever em `jobs` e nas demais tabelas do domínio WhatsApp, porque
+# usa a mesma credencial — apenas nunca o faz, por não importar
+# repositories/job.py. O desenho de uma role Postgres restrita (somente
+# SELECT/INSERT/UPDATE em financial_jobs, sem acesso a `jobs`) está
+# preparado em docker/financial_role_setup.sql — NÃO aplicado, NÃO
+# executado contra nenhum banco; aplicar isso é alteração de banco e
+# fica fora do que esta etapa autoriza.
 #
 # Uso (só depois de autorizado — ver plano de implantação). Sempre
 # nomeando o serviço explicitamente, nunca um `up -d` sem alvo:
@@ -72,15 +76,29 @@ services:
     # The base image's own HEALTHCHECK (Dockerfile) polls GET /health on
     # port 8000 — this process runs no HTTP server at all (see
     # investments/__main__.py), so that check would fail forever. Overridden
-    # here with a liveness check appropriate for a polling worker: the loop
-    # writes a heartbeat file after every tick (worker.py::_write_heartbeat),
-    # and this fails if that file is missing or older than ~2 polling
-    # intervals (worker's idle poll is 5s; generous margin for a slow tick).
+    # here with a check appropriate for a polling worker, reading the JSON
+    # heartbeat worker.py::_write_heartbeat writes after every tick:
+    #   - the file must exist and be recent (<120s: ~2 idle-poll intervals,
+    #     generous margin for a slow tick) — this is the liveness half:
+    #     "the loop is still ticking".
+    #   - its own `healthy` field must be true — this is the readiness
+    #     half: db_ok on the last tick AND consecutive_tick_failures below
+    #     the threshold. A process that keeps looping but can't reach the
+    #     database, or whose last 5+ ticks all raised, must NOT report
+    #     healthy just because it's still alive — that was exactly the gap
+    #     in the plain file-age check this replaces.
+    # Still one combined signal in one Docker HEALTHCHECK, not a true
+    # separate liveness/readiness pair the way Kubernetes exposes two probe
+    # types: a real split would need either two separate files (one for
+    # "process alive", one for "last tick healthy") each polled by its own
+    # check, or an embedded HTTP server exposing /healthz and /readyz —
+    # deliberately not built, since it would add the HTTP surface this
+    # package has otherwise avoided end to end (see module docstrings).
     healthcheck:
       test:
         [
           "CMD", "python", "-c",
-          "import os,sys,time; p='/tmp/financial_worker_heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<120 else 1)"
+          "import json,os,sys,time; p='/tmp/financial_worker_heartbeat'; d=json.load(open(p)); sys.exit(0 if time.time()-os.path.getmtime(p)<120 and d.get('healthy') else 1)"
         ]
       interval: 30s
       timeout: 5s
