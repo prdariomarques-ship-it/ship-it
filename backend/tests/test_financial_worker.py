@@ -227,3 +227,142 @@ async def test_investments_jobs_endpoint_lists_financial_jobs_only(client, auth_
     # which only ever queries the financial_jobs table — nothing here can
     # surface a row from `jobs` (WhatsApp's queue).
     assert all("to" not in row["payload"] for row in response.json())  # whatsapp.send_text's own payload shape
+
+
+# ── telegram.send_message is excluded from the chain-uniqueness index ───────
+# (regression test for the exact bug a review caught: the index used to
+# apply to every job name, including this one, which every feed shares.)
+
+
+@pytest.mark.asyncio
+async def test_two_different_feeds_queue_without_colliding(session_factory):
+    async with session_factory() as session:
+        await FinancialJobRepository(session).create(
+            name="telegram.send_message", payload={"feed": "spcx", "text": "a"}
+        )
+    async with session_factory() as session:
+        # Must NOT raise DuplicateChainError — different feed, same job name.
+        await FinancialJobRepository(session).create(
+            name="telegram.send_message", payload={"feed": "b3", "text": "b"}
+        )
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "telegram.send_message"))
+        ).scalars().all()
+        assert len(rows) == 2
+        assert {r.payload["feed"] for r in rows} == {"spcx", "b3"}
+
+
+@pytest.mark.asyncio
+async def test_same_feed_can_have_several_pending_sends(session_factory):
+    """A burst of real alerts for ONE feed must also be allowed to queue up
+    as separate rows — the constraint is about chain names, not feeds."""
+    async with session_factory() as session:
+        repo = FinancialJobRepository(session)
+        for i in range(3):
+            await repo.create(name="telegram.send_message", payload={"feed": "spcx", "text": f"msg {i}"})
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "telegram.send_message"))
+        ).scalars().all()
+        assert len(rows) == 3
+
+
+# ── recovery after a crash must never auto-resend an accepted message ───────
+
+
+@pytest.mark.asyncio
+async def test_stale_telegram_send_job_is_not_auto_retried(session_factory, worker, monkeypatch):
+    """If the process crashes after Telegram already accepted the message
+    but before the result was persisted, recovery must mark it uncertain
+    and stop — never silently requeue it for a second attempt."""
+    from datetime import datetime, timedelta, timezone
+
+    send_calls = []
+
+    @financial_job_handler("telegram.send_message")
+    async def _handler(db, payload):
+        send_calls.append(payload)
+        return {"delivered": True, "message_id": 1}
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).create(
+            name="telegram.send_message", payload={"feed": "spcx", "text": "oi"}, max_attempts=3
+        )
+        repo = FinancialJobRepository(session)
+        existing = await repo.get(job.id)
+        await repo.update(
+            existing, status=FinancialJobStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(seconds=600), attempts=1,
+        )
+
+    await worker.run_once()  # recovery runs at the top of every tick
+
+    assert send_calls == []  # the handler was never invoked again
+
+    async with session_factory() as session:
+        refreshed = await FinancialJobRepository(session).get(job.id)
+        assert refreshed.status == FinancialJobStatus.FAILED
+        assert refreshed.result == {"delivered": None, "reason": "uncertain_outcome_process_crash"}
+
+
+# ── self-healing: a chain that dies between its two commits heals itself ────
+
+
+@pytest.mark.asyncio
+async def test_a_missing_chain_is_reseeded_on_the_next_tick_without_a_restart(session_factory, worker, monkeypatch):
+    """Simulates exactly the gap the review asked about: the current row
+    already SUCCEEDED, but the successor was never created (process died,
+    or the create() call itself failed) — the very next tick must recreate
+    it, with no process restart and no second chain."""
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "market_monitors_enabled", True)
+
+    # A trivial fake handler: the re-seeded row is due immediately (delay 0)
+    # and would otherwise be claimed+executed within this same tick by the
+    # real check_spcx34_job, which calls out to Yahoo Finance for real.
+    @financial_job_handler("market.check_spcx34")
+    async def _fake_check(db, payload):
+        return None
+
+    async with session_factory() as session:
+        job = await FinancialJobRepository(session).create(name="market.check_spcx34", payload={})
+        repo = FinancialJobRepository(session)
+        existing = await repo.get(job.id)
+        # The chain's only row is already terminal — as if the successor
+        # create() never happened after marking this one SUCCEEDED.
+        await repo.update(existing, status=FinancialJobStatus.SUCCEEDED)
+
+    await worker.run_once()  # ensure_chains_seeded runs at the top of every tick
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "market.check_spcx34"))
+        ).scalars().all()
+        queued = [r for r in rows if r.status == FinancialJobStatus.QUEUED]
+        assert len(queued) == 1  # healed, and exactly one — not a duplicate chain
+
+
+@pytest.mark.asyncio
+async def test_healing_does_not_touch_a_chain_that_is_already_active(session_factory, worker, monkeypatch):
+    from utils.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "market_monitors_enabled", True)
+
+    async with session_factory() as session:
+        # Scheduled in the future, so _claim_due leaves it alone this tick —
+        # isolates ensure_chains_seeded's behavior from claim/execute.
+        await FinancialJobRepository(session).create(
+            name="market.check_spcx34", payload={}, delay_seconds=3600
+        )
+
+    await worker.run_once()
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(select(FinancialJob).where(FinancialJob.name == "market.check_spcx34"))
+        ).scalars().all()
+        assert len(rows) == 1  # healing must not create a second row when one is already active

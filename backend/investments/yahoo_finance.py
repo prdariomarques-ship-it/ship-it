@@ -29,8 +29,32 @@ _MAX_CONCURRENCY = 6
 # Daily-bar data older than this is treated as stale, not current — covers
 # a long weekend/holiday without needing an exchange calendar (point still
 # open: this does NOT validate actual B3/international trading holidays;
-# see investments/b3_calendar.py's docstring).
+# see investments/b3_calendar.py's docstring). This threshold only decides
+# whether to use the data AT ALL (StaleDataError above it); it does not by
+# itself mean the data should be presented as if it were today's — that's
+# FRESH_ENOUGH_HOURS below, a much tighter bar, because tolerating a few
+# days of old data as "not broken" is a different claim from "this is a
+# current quote", and callers must not conflate the two.
 STALE_AFTER_SECONDS = 4 * 24 * 3600
+
+# Below this, a quote is presented as current with no caveat. Above it
+# (but still under STALE_AFTER_SECONDS), the data is used but every
+# message built from it must say explicitly how old it is — never
+# implied to be "now" just because it wasn't old enough to reject outright.
+# ~20h covers a same-day quote fetched slightly before/after a given
+# market's own session without silently spanning an entire extra day.
+FRESH_ENOUGH_HOURS = 20.0
+
+
+def age_disclosure(age_hours: float) -> str:
+    """"" when fresh enough to show with no caveat; otherwise an explicit,
+    user-facing line stating the data's real age — this exists specifically
+    so "we didn't reject the data as broken" is never read as "this is
+    current". Does not know about holidays/trading calendars (that gap is
+    still open, see b3_calendar.py) — only about clock time elapsed."""
+    if age_hours <= FRESH_ENOUGH_HOURS:
+        return ""
+    return f"⚠️ dado de {age_hours:.0f}h atrás — pregão de hoje não confirmado"
 
 
 class MarketDataError(RuntimeError):

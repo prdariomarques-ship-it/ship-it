@@ -86,7 +86,7 @@ def _monitors_enabled(monkeypatch):
 @pytest.mark.asyncio
 async def test_check_spcx34_job_enqueues_telegram_message_when_triggered(session_factory, worker, monkeypatch):
     async def _fake_check(ticker, window, std_mult):
-        return SPCX34Check(ticker=ticker, price=60.0, upper_band=57.74, triggered=True)
+        return SPCX34Check(ticker=ticker, price=60.0, upper_band=57.74, triggered=True, quote_timestamp=1_700_000_000, quote_age_hours=1.0)
 
     monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
 
@@ -108,9 +108,30 @@ async def test_check_spcx34_job_enqueues_telegram_message_when_triggered(session
 
 
 @pytest.mark.asyncio
+async def test_check_spcx34_alert_declares_age_when_quote_is_stale(session_factory, worker, monkeypatch):
+    async def _fake_check(ticker, window, std_mult):
+        return SPCX34Check(
+            ticker=ticker, price=60.0, upper_band=57.74, triggered=True,
+            quote_timestamp=1_700_000_000, quote_age_hours=30.0,  # past FRESH_ENOUGH_HOURS
+        )
+
+    monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
+
+    async with session_factory() as session:
+        await FinancialJobRepository(session).create(name=SPCX34_JOB_NAME, payload={})
+
+    assert await worker.run_once() == 1
+
+    async with session_factory() as session:
+        sent = await FinancialJobRepository(session).find_one(name=TELEGRAM_SEND_JOB_NAME)
+        assert "30h" in sent.payload["text"]
+        assert "pregão de hoje não confirmado" in sent.payload["text"]
+
+
+@pytest.mark.asyncio
 async def test_check_spcx34_job_sends_nothing_when_not_triggered(session_factory, worker, monkeypatch):
     async def _fake_check(ticker, window, std_mult):
-        return SPCX34Check(ticker=ticker, price=50.0, upper_band=57.74, triggered=False)
+        return SPCX34Check(ticker=ticker, price=50.0, upper_band=57.74, triggered=False, quote_timestamp=1_700_000_000, quote_age_hours=1.0)
 
     monkeypatch.setattr("investments.jobs.check_spcx34", _fake_check)
 
@@ -211,10 +232,33 @@ async def test_seed_financial_monitor_jobs_noop_when_disabled(session_factory, m
 # ── send_b3_summary_job (PMX / @dariozcodebot port) ──────────────────────────
 
 
+def test_format_b3_summary_message_declares_age_when_stale():
+    from investments.b3_summary import format_b3_summary_message
+
+    summary = B3Summary(
+        ibovespa_points=166934.2, ibovespa_delta_pct=1.23,
+        usdbrl_level=5.4321, usdbrl_delta_pct=-0.5, max_age_hours=50.0,
+    )
+    message = format_b3_summary_message(summary)
+    assert "50h" in message
+    assert "pregão de hoje não confirmado" in message
+
+
+def test_format_b3_summary_message_silent_when_fresh():
+    from investments.b3_summary import format_b3_summary_message
+
+    summary = B3Summary(
+        ibovespa_points=166934.2, ibovespa_delta_pct=1.23,
+        usdbrl_level=5.4321, usdbrl_delta_pct=-0.5, max_age_hours=1.0,
+    )
+    message = format_b3_summary_message(summary)
+    assert "pregão de hoje não confirmado" not in message
+
+
 @pytest.mark.asyncio
 async def test_b3_summary_job_enqueues_telegram_message(session_factory, worker, monkeypatch):
     async def _fake_check():
-        return B3Summary(ibovespa_points=166934.2, ibovespa_delta_pct=1.23, usdbrl_level=5.4321, usdbrl_delta_pct=-0.5)
+        return B3Summary(ibovespa_points=166934.2, ibovespa_delta_pct=1.23, usdbrl_level=5.4321, usdbrl_delta_pct=-0.5, max_age_hours=1.0)
 
     monkeypatch.setattr("investments.jobs.check_b3_summary", _fake_check)
 

@@ -2,11 +2,11 @@
 
 Ports runtime/telegram.py::build_b3_summary_message() from the original
 FlowCore (Python/FastAPI) repo into DarioOS, same tickers, same two data
-points, now delivered over WhatsApp instead of a dedicated Telegram bot.
+points, now delivered over Telegram instead of a dedicated bot.
 """
 from dataclasses import dataclass
 
-from investments.yahoo_finance import fetch_daily_closes, latest_and_delta_pct
+from investments.yahoo_finance import age_disclosure, fetch_price_series, latest_and_delta_pct
 
 IBOVESPA_TICKER = "^BVSP"
 USDBRL_TICKER = "USDBRL=X"
@@ -18,6 +18,7 @@ class B3Summary:
     ibovespa_delta_pct: float | None
     usdbrl_level: float
     usdbrl_delta_pct: float | None
+    max_age_hours: float  # older of the two tickers' quote ages — see age_disclosure
 
 
 def _fmt_index_value(value: float) -> str:
@@ -32,15 +33,16 @@ def _fmt_delta_pct(delta: float | None) -> str:
 
 
 async def check_b3_summary() -> B3Summary:
-    ibov_closes = await fetch_daily_closes(IBOVESPA_TICKER, range_="5d")
-    usdbrl_closes = await fetch_daily_closes(USDBRL_TICKER, range_="5d")
-    ibov_value, ibov_delta = latest_and_delta_pct(ibov_closes)
-    usdbrl_value, usdbrl_delta = latest_and_delta_pct(usdbrl_closes)
+    ibov_series = await fetch_price_series(IBOVESPA_TICKER, range_="5d")
+    usdbrl_series = await fetch_price_series(USDBRL_TICKER, range_="5d")
+    ibov_value, ibov_delta = latest_and_delta_pct(ibov_series.closes)
+    usdbrl_value, usdbrl_delta = latest_and_delta_pct(usdbrl_series.closes)
     return B3Summary(
         ibovespa_points=ibov_value,
         ibovespa_delta_pct=ibov_delta,
         usdbrl_level=usdbrl_value,
         usdbrl_delta_pct=usdbrl_delta,
+        max_age_hours=max(ibov_series.age_seconds(), usdbrl_series.age_seconds()) / 3600,
     )
 
 
@@ -52,4 +54,7 @@ def format_b3_summary_message(summary: B3Summary) -> str:
         f"({_fmt_delta_pct(summary.ibovespa_delta_pct)})",
         f"💵 <b>USD/BRL</b>: R$ {summary.usdbrl_level:.4f} ({_fmt_delta_pct(summary.usdbrl_delta_pct)})",
     ]
+    age_line = age_disclosure(summary.max_age_hours)
+    if age_line:
+        lines.append(age_line)
     return "\n".join(lines)

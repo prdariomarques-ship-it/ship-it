@@ -20,27 +20,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from investments.b3_calendar import is_pregao_now
 from investments.b3_summary import check_b3_summary, format_b3_summary_message
 from investments.daily_briefing import fetch_briefing_snapshot, format_briefing_message
-from investments.models import FinancialJob
-from investments.repository import DuplicateChainError, FinancialJobRepository
+from investments.models import CHAIN_JOB_NAMES, FinancialJob
+from investments.repository import FinancialJobRepository
 from investments.spcx34_monitor import check_spcx34
 from investments.telegram_sender import (
     TelegramPermanentError,
     TelegramUncertainOutcomeError,
     send_telegram_message,
 )
-from investments.worker import Reschedule, financial_job_handler
+from investments.worker import Reschedule, ensure_chains_seeded, financial_job_handler
 from investments.yahoo_finance import MarketDataError
 from utils.config import get_settings
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-SPCX34_JOB_NAME = "market.check_spcx34"
-B3_SUMMARY_JOB_NAME = "market.send_b3_summary"
-DAILY_BRIEFING_JOB_NAME = "market.send_daily_briefing"
+# Derived from models.CHAIN_JOB_NAMES (not redefined here) so the unique
+# partial index's condition and these handler names can never drift apart.
+SPCX34_JOB_NAME, B3_SUMMARY_JOB_NAME, DAILY_BRIEFING_JOB_NAME = CHAIN_JOB_NAMES
 TELEGRAM_SEND_JOB_NAME = "telegram.send_message"
-
-CHAIN_JOB_NAMES = (SPCX34_JOB_NAME, B3_SUMMARY_JOB_NAME, DAILY_BRIEFING_JOB_NAME)
 
 # feed name -> (bot token setting, chat id setting) on Settings.
 _FEED_CREDENTIALS = {
@@ -51,12 +49,24 @@ _FEED_CREDENTIALS = {
 
 
 async def _enqueue_telegram(db: AsyncSession, feed: str, text: str) -> None:
-    # telegram.send_message is NOT self-rescheduling (no unique constraint
-    # concern) — a burst of real alerts for the same feed must be allowed
-    # to queue up as separate rows, not collapse into one.
+    # telegram.send_message is excluded from the chain-uniqueness index (see
+    # models.CHAIN_JOB_NAMES) — a burst of real alerts, or two different
+    # feeds, must be able to queue up as separate rows, not collide.
+    # The explicit rollback-on-IntegrityError below is defense in depth:
+    # db.add()+commit() does not bypass a DB constraint (an earlier version
+    # of this comment claimed it did — it was wrong), so if some future
+    # constraint ever does apply here, the caller's session must not be
+    # left in a failed state afterward.
+    from sqlalchemy.exc import IntegrityError
+
     job = FinancialJob(name=TELEGRAM_SEND_JOB_NAME, payload={"feed": feed, "text": text}, max_attempts=3)
     db.add(job)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.exception("Unexpected IntegrityError enqueueing telegram.send_message for feed %r", feed)
+        raise
 
 
 @financial_job_handler(TELEGRAM_SEND_JOB_NAME)
@@ -126,12 +136,17 @@ async def _run_spcx34_check(db: AsyncSession, settings) -> None:
     if not result.triggered:
         return
 
-    message = (
-        "🚨 <b>ALERTA SPCX34.SA</b>\n"
-        f"Preço: R$ {result.price:.2f}\n"
-        f"Acima da banda superior (R$ {result.upper_band:.2f})"
-    )
-    await _enqueue_telegram(db, "spcx", message)
+    from investments.yahoo_finance import age_disclosure
+
+    lines = [
+        "🚨 <b>ALERTA SPCX34.SA</b>",
+        f"Preço: R$ {result.price:.2f}",
+        f"Acima da banda superior (R$ {result.upper_band:.2f})",
+    ]
+    age_line = age_disclosure(result.quote_age_hours)
+    if age_line:
+        lines.append(age_line)
+    await _enqueue_telegram(db, "spcx", "\n".join(lines))
 
 
 @financial_job_handler(B3_SUMMARY_JOB_NAME)
@@ -191,17 +206,9 @@ async def _run_daily_briefing(db: AsyncSession, settings) -> None:
 
 
 async def seed_financial_monitor_jobs(db: AsyncSession) -> None:
-    """Enqueue the first run of each monitor chain — safe to call on every
-    process start: a DuplicateChainError (another instance already seeded)
-    is expected and ignored, not an error. A no-op while
-    market_monitors_enabled is false (the default)."""
-    settings = get_settings()
-    if not settings.market_monitors_enabled:
-        return
-    repository = FinancialJobRepository(db)
-    for job_name in CHAIN_JOB_NAMES:
-        try:
-            await repository.create(name=job_name, payload={})
-            logger.info("Seeded financial monitor job %s", job_name)
-        except DuplicateChainError:
-            pass
+    """Thin wrapper over worker.ensure_chains_seeded — kept as a named,
+    importable entry point for the standalone process's startup call.
+    The worker also calls ensure_chains_seeded on every tick, so a chain
+    that dies after startup heals on its own too; this call just avoids
+    waiting for the first tick after a fresh process start."""
+    await ensure_chains_seeded(FinancialJobRepository(db), get_settings().market_monitors_enabled)

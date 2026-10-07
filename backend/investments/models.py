@@ -19,6 +19,14 @@ class FinancialJobStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+# Single source of truth for which job names are self-rescheduling chains
+# (at most one QUEUED/RUNNING row at a time — enforced below). investments/
+# jobs.py imports this rather than keeping its own list, so the index
+# condition and the application code can never drift apart.
+CHAIN_JOB_NAMES = ("market.check_spcx34", "market.send_b3_summary", "market.send_daily_briefing")
+_CHAIN_NAMES_SQL = "(" + ", ".join(f"'{name}'" for name in CHAIN_JOB_NAMES) + ")"
+
+
 class FinancialJob(Base, TimestampMixin):
     """Durable financial-monitor job: own table, own worker, own retry/backoff.
 
@@ -32,9 +40,13 @@ class FinancialJob(Base, TimestampMixin):
 
     __tablename__ = "financial_jobs"
     __table_args__ = (
-        # At most one QUEUED-or-RUNNING row per job name at a time — the DB
-        # itself refuses a second concurrent chain of the same monitor,
-        # closing the query-then-insert race that app-level checks can't.
+        # At most one QUEUED-or-RUNNING row per job name at a time — but
+        # ONLY for the three self-rescheduling chain names. Scoping this to
+        # specific names (rather than every row) is deliberate: confirmed
+        # by a failing reproduction before this fix that an unscoped
+        # version blocked a second *feed* of telegram.send_message from
+        # being queued, since every feed shares that same job name — two
+        # legitimate, independent pending sends must be able to coexist.
         # SQLAlchemy's Enum type persists the member NAME ("QUEUED"), not
         # `.value` ("queued") — verified against this project's existing
         # Job/JobStatus table before writing this condition.
@@ -42,8 +54,8 @@ class FinancialJob(Base, TimestampMixin):
             "ix_financial_jobs_one_active_chain_per_name",
             "name",
             unique=True,
-            postgresql_where=text("status IN ('QUEUED', 'RUNNING')"),
-            sqlite_where=text("status IN ('QUEUED', 'RUNNING')"),
+            postgresql_where=text(f"status IN ('QUEUED', 'RUNNING') AND name IN {_CHAIN_NAMES_SQL}"),
+            sqlite_where=text(f"status IN ('QUEUED', 'RUNNING') AND name IN {_CHAIN_NAMES_SQL}"),
         ),
     )
 

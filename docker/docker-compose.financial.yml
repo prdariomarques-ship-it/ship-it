@@ -1,27 +1,51 @@
 # PROPOSTA — não aplicado, não mesclado no docker-compose.yml principal.
 #
-# Serviço separado para os monitores financeiros: mesma imagem do backend
-# (nenhuma imagem nova pra manter), mas processo e comando próprios
-# (`python -m investments`, não uvicorn/main.py) — não é um segundo
-# backend genérico, é só o worker financeiro isolado.
+# Serviço separado para os monitores financeiros. Usa o mesmo Dockerfile
+# do backend como contexto de build (não precisa de uma imagem adicional
+# pra manter), mas gera sua PRÓPRIA imagem (`image:` abaixo) e roda um
+# comando próprio (`python -m investments`, nunca uvicorn/main.py) — não é
+# um segundo backend genérico, é só o worker financeiro isolado. Construir
+# ou subir este serviço NUNCA reconstrói nem reinicia o serviço `backend`
+# existente — são serviços e imagens Compose completamente separados.
 #
 # Isolamento real, não só "processo separado":
 #   - Tabela própria (financial_jobs), nunca toca `jobs`.
 #   - Sem rota HTTP, sem depender do WhatsApp provider/worker.
+#   - Pool de conexão com o Postgres bem menor e próprio (DB_POOL_SIZE/
+#     DB_MAX_OVERFLOW abaixo) — limitar CPU/RAM do contêiner não limita a
+#     carga que ele gera no Postgres; isso sim limita.
 #   - Limites de CPU/memória explícitos, pra não disputar recurso com o
 #     atendimento ao vivo mesmo sob carga.
 #
-# Uso (só depois de autorizado — ver plano de implantação):
+# O que NÃO é isolado (declarado, não escondido): mesmo servidor Postgres,
+# mesmo banco, mesmo usuário/credencial do backend principal — isolamento
+# lógico (tabela própria, sem queries cruzadas), não isolamento de
+# instância de banco nem de role com permissão restrita. Uma role Postgres
+# dedicada (somente INSERT/SELECT/UPDATE em financial_jobs) é recomendável
+# como endurecimento adicional, mas não foi criada aqui — criar role/
+# permissão é alteração de banco, fora do que esta etapa autoriza.
+#
+# Uso (só depois de autorizado — ver plano de implantação). Sempre
+# nomeando o serviço explicitamente, nunca um `up -d` sem alvo:
+#   docker compose -f docker-compose.yml -f docker-compose.financial.yml build financial-worker
 #   docker compose -f docker-compose.yml -f docker-compose.financial.yml up -d financial-worker
 
 services:
   financial-worker:
     build: ../backend
+    image: darioos-financial-worker:latest
     command: ["python", "-m", "investments"]
     restart: unless-stopped
     environment:
       LOG_JSON: "true"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:-dario}@postgres:5432/${POSTGRES_DB:-darioos}
+      # Deliberately small and separate from the backend's own pool
+      # (db_pool_size default 10 / db_max_overflow default 20) — this
+      # process does at most ~1 query at a time per tick, it never needs
+      # the backend's concurrency headroom, and capping it bounds how much
+      # of Postgres's max_connections this service can ever claim.
+      DB_POOL_SIZE: ${FINANCIAL_DB_POOL_SIZE:-2}
+      DB_MAX_OVERFLOW: ${FINANCIAL_DB_MAX_OVERFLOW:-3}
       MARKET_MONITORS_ENABLED: ${MARKET_MONITORS_ENABLED:-false}
       MARKET_CHECK_INTERVAL_SECONDS: ${MARKET_CHECK_INTERVAL_SECONDS:-1200}
       SPCX34_TICKER: ${SPCX34_TICKER:-SPCX34.SA}
@@ -45,3 +69,20 @@ services:
         reservations:
           cpus: "0.1"
           memory: 64M
+    # The base image's own HEALTHCHECK (Dockerfile) polls GET /health on
+    # port 8000 — this process runs no HTTP server at all (see
+    # investments/__main__.py), so that check would fail forever. Overridden
+    # here with a liveness check appropriate for a polling worker: the loop
+    # writes a heartbeat file after every tick (worker.py::_write_heartbeat),
+    # and this fails if that file is missing or older than ~2 polling
+    # intervals (worker's idle poll is 5s; generous margin for a slow tick).
+    healthcheck:
+      test:
+        [
+          "CMD", "python", "-c",
+          "import os,sys,time; p='/tmp/financial_worker_heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<120 else 1)"
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

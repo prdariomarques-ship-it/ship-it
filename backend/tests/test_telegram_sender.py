@@ -117,12 +117,25 @@ async def test_token_never_appears_in_exception_on_permanent_error(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_httpx_logger_level_restored_after_call(monkeypatch):
+async def test_no_token_leak_under_real_concurrent_sends(monkeypatch, caplog):
+    """The redaction used to be a logger.setLevel()/finally-reset around
+    each call — process-global shared state. Two real concurrent calls,
+    each targeting a DIFFERENT fake token, reproduce the exact interleaving
+    that approach was unsafe under; the current design (a stateless
+    logging.Filter, no shared mutable state) must have no such window."""
+    import asyncio
+
+    token_a = "111111:TokenAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    token_b = "222222:TokenBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "result": {}})
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
 
     _patch_client(monkeypatch, handler)
-    httpx_logger = logging.getLogger("httpx")
-    original_level = httpx_logger.level
-    await send_telegram_message(FAKE_TOKEN, "chat-1", "oi")
-    assert httpx_logger.level == original_level
+    with caplog.at_level(logging.DEBUG):
+        await asyncio.gather(
+            *(send_telegram_message(token_a, "chat-a", "msg") for _ in range(25)),
+            *(send_telegram_message(token_b, "chat-b", "msg") for _ in range(25)),
+        )
+    assert token_a not in caplog.text
+    assert token_b not in caplog.text

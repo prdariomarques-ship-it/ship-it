@@ -6,7 +6,7 @@ the caller must treat that as "no data", never as "price below band".
 import statistics
 from dataclasses import dataclass
 
-from investments.yahoo_finance import MarketDataError, fetch_daily_closes
+from investments.yahoo_finance import MarketDataError, fetch_price_series
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -18,6 +18,8 @@ class SPCX34Check:
     price: float
     upper_band: float
     triggered: bool
+    quote_timestamp: int  # unix seconds — the price's own trading-day timestamp from Yahoo
+    quote_age_hours: float  # declared explicitly in the alert text — see jobs.py
 
 
 def bollinger_upper_band(closes: list[float], window: int, std_mult: float) -> float:
@@ -32,7 +34,10 @@ def bollinger_upper_band(closes: list[float], window: int, std_mult: float) -> f
 
 
 async def check_spcx34(ticker: str, window: int, std_mult: float) -> SPCX34Check:
-    closes = await fetch_daily_closes(ticker)
-    upper_band = bollinger_upper_band(closes, window, std_mult)
-    price = closes[-1]
-    return SPCX34Check(ticker=ticker, price=price, upper_band=upper_band, triggered=price > upper_band)
+    series = await fetch_price_series(ticker)
+    upper_band = bollinger_upper_band(series.closes, window, std_mult)
+    price = series.latest_close
+    return SPCX34Check(
+        ticker=ticker, price=price, upper_band=upper_band, triggered=price > upper_band,
+        quote_timestamp=series.latest_timestamp, quote_age_hours=series.age_seconds() / 3600,
+    )

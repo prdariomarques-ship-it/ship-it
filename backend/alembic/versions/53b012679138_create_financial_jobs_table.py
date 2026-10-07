@@ -47,13 +47,17 @@ def upgrade() -> None:
     op.create_index("ix_financial_jobs_name", "financial_jobs", ["name"])
     op.create_index("ix_financial_jobs_status", "financial_jobs", ["status"])
     op.create_index("ix_financial_jobs_scheduled_at", "financial_jobs", ["scheduled_at"])
+    # Scoped to the three self-rescheduling chain names only — NOT to
+    # telegram.send_message, which every feed shares as its job name and
+    # must be free to have several independent rows pending at once.
+    _chain_names = "('market.check_spcx34', 'market.send_b3_summary', 'market.send_daily_briefing')"
     op.create_index(
         "ix_financial_jobs_one_active_chain_per_name",
         "financial_jobs",
         ["name"],
         unique=True,
-        postgresql_where=sa.text("status IN ('QUEUED', 'RUNNING')"),
-        sqlite_where=sa.text("status IN ('QUEUED', 'RUNNING')"),
+        postgresql_where=sa.text(f"status IN ('QUEUED', 'RUNNING') AND name IN {_chain_names}"),
+        sqlite_where=sa.text(f"status IN ('QUEUED', 'RUNNING') AND name IN {_chain_names}"),
     )
 
 

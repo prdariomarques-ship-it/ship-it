@@ -6,17 +6,52 @@ Token-safety: the bot token sits in the URL path (Telegram's own API
 design — https://api.telegram.org/bot<token>/sendMessage — not something
 this module can avoid). httpx logs the full request URL at INFO by
 default (confirmed against this project's own logging config), and any
-exception's default string often embeds the request URL too. Every path
-here that could log or raise is required to go through a message that
-never contains the token — see _redact_token and the tests in
-tests/test_telegram_sender.py that assert this with a fake token.
+exception's default string often embeds the request URL too.
+
+Two independent layers, deliberately not relying on just one:
+  1. A regex-based logging.Filter, attached once at import time to the
+     "httpx" logger, that redacts any token-shaped substring from every
+     record it emits. This used to be a temporary mutation of the
+     logger's level around each call — removed because logging.Logger is
+     process-global shared state: two concurrent sends interleaving their
+     own setLevel()/finally-reset could leave the window open for one of
+     them. A Filter has no shared mutable state to race on — every call
+     gets its own LogRecord — so this is safe under any concurrency,
+     including if a future change makes _execute() run jobs concurrently
+     (today's worker loop is sequential, but nothing here should depend
+     on that staying true).
+  2. _redact_token, applied to anything this module raises itself.
+Tests in tests/test_telegram_sender.py assert both hold under a fake
+token for every outcome, including with real concurrent calls.
 """
 import html
 import logging
+import re
 
 import httpx
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+
+_TOKEN_SHAPE = re.compile(r"\d{6,}:[A-Za-z0-9_-]{20,}")
+
+
+class _TokenRedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # httpx logs "HTTP Request: %s %s ..." with the URL as an httpx.URL
+        # object in record.args, not a str — a plain isinstance(arg, str)
+        # check on the raw args misses it entirely (confirmed: that was
+        # this filter's first, broken version). getMessage() does the
+        # %-formatting itself, stringifying every arg type, so the token
+        # shape is always matchable in the result regardless of what type
+        # produced it.
+        message = record.getMessage()
+        if _TOKEN_SHAPE.search(message):
+            record.msg = _TOKEN_SHAPE.sub("***:***", message)
+            record.args = ()
+        return True
+
+
+logging.getLogger("httpx").addFilter(_TokenRedactionFilter())
 
 
 class TelegramError(RuntimeError):
@@ -53,7 +88,7 @@ def escape_html(text: str) -> str:
 
 def _redact_token(bot_token: str, text: str) -> str:
     """Strip a token that leaked into a URL or exception string. Belt and
-    braces alongside the logger-silencing below — never rely on just one."""
+    braces alongside the logging.Filter above — never rely on just one."""
     return text.replace(bot_token, "***") if bot_token else text
 
 
@@ -67,23 +102,15 @@ async def send_telegram_message(bot_token: str, chat_id: str, text: str, timeout
     """
     url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendMessage"
 
-    # httpx's own request/response logging would otherwise put the token
-    # (embedded in `url`) into application logs at INFO.
-    httpx_logger = logging.getLogger("httpx")
-    previous_level = httpx_logger.level
-    httpx_logger.setLevel(logging.WARNING)
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            try:
-                response = await client.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
-            except httpx.HTTPError as exc:
-                # httpx exceptions stringify with the request URL attached —
-                # never pass str(exc) through; build our own message instead.
-                raise TelegramUncertainOutcomeError(
-                    f"Telegram request failed before a response was received: {type(exc).__name__}"
-                ) from None
-    finally:
-        httpx_logger.setLevel(previous_level)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            response = await client.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+        except httpx.HTTPError as exc:
+            # httpx exceptions stringify with the request URL attached —
+            # never pass str(exc) through; build our own message instead.
+            raise TelegramUncertainOutcomeError(
+                f"Telegram request failed before a response was received: {type(exc).__name__}"
+            ) from None
 
     try:
         data = response.json()

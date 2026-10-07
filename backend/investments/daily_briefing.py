@@ -217,6 +217,18 @@ def format_briefing_message(snapshot: BriefingSnapshot) -> str:
         else:
             lines.append(f"{label}: {len(sources)} fontes")
 
+    if snapshot.quotes:
+        from datetime import datetime, timezone
+
+        from investments.yahoo_finance import age_disclosure
+
+        oldest_age_hours = (
+            datetime.now(timezone.utc).timestamp() - min(q.timestamp for q in snapshot.quotes.values())
+        ) / 3600
+        age_line = age_disclosure(oldest_age_hours)
+        if age_line:
+            lines.append(age_line)
+
     return "\n".join(lines)[:4095]
 
 

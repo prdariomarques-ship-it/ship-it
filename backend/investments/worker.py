@@ -17,12 +17,33 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.session import async_session_factory
-from investments.models import FinancialJob, FinancialJobStatus
+from investments.models import CHAIN_JOB_NAMES, FinancialJob, FinancialJobStatus
 from investments.repository import DuplicateChainError, FinancialJobRepository
 from utils.config import get_settings
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+async def ensure_chains_seeded(repository: FinancialJobRepository, enabled: bool) -> None:
+    """Create the first/missing row for each self-rescheduling chain name.
+    Idempotent: a DuplicateChainError (a chain is already QUEUED/RUNNING)
+    is expected and dropped, not an error.
+
+    Called both once at process start AND on every worker tick (see
+    FinancialWorker.run_once) — marking the current row SUCCEEDED and
+    creating its successor are two separate commits (see Reschedule's
+    docstring for why they can't be one), so a crash between them would
+    otherwise leave a chain permanently dead until the next process
+    restart. Calling this every tick heals that without depending on one."""
+    if not enabled:
+        return
+    for name in CHAIN_JOB_NAMES:
+        try:
+            await repository.create(name=name, payload={})
+            logger.info("Seeded/healed financial monitor chain %s", name)
+        except DuplicateChainError:
+            pass
 
 
 @dataclass
@@ -42,6 +63,15 @@ FinancialJobResult = dict | Reschedule | None
 FinancialJobHandler = Callable[[AsyncSession, dict], Awaitable[FinancialJobResult]]
 
 _HANDLERS: dict[str, FinancialJobHandler] = {}
+
+# Job names whose handler has an external, irreversible side effect (sends
+# a real message to a real person). If the worker process crashes between
+# the handler returning (meaning Telegram may have already accepted and
+# delivered the message) and the result being persisted, stale-RUNNING
+# recovery must NEVER silently requeue one of these for another attempt —
+# that would risk sending the same message twice. It is instead marked
+# FAILED with an explicit uncertain-outcome result, for a human to check.
+AT_MOST_ONCE_JOB_NAMES = {"telegram.send_message"}
 
 
 class UnknownFinancialJobError(KeyError):
@@ -63,11 +93,19 @@ def resolve_financial_handler(name: str) -> FinancialJobHandler:
         raise UnknownFinancialJobError(name) from None
 
 
+#  Written after every tick, successful or not — the loop being alive is
+# what this proves, not that any particular job succeeded. See
+# docker-compose.financial.yml's healthcheck, which has no HTTP server to
+# poll (this process runs no uvicorn/FastAPI — see __main__.py).
+HEARTBEAT_PATH = "/tmp/financial_worker_heartbeat"
+
+
 class FinancialWorker:
-    def __init__(self) -> None:
+    def __init__(self, heartbeat_path: str = HEARTBEAT_PATH) -> None:
         self._settings = get_settings()
         self._task: asyncio.Task | None = None
         self._stopping = asyncio.Event()
+        self._heartbeat_path = heartbeat_path
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -94,11 +132,19 @@ class FinancialWorker:
             except Exception:  # noqa: BLE001 - the loop must survive anything
                 logger.exception("Financial worker tick failed")
                 processed = 0
+            self._write_heartbeat()
             if processed == 0:
                 try:
                     await asyncio.wait_for(self._stopping.wait(), timeout=poll_interval)
                 except asyncio.TimeoutError:
                     pass
+
+    def _write_heartbeat(self) -> None:
+        try:
+            with open(self._heartbeat_path, "w") as f:
+                f.write(datetime.now(timezone.utc).isoformat())
+        except OSError:
+            logger.warning("Could not write heartbeat file %s", self._heartbeat_path)
 
     async def run_once(self) -> int:
         async with async_session_factory() as session:
@@ -106,6 +152,7 @@ class FinancialWorker:
             now = datetime.now(timezone.utc)
 
             await self._recover_stale(session, repository, now)
+            await ensure_chains_seeded(repository, self._settings.market_monitors_enabled)
             claimed = await self._claim_due(session, repository, now)
             job_ids = [job.id for job in claimed]
 
@@ -136,6 +183,15 @@ class FinancialWorker:
         started_before = now - timedelta(seconds=300)
         for job in await repository.stale_running_jobs(started_before):
             logger.warning("Recovering stale financial job %s (%s), attempt %s", job.id, job.name, job.attempts)
+            if job.name in AT_MOST_ONCE_JOB_NAMES:
+                await repository.update(
+                    job, status=FinancialJobStatus.FAILED, finished_at=now,
+                    last_error="Recovered from a stale RUNNING state: the handler may have already "
+                               "completed (e.g. Telegram may have already accepted the message) before "
+                               "the crash — not auto-retried to avoid a possible duplicate send.",
+                    result={"delivered": None, "reason": "uncertain_outcome_process_crash"},
+                )
+                continue
             if job.attempts >= job.max_attempts:
                 await repository.update(
                     job, status=FinancialJobStatus.FAILED, finished_at=now,
