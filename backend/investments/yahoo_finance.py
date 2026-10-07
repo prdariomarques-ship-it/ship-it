@@ -26,10 +26,12 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DarioOS-MarketMonitor/1.0)"}
 # mirrored here even though a VPS isn't as constrained as the mobile link
 # that prompted it.
 _MAX_CONCURRENCY = 6
-# Daily-bar data older than this is treated as stale, not current — covers
-# a long weekend/holiday without needing an exchange calendar (point still
-# open: this does NOT validate actual B3/international trading holidays;
-# see investments/b3_calendar.py's docstring). This threshold only decides
+# Daily-bar data older than this is treated as stale, not current — a
+# backstop that covers any long weekend/holiday regardless of exchange
+# calendar. is_pregao_now() (investments/b3_calendar.py) now also gates on
+# the actual computed B3 holiday calendar, but only for B3 — this module
+# still has no calendar for the US/European/Asian exchanges the daily
+# briefing quotes (see that module's docstring). This threshold only decides
 # whether to use the data AT ALL (StaleDataError above it); it does not by
 # itself mean the data should be presented as if it were today's — that's
 # FRESH_ENOUGH_HOURS below, a much tighter bar, because tolerating a few
@@ -50,8 +52,10 @@ def age_disclosure(age_hours: float) -> str:
     """"" when fresh enough to show with no caveat; otherwise an explicit,
     user-facing line stating the data's real age — this exists specifically
     so "we didn't reject the data as broken" is never read as "this is
-    current". Does not know about holidays/trading calendars (that gap is
-    still open, see b3_calendar.py) — only about clock time elapsed."""
+    current". Purely clock-based: the B3 holiday calendar is applied
+    upstream, in is_pregao_now() deciding whether to run the check at all
+    (see b3_calendar.py); this function itself still knows nothing about
+    any calendar, B3's or otherwise."""
     if age_hours <= FRESH_ENOUGH_HOURS:
         return ""
     return f"⚠️ dado de {age_hours:.0f}h atrás — pregão de hoje não confirmado"

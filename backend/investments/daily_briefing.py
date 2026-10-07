@@ -11,10 +11,11 @@ couldn't be verified live from this environment (Yahoo Finance is
 blocked by the sandbox's egress policy) — a future addition once that's
 confirmed against the real deployment.
 
-Known gap, not yet solved: is_pregao_now() only gates on weekday + B3
-trading hours. It does not know about B3 holidays, nor about holidays on
-any of the US/European/Asian exchanges this briefing also quotes — a
-holiday on one of those markets can still produce a "stale" quote (see
+Known gap, partially solved: is_pregao_now() now also gates on the
+computed B3/ANBIMA holiday calendar (see investments/b3_calendar.py), not
+just weekday + trading hours. What's still unsolved: it has no calendar
+for the US/European/Asian exchanges this briefing also quotes — a holiday
+on one of those markets can still produce a "stale" quote (see
 yahoo_finance.StaleDataError, which catches the case but doesn't
 distinguish "market closed for a holiday" from "data feed is actually
 broken").

@@ -68,6 +68,42 @@ def test_pregao_weekend():
     assert is_pregao_now(now) is False
 
 
+# ── is_pregao_now: B3 holiday calendar ───────────────────────────────────────
+
+
+def test_pregao_false_on_fixed_date_national_holiday():
+    from zoneinfo import ZoneInfo
+
+    independencia = datetime(2026, 9, 7, 14, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))  # Monday
+    assert is_pregao_now(independencia) is False
+
+
+def test_pregao_false_on_computed_carnaval():
+    from zoneinfo import ZoneInfo
+
+    # Carnaval 2026: Monday Feb 16 / Tuesday Feb 17 (Easter 2026 = Apr 5).
+    carnaval_monday = datetime(2026, 2, 16, 14, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    carnaval_tuesday = datetime(2026, 2, 17, 14, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    assert is_pregao_now(carnaval_monday) is False
+    assert is_pregao_now(carnaval_tuesday) is False
+
+
+def test_pregao_false_on_computed_good_friday():
+    from zoneinfo import ZoneInfo
+
+    good_friday_2026 = datetime(2026, 4, 3, 14, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    assert is_pregao_now(good_friday_2026) is False
+
+
+def test_pregao_true_the_day_right_after_a_holiday():
+    """The gate must not over-block — the very next trading day (a normal
+    Wednesday, no longer Carnaval) must pass again."""
+    from zoneinfo import ZoneInfo
+
+    ash_wednesday_2026 = datetime(2026, 2, 18, 14, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    assert is_pregao_now(ash_wednesday_2026) is True
+
+
 # ── check_spcx34_job / send_b3_summary_job ────────────────────────────────────
 
 

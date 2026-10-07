@@ -17,17 +17,16 @@
 #   - Limites de CPU/memória explícitos, pra não disputar recurso com o
 #     atendimento ao vivo mesmo sob carga.
 #
-# O que NÃO é isolado (declarado, não escondido): mesmo servidor Postgres,
-# mesmo banco, mesmo usuário/credencial do backend principal — isolamento
-# lógico (tabela própria, sem queries cruzadas no código), não isolamento
-# de permissão a nível de banco. Hoje o worker financeiro TEM permissão de
-# ler/escrever em `jobs` e nas demais tabelas do domínio WhatsApp, porque
-# usa a mesma credencial — apenas nunca o faz, por não importar
-# repositories/job.py. O desenho de uma role Postgres restrita (somente
-# SELECT/INSERT/UPDATE em financial_jobs, sem acesso a `jobs`) está
-# preparado em docker/financial_role_setup.sql — NÃO aplicado, NÃO
-# executado contra nenhum banco; aplicar isso é alteração de banco e
-# fica fora do que esta etapa autoriza.
+# Isolamento de permissão: DATABASE_URL abaixo usa FINANCIAL_DB_USER/
+# FINANCIAL_DB_PASSWORD, uma role Postgres dedicada — NÃO a credencial do
+# backend principal. O desenho dessa role (somente SELECT/INSERT/UPDATE
+# em financial_jobs, sem acesso a `jobs`) está em
+# docker/financial_role_setup.sql — preparado, mas NÃO aplicado contra
+# nenhum banco por esta sessão; ver docker/FINANCIAL_DEPLOYMENT_RUNBOOK.md
+# para o roteiro de quem for aplicar isso de fato. Enquanto
+# FINANCIAL_DB_USER/PASSWORD não estiverem definidos no .env, estas
+# variáveis ficam vazias e o serviço falha ao conectar de propósito — ele
+# nunca cai de volta para a credencial do backend principal silenciosamente.
 #
 # Uso (só depois de autorizado — ver plano de implantação). Sempre
 # nomeando o serviço explicitamente, nunca um `up -d` sem alvo:
@@ -42,7 +41,12 @@ services:
     restart: unless-stopped
     environment:
       LOG_JSON: "true"
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dario}:${POSTGRES_PASSWORD:-dario}@postgres:5432/${POSTGRES_DB:-darioos}
+      # Dedicated, restricted role — never the backend's own credential.
+      # No fallback to POSTGRES_USER/PASSWORD on purpose: an unset
+      # FINANCIAL_DB_USER/PASSWORD must fail to connect, not silently run
+      # under the shared backend credential (see financial_role_setup.sql
+      # and FINANCIAL_DEPLOYMENT_RUNBOOK.md).
+      DATABASE_URL: postgresql+asyncpg://${FINANCIAL_DB_USER:?set FINANCIAL_DB_USER in .env — see docker/financial_role_setup.sql}:${FINANCIAL_DB_PASSWORD:?set FINANCIAL_DB_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-darioos}
       # Deliberately small and separate from the backend's own pool
       # (db_pool_size default 10 / db_max_overflow default 20) — this
       # process does at most ~1 query at a time per tick, it never needs
