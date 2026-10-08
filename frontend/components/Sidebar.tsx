@@ -88,6 +88,25 @@ export default function Sidebar() {
   const navRef = useRef<HTMLElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Fonte única pro ponto de corte mobile/desktop, compartilhada pelos dois
+  // efeitos abaixo. Ampliar a janela pra desktop com a gaveta ainda aberta
+  // não pode deixar um estado "aberto" zumbi: no desktop não existe gaveta,
+  // é a sidebar estática sempre visível — sem resetar mobileOpen aqui, o
+  // aprisionamento de Tab do efeito de teclado continuava ativo mesmo
+  // depois do redimensionamento (reproduzido: abrir no mobile e ampliar
+  // pra desktop prendia Tab dentro da nav indefinidamente).
+  useEffect(() => {
+    const mql = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
+    const sync = () => {
+      setIsMobile(mql.matches);
+      if (!mql.matches) setMobileOpen(false);
+    };
+    sync();
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, []);
 
   // A gaveta fechada no mobile só fica fora da tela visualmente
   // (transform: translateX fora do viewport) — sem isto, os links dela
@@ -98,18 +117,15 @@ export default function Sidebar() {
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
-
-    const mql = window.matchMedia(MOBILE_BREAKPOINT_QUERY);
-    const apply = () => {
-      nav.toggleAttribute("inert", mql.matches && !mobileOpen);
-    };
-    apply();
-    mql.addEventListener("change", apply);
-    return () => mql.removeEventListener("change", apply);
-  }, [mobileOpen]);
+    nav.toggleAttribute("inert", isMobile && !mobileOpen);
+  }, [isMobile, mobileOpen]);
 
   useEffect(() => {
-    if (!mobileOpen) return;
+    // isMobile redundante com o reset em cima, mas mantido explícito:
+    // se os dois setState do efeito acima ainda não renderizaram juntos,
+    // este guard continua impedindo o listener de Tab de ficar pendurado
+    // fora do mobile.
+    if (!mobileOpen || !isMobile) return;
 
     // Exclui o link da marca ("Darius OS", também um <a href="/">) — ao
     // abrir a gaveta, o foco deve ir pro primeiro item de navegação de
@@ -144,7 +160,7 @@ export default function Sidebar() {
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [mobileOpen]);
+  }, [mobileOpen, isMobile]);
 
   const closeAfterNavigation = () => {
     if (!mobileOpen) return;

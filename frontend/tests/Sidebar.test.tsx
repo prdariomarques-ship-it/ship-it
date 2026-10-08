@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +19,30 @@ function mockMatchMedia(matches: boolean) {
     addEventListener: (_: string, cb: () => void) => listeners.add(cb),
     removeEventListener: (_: string, cb: () => void) => listeners.delete(cb),
   })) as unknown as typeof window.matchMedia;
+}
+
+// Variante que permite mudar `matches` depois de montado e disparar os
+// listeners de "change" registrados — simula de verdade um
+// redimensionamento de viewport (abrir no mobile, ampliar pra desktop),
+// o que a função acima não permite porque fixa `matches` na criação.
+function mockResizableMatchMedia(initialMatches: boolean) {
+  let matches = initialMatches;
+  const listeners = new Set<() => void>();
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    get matches() {
+      return matches;
+    },
+    media: query,
+    addEventListener: (_: string, cb: () => void) => listeners.add(cb),
+    removeEventListener: (_: string, cb: () => void) => listeners.delete(cb),
+  })) as unknown as typeof window.matchMedia;
+
+  return {
+    resizeTo(next: boolean) {
+      matches = next;
+      listeners.forEach((cb) => cb());
+    },
+  };
 }
 
 describe("Sidebar", () => {
@@ -149,6 +173,50 @@ describe("Sidebar", () => {
       render(<Sidebar />);
       const nav = screen.getByRole("navigation", { name: "Navegação principal" });
       expect(nav).not.toHaveAttribute("inert");
+    });
+
+    // Reprodução do achado de revisão: abrir a gaveta no mobile e depois
+    // ampliar a janela pra desktop (sem fechar a gaveta manualmente antes)
+    // deixava o aprisionamento de Tab do efeito de teclado ativo pra sempre,
+    // já que ele só reagia a mobileOpen, nunca ao viewport ter mudado.
+    it("releases the Tab trap when the viewport widens to desktop while the drawer is still open", async () => {
+      const mql = mockResizableMatchMedia(true);
+      const user = userEvent.setup();
+      render(<Sidebar />);
+
+      await user.click(screen.getByRole("button", { name: "Abrir navegação" }));
+      const nav = screen.getByRole("navigation", { name: "Navegação principal" });
+      expect(nav).not.toHaveAttribute("inert");
+
+      // Confirma que a armadilha está mesmo ativa ANTES do redimensionamento
+      // (senão o teste não prova nada): focar o último link e apertar Tab
+      // deveria voltar pro primeiro (a marca), interceptando o evento.
+      const lastLink = screen.getByRole("link", { name: "Admin" });
+      lastLink.focus();
+      const trappedEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(trappedEvent);
+      expect(trappedEvent.defaultPrevented).toBe(true);
+      expect(screen.getByText("Darius OS").closest("a")).toHaveFocus();
+
+      act(() => mql.resizeTo(false)); // amplia pra desktop sem clicar em "Fechar navegação"
+
+      expect(nav).not.toHaveAttribute("inert");
+      expect(screen.getByRole("button", { name: "Abrir navegação" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+
+      const releasedEvent = new KeyboardEvent("keydown", {
+        key: "Tab",
+        bubbles: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(releasedEvent);
+      expect(releasedEvent.defaultPrevented).toBe(false);
     });
   });
 });

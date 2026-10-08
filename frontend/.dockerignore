@@ -1,0 +1,34 @@
+# Reinstalled/regenerated inside the image — never send the local copy
+node_modules
+.next
+.turbo
+
+# VCS metadata — this directory isn't a git root, but excluded defensively
+.git
+.gitignore
+
+# Env and secrets — must never enter the build context
+.env
+.env.*
+.env.local
+*.pem
+*.key
+*.crt
+
+# Local-only tooling, not read by `next build`
+tests
+e2e
+playwright.config.ts
+playwright-report
+test-results
+vitest.config.ts
+vitest.setup.ts
+coverage
+tsconfig.tsbuildinfo
+
+# Editor/OS noise
+.vscode
+.idea
+.DS_Store
+*.log
+npm-debug.log*
