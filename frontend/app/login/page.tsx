@@ -35,7 +35,7 @@ export default function LoginPage() {
     <div className="login-wrap">
       <form className="login-card" onSubmit={handleSubmit}>
         <h1 className="page-title" style={{ marginBottom: "1.25rem" }}>
-          Dario OS
+          Darius OS
         </h1>
         <input
           className="input"

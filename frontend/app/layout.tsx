@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
-  title: "Dario OS",
+  title: "Darius OS",
   description: "Sistema operacional pessoal baseado em IA",
 };
 
