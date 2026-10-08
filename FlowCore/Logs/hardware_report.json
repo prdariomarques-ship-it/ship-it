@@ -1,0 +1,85 @@
+{
+  "timestamp": "2026-07-26T19:09:08.524714",
+  "device": {
+    "model": "Unknown",
+    "manufacturer": "Unknown",
+    "android_version": "Unknown",
+    "sdk_version": "Unknown",
+    "termux": false
+  },
+  "cpu": {
+    "cores": 2,
+    "architecture": "x86_64",
+    "model": "",
+    "frequencies": {},
+    "governor": "",
+    "scheduler": ""
+  },
+  "gpu": {
+    "vendor": "",
+    "model": "",
+    "driver": "",
+    "vulkan_support": false,
+    "opencl_support": false
+  },
+  "npu": {
+    "present": false,
+    "vendor": "",
+    "model": "",
+    "hexagon_dsp": false
+  },
+  "memory": {
+    "ram": {
+      "total": 1058,
+      "available": 694,
+      "used": 364
+    },
+    "swap": {
+      "total": 0,
+      "used": 0,
+      "active": false
+    },
+    "zram": {
+      "total": 0,
+      "used": 0,
+      "active": true,
+      "device": "zram0"
+    }
+  },
+  "kernel": {
+    "version": "4.19.91-c8dfc93.al7.x86_64",
+    "release": "#1 SMP Tue Sep 26 10:25:51 UTC 2023",
+    "arch": "x86_64",
+    "selinux": "Unknown",
+    "magisk": false
+  },
+  "temperature": {
+    "cpu": 0,
+    "battery": 0,
+    "gpu": 0,
+    "skin": 0,
+    "sensors": []
+  },
+  "battery": {
+    "level": 0,
+    "status": "",
+    "health": "",
+    "voltage": 0,
+    "temperature": 0,
+    "charging": false
+  },
+  "storage": {
+    "internal": {
+      "total": 0,
+      "used": 0,
+      "available": 0
+    },
+    "sdcard": {
+      "total": 0,
+      "used": 0,
+      "available": 0,
+      "present": false
+    },
+    "filesystem": ""
+  }
+}

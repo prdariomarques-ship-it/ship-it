@@ -1,0 +1,320 @@
+[
+  {
+    "timestamp": "2026-07-26T19:22:20.447202",
+    "event_type": "info",
+    "data": {
+      "message": "Test log message",
+      "test": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.447620",
+    "event_type": "debug",
+    "data": {
+      "message": "Executando comando: echo 'FlowCore Test'...",
+      "use_root": false,
+      "cwd": "/workspace"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.448883",
+    "event_type": "command_executed",
+    "data": {
+      "command": "echo 'FlowCore Test'",
+      "exit_code": 0,
+      "execution_time_sec": 0.0013468265533447266,
+      "stdout_length": 14,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.449167",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: echo 'FlowCore Test'...",
+      "execution_time": 0.0013468265533447266
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.522808",
+    "event_type": "command_executed",
+    "data": {
+      "command": "python (isolated, 34 chars)",
+      "exit_code": 0,
+      "execution_time_sec": 0.07292342185974121,
+      "stdout_length": 18,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.523297",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: python (isolated, 34 chars)...",
+      "execution_time": 0.07292342185974121
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.524011",
+    "event_type": "info",
+    "data": {
+      "message": "Executando comando bash",
+      "command": "ls -la",
+      "timeout": 300
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.524317",
+    "event_type": "debug",
+    "data": {
+      "message": "Executando comando: ls -la...",
+      "use_root": false,
+      "cwd": "/workspace"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.527788",
+    "event_type": "command_executed",
+    "data": {
+      "command": "ls -la",
+      "exit_code": 0,
+      "execution_time_sec": 0.0035223960876464844,
+      "stdout_length": 7754,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.528139",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: ls -la...",
+      "execution_time": 0.0035223960876464844
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.529015",
+    "event_type": "info",
+    "data": {
+      "message": "Tarefa submetida: e2ba90ed-2743-43a1-b6b9-4842de31154f",
+      "command_type": "bash",
+      "priority": 0
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.529481",
+    "event_type": "info",
+    "data": {
+      "message": "Executando tarefa: e2ba90ed-2743-43a1-b6b9-4842de31154f",
+      "command": "echo 'scheduled task'"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.541507",
+    "event_type": "info",
+    "data": {
+      "message": "Executando comando bash",
+      "command": "echo 'scheduled task'",
+      "timeout": 300
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.542178",
+    "event_type": "debug",
+    "data": {
+      "message": "Executando comando: echo 'scheduled task'...",
+      "use_root": false,
+      "cwd": "/workspace"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.543434",
+    "event_type": "command_executed",
+    "data": {
+      "command": "echo 'scheduled task'",
+      "exit_code": 0,
+      "execution_time_sec": 0.0014424324035644531,
+      "stdout_length": 15,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.543851",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: echo 'scheduled task'...",
+      "execution_time": 0.0014424324035644531
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:22:20.544569",
+    "event_type": "info",
+    "data": {
+      "message": "Tarefa concluída: e2ba90ed-2743-43a1-b6b9-4842de31154f",
+      "success": true,
+      "execution_time": 0.0014424324035644531
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.126023",
+    "event_type": "info",
+    "data": {
+      "message": "Test log message",
+      "test": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.126663",
+    "event_type": "debug",
+    "data": {
+      "message": "Executando comando: echo 'FlowCore Test'...",
+      "use_root": false,
+      "cwd": "/workspace"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.128099",
+    "event_type": "command_executed",
+    "data": {
+      "command": "echo 'FlowCore Test'",
+      "exit_code": 0,
+      "execution_time_sec": 0.0015075206756591797,
+      "stdout_length": 14,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.128555",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: echo 'FlowCore Test'...",
+      "execution_time": 0.0015075206756591797
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.187310",
+    "event_type": "command_executed",
+    "data": {
+      "command": "python (isolated, 34 chars)",
+      "exit_code": 0,
+      "execution_time_sec": 0.05793642997741699,
+      "stdout_length": 18,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.201501",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: python (isolated, 34 chars)...",
+      "execution_time": 0.05793642997741699
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.202499",
+    "event_type": "info",
+    "data": {
+      "message": "Executando comando bash",
+      "command": "ls -la",
+      "timeout": 300
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.203132",
+    "event_type": "debug",
+    "data": {
+      "message": "Executando comando: ls -la...",
+      "use_root": false,
+      "cwd": "/workspace"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.206260",
+    "event_type": "command_executed",
+    "data": {
+      "command": "ls -la",
+      "exit_code": 0,
+      "execution_time_sec": 0.003218412399291992,
+      "stdout_length": 7946,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.206798",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: ls -la...",
+      "execution_time": 0.003218412399291992
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.208061",
+    "event_type": "info",
+    "data": {
+      "message": "Tarefa submetida: dd52ff47-6c9a-48c7-a73c-c8cd15f7076b",
+      "command_type": "bash",
+      "priority": 0
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.208700",
+    "event_type": "info",
+    "data": {
+      "message": "Executando tarefa: dd52ff47-6c9a-48c7-a73c-c8cd15f7076b",
+      "command": "echo 'scheduled task'"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.209337",
+    "event_type": "info",
+    "data": {
+      "message": "Executando comando bash",
+      "command": "echo 'scheduled task'",
+      "timeout": 300
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.209919",
+    "event_type": "debug",
+    "data": {
+      "message": "Executando comando: echo 'scheduled task'...",
+      "use_root": false,
+      "cwd": "/workspace"
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.221712",
+    "event_type": "command_executed",
+    "data": {
+      "command": "echo 'scheduled task'",
+      "exit_code": 0,
+      "execution_time_sec": 0.011783599853515625,
+      "stdout_length": 15,
+      "stderr_length": 0,
+      "success": true
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.222400",
+    "event_type": "debug",
+    "data": {
+      "message": "Comando executado com sucesso: echo 'scheduled task'...",
+      "execution_time": 0.011783599853515625
+    }
+  },
+  {
+    "timestamp": "2026-07-26T19:54:13.223380",
+    "event_type": "info",
+    "data": {
+      "message": "Tarefa concluída: dd52ff47-6c9a-48c7-a73c-c8cd15f7076b",
+      "success": true,
+      "execution_time": 0.011783599853515625
+    }
+  }
+]

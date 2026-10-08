@@ -1,0 +1,147 @@
+{
+  "hardware_profile": {
+    "available_ram_mb": 5000,
+    "total_ram_mb": 8192,
+    "use_case": "general"
+  },
+  "model_scores": [
+    {
+      "name": "Llama-3.2-1B-Instruct",
+      "params_b": 1.0,
+      "total_score": 0.849,
+      "quantization": "Q4_K_M",
+      "size_mb": 650,
+      "tokens_per_sec": 60.0,
+      "quality": 0.59,
+      "performance": 1.0,
+      "efficiency": 0.972,
+      "recommended": true
+    },
+    {
+      "name": "DeepSeek-R1-Distill-Qwen-1.5B",
+      "params_b": 1.5,
+      "total_score": 0.848,
+      "quantization": "Q4_K_M",
+      "size_mb": 950,
+      "tokens_per_sec": 50.0,
+      "quality": 0.756,
+      "performance": 0.833,
+      "efficiency": 0.932,
+      "recommended": false
+    },
+    {
+      "name": "TinyLlama-1.1B-Chat",
+      "params_b": 1.1,
+      "total_score": 0.843,
+      "quantization": "Q4_K_M",
+      "size_mb": 700,
+      "tokens_per_sec": 65.0,
+      "quality": 0.565,
+      "performance": 1.0,
+      "efficiency": 0.982,
+      "recommended": false
+    },
+    {
+      "name": "SmolLM-1.7B-Instruct",
+      "params_b": 1.7,
+      "total_score": 0.825,
+      "quantization": "Q4_K_M",
+      "size_mb": 1100,
+      "tokens_per_sec": 55.0,
+      "quality": 0.595,
+      "performance": 0.917,
+      "efficiency": 0.968,
+      "recommended": false
+    },
+    {
+      "name": "Gemma-2-2b-it",
+      "params_b": 2.5,
+      "total_score": 0.804,
+      "quantization": "Q4_K_M",
+      "size_mb": 1600,
+      "tokens_per_sec": 42.0,
+      "quality": 0.741,
+      "performance": 0.7,
+      "efficiency": 0.938,
+      "recommended": false
+    },
+    {
+      "name": "Qwen2.5-3B-Instruct",
+      "params_b": 3.0,
+      "total_score": 0.775,
+      "quantization": "Q4_K_M",
+      "size_mb": 2000,
+      "tokens_per_sec": 32.0,
+      "quality": 0.841,
+      "performance": 0.533,
+      "efficiency": 0.884,
+      "recommended": false
+    },
+    {
+      "name": "Phi-3-mini-4k-instruct",
+      "params_b": 3.8,
+      "total_score": 0.766,
+      "quantization": "Q4_K_M",
+      "size_mb": 2400,
+      "tokens_per_sec": 35.0,
+      "quality": 0.759,
+      "performance": 0.583,
+      "efficiency": 0.9,
+      "recommended": false
+    },
+    {
+      "name": "Llama-3.2-3B-Instruct",
+      "params_b": 3.0,
+      "total_score": 0.762,
+      "quantization": "Q4_K_M",
+      "size_mb": 2000,
+      "tokens_per_sec": 34.0,
+      "quality": 0.787,
+      "performance": 0.567,
+      "efficiency": 0.866,
+      "recommended": false
+    },
+    {
+      "name": "Phi-3.5-mini-instruct",
+      "params_b": 3.8,
+      "total_score": 0.756,
+      "quantization": "Q4_K_M",
+      "size_mb": 2500,
+      "tokens_per_sec": 33.0,
+      "quality": 0.788,
+      "performance": 0.55,
+      "efficiency": 0.862,
+      "recommended": false
+    },
+    {
+      "name": "SmolLM-3.6B-Instruct",
+      "params_b": 3.6,
+      "total_score": 0.755,
+      "quantization": "Q4_K_M",
+      "size_mb": 2300,
+      "tokens_per_sec": 38.0,
+      "quality": 0.69,
+      "performance": 0.633,
+      "efficiency": 0.896,
+      "recommended": false
+    }
+  ],
+  "recommendation": {
+    "model": "Llama-3.2-1B-Instruct",
+    "family": "llama",
+    "quantization": "Q4_K_M",
+    "estimated_size_mb": 650,
+    "estimated_tokens_per_sec": 60.0,
+    "download_url": "https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct-GGUF/Q4_K_M.gguf",
+    "reasons": [
+      "BEST FOR GENERAL"
+    ],
+    "strengths": [
+      "Smallest Llama",
+      "Fast",
+      "Meta ecosystem",
+      "Good for simple tasks"
+    ],
+    "license": "Llama Community"
+  }
+}

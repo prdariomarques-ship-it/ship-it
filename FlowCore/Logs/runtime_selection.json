@@ -1,0 +1,83 @@
+{
+  "hardware_summary": {
+    "total_ram_mb": 8192,
+    "available_ram_mb": 4096,
+    "vulkan_support": true,
+    "opencl_support": false,
+    "hexagon_dsp": true,
+    "termux": true
+  },
+  "runtime_scores": [
+    {
+      "runtime": "llama.cpp",
+      "total_score": 0.932,
+      "compatibility": 1.0,
+      "performance": 0.9,
+      "memory_efficiency": 0.95,
+      "battery_efficiency": 0.85,
+      "recommended": true
+    },
+    {
+      "runtime": "onnx_runtime",
+      "total_score": 0.84,
+      "compatibility": 1.0,
+      "performance": 0.75,
+      "memory_efficiency": 0.8,
+      "battery_efficiency": 0.75,
+      "recommended": false
+    },
+    {
+      "runtime": "executortorch",
+      "total_score": 0.82,
+      "compatibility": 0.5,
+      "performance": 1.0,
+      "memory_efficiency": 0.9,
+      "battery_efficiency": 0.9,
+      "recommended": false
+    },
+    {
+      "runtime": "litert",
+      "total_score": 0.76,
+      "compatibility": 0.5,
+      "performance": 0.84,
+      "memory_efficiency": 0.85,
+      "battery_efficiency": 0.85,
+      "recommended": false
+    },
+    {
+      "runtime": "tensorflow_lite",
+      "total_score": 0.732,
+      "compatibility": 0.5,
+      "performance": 0.78,
+      "memory_efficiency": 0.9,
+      "battery_efficiency": 0.85,
+      "recommended": false
+    },
+    {
+      "runtime": "mlc_llm",
+      "total_score": 0.715,
+      "compatibility": 0.35,
+      "performance": 0.99,
+      "memory_efficiency": 0.75,
+      "battery_efficiency": 0.7,
+      "recommended": false
+    }
+  ],
+  "recommendation": {
+    "runtime": "llama.cpp",
+    "score": 0.932,
+    "reasons": [
+      "BEST CHOICE: Excellent GGUF support, optimal for local LLM inference",
+      "Vulkan acceleration available"
+    ],
+    "installation": [
+      "# Install llama.cpp in Termux",
+      "pkg update && pkg upgrade",
+      "pkg install git cmake clang python",
+      "cd /tmp && git clone https://github.com/ggerganov/llama.cpp",
+      "cd llama.cpp && make -j$(nproc)",
+      "# Or use pip for Python bindings",
+      "pip install llama-cpp-python"
+    ]
+  }
+}
