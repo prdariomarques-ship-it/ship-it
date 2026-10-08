@@ -1,48 +1,72 @@
-# Credenciais e tokens — NUNCA commitar
-.credentials.json
-*.json.backup.*
+```
+# Environment files
+.env
+.env.local
+*.env.*
 
-# Sessões e dados temporários
-sessions/
-shell-snapshots/
-projects/
-backups/
-ide/
-session-env/
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
 
-# Arquivos de estado interno
-.last-cleanup
-mcp-needs-auth-cache.json
+# Editors
+.vscode/
+.idea/
 
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Dependencies
 .venv/
 venv/
-.pytest_cache/
-.ruff_cache/
-.coverage
-*.db
-
-# Node / Next.js
+.env/
 node_modules/
-.next/
-next-env.d.ts
-npm-debug.log*
-tsconfig.tsbuildinfo
-coverage/
 
-# Playwright
-frontend/test-results/
-frontend/playwright-report/
-frontend/e2e/.auth/
-frontend/blob-report/
-
-# Ambiente
-.env
-.env.local
-
-# Editor
-.idea/
-.vscode/
+# OS generated files
 .DS_Store
+Thumbs.db
+
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# MyPy cache
+.mypy_cache/
+# PyTest cache
+.pytest_cache/
+
+# Compression files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
