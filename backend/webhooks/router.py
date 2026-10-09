@@ -14,6 +14,7 @@ for anyone using n8n for additional automation.
 
 import hmac
 import json
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.session import get_db
 from events.bus import event_bus
 from jobs.service import JobService
+from models.job import Job
 from memory.contact_memory import contact_memory_service
 from models.message import (
     Message,
@@ -33,7 +35,14 @@ from models.message import (
 )
 from observability.metrics import record_whatsapp_session_status
 from orchestrator.priority import Priority, quick_priority_hint
-from providers.whatsapp.base import ConnectionStatus, DeliveryStatus, WhatsAppProvider
+from providers.stt.base import STTProviderError
+from providers.stt.factory import get_stt_provider
+from providers.whatsapp.base import (
+    ConnectionStatus,
+    DeliveryStatus,
+    InboundMessage,
+    WhatsAppProvider,
+)
 from providers.whatsapp.factory import get_whatsapp_provider
 from repositories.contact import ContactRepository
 from repositories.message import MessageRepository
@@ -139,6 +148,70 @@ async def _handle_delivery_ack(
     return WebhookAck(status="delivery_ack")
 
 
+async def _transcribe_audio(
+    db: AsyncSession, provider: WhatsAppProvider, inbound: InboundMessage
+) -> str:
+    """Best-effort speech-to-text for an inbound voice message, so it flows
+    through the rest of the pipeline (twin, risk gate, cognitive pipeline)
+    exactly like a typed message. Never raises: no STT provider configured,
+    no media_key on this message, a download failure, or a transcription
+    failure all just mean the message keeps its pre-existing behaviour
+    (empty text, no auto-reply) instead of breaking webhook ingestion."""
+    stt = get_stt_provider()
+    if stt is None or not stt.enabled or inbound.media_key is None:
+        return ""
+    downloaded = await provider.download_media(inbound.media_key, instance=inbound.instance or None)
+    if downloaded is None:
+        return ""
+    audio_bytes, mime_type = downloaded
+    try:
+        return await stt.transcribe(audio_bytes, mime_type)
+    except STTProviderError as exc:
+        logger.warning("Audio transcription failed: %s", exc)
+        await record_log(
+            db,
+            source="webhook:whatsapp",
+            level="warning",
+            message="Falha ao transcrever áudio",
+            payload={"phone": inbound.phone, "error": str(exc)},
+        )
+        return ""
+
+
+async def _capture_human_reply(db: AsyncSession, provider: WhatsAppProvider, contact, inbound, media_type: str) -> WebhookAck:
+    """The owner answered from his phone (provider fromMe echo): record it as
+    a human message and clear the pending marker so the twin stays quiet.
+    No auto-reply is ever enqueued from here. Owner audio gets a history-only
+    transcription job in the same transaction as its message."""
+    personal_instance = get_settings().evolution_personal_instance
+    personal_empty_audio = media_type == 'audio' and (not (inbound.text or '').strip()) and bool(personal_instance) and (inbound.instance == personal_instance)
+    own = None
+    if not personal_empty_audio:
+        own = await MessageRepository(db).find_unacknowledged_outbound(contact.id, inbound.text, instance=inbound.instance)
+    if own is not None:
+        own.external_id = inbound.external_id or None
+        await db.commit()
+        return WebhookAck(status='own_echo', message_id=own.id)
+    message = Message(contact_id=contact.id, direction=MessageDirection.OUTBOUND, media_type=MessageMediaType(media_type), content=inbound.text, external_id=inbound.external_id or None, provider_timestamp=inbound.timestamp, sent_by_human=True, whatsapp_instance=inbound.instance)
+    db.add(message)
+    if not personal_instance or inbound.instance == personal_instance:
+        contact.awaiting_reply_since = None
+    try:
+        await db.flush()
+        if media_type == 'audio' and (not (inbound.text or '').strip()) and personal_instance and (inbound.instance == personal_instance):
+            db.add(Job(name='whatsapp.transcribe_owner_audio', payload={'message_id': message.id, 'media_key': inbound.media_key}))
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing = await MessageRepository(db).find_one(external_id=inbound.external_id)
+        if existing is not None:
+            return WebhookAck(status='duplicate', message_id=existing.id)
+        raise
+    await db.refresh(message)
+    await record_log(db, source='webhook:whatsapp:human_reply', message=f'Owner reply captured for {inbound.phone} via {provider.name}', payload={'contact_id': contact.id, 'message_id': message.id})
+    return WebhookAck(status='human_reply_captured', message_id=message.id)
+
+
 def _verify_webhook_security(
     provider: WhatsAppProvider, raw_body: bytes, headers
 ) -> None:
@@ -211,7 +284,19 @@ async def whatsapp_webhook(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid JSON body"
         ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Expected a JSON object")
     inbound = provider.parse_webhook(payload)
+    if (
+        inbound is not None
+        and inbound.from_me
+        and not get_settings().whatsapp_twin_mode_enabled
+    ):
+        # The owner's own messages are only captured for the digital twin.
+        # Everywhere else (e.g. the store number) they stay ignored, exactly
+        # as before -- otherwise the gateway's echo of every reply the app
+        # itself sends would be stored a second time.
+        inbound = None
     if inbound is None:
         connection_ack = await _handle_connection_event(db, provider, payload)
         if connection_ack is not None:
@@ -220,6 +305,45 @@ async def whatsapp_webhook(
         if delivery_ack is not None:
             return delivery_ack
         return WebhookAck(status="ignored")
+
+    settings = get_settings()
+
+    # Os dois números administrados nunca podem disparar automação um no outro.
+    if not inbound.from_me:
+        sender_phone = "".join(
+            ch for ch in (inbound.phone or "") if ch.isdigit()
+        )
+        owner_phone = "".join(
+            ch for ch in (settings.whatsapp_owner_alert_phone or "")
+            if ch.isdigit()
+        )
+        store_phone = "".join(
+            ch for ch in (settings.store_staff_notify_phone or "")
+            if ch.isdigit()
+        )
+
+        managed_cross_talk = (
+            inbound.instance == settings.evolution_personal_instance
+            and bool(store_phone)
+            and sender_phone == store_phone
+        ) or (
+            inbound.instance == settings.evolution_instance
+            and bool(owner_phone)
+            and sender_phone == owner_phone
+        )
+
+        if managed_cross_talk:
+            await record_log(
+                db,
+                source="webhook:whatsapp",
+                level="info",
+                message="Managed-number cross-talk ignored",
+                payload={
+                    "phone": inbound.phone,
+                    "instance": inbound.instance,
+                },
+            )
+            return WebhookAck(status="ignored")
 
     # Idempotency: a provider redelivering the same message (a common webhook
     # retry pattern) must not be processed twice — no double reply, no double
@@ -237,6 +361,17 @@ async def whatsapp_webhook(
     )
 
     media_type = inbound.media_type if inbound.media_type in _MEDIA_TYPES else "text"
+
+    defer_audio = (
+        media_type == "audio" and not inbound.from_me and not inbound.text.strip()
+        and settings.stt_background_enabled
+    )
+    if media_type == "audio" and not inbound.from_me and not inbound.text.strip() and not defer_audio:
+        inbound.text = await _transcribe_audio(db, provider, inbound)
+
+    if inbound.from_me:
+        return await _capture_human_reply(db, provider, contact, inbound, media_type)
+
     message = Message(
         contact_id=contact.id,
         direction=MessageDirection.INBOUND,
@@ -244,9 +379,18 @@ async def whatsapp_webhook(
         content=inbound.text,
         external_id=inbound.external_id or None,
         provider_timestamp=inbound.timestamp,
+        whatsapp_instance=inbound.instance,
     )
     db.add(message)
     try:
+        if defer_audio:
+            # The message and its audio job are committed together. A webhook
+            # retry sees the existing message, never another transcription job.
+            await db.flush()
+            db.add(Job(name="whatsapp.transcribe_audio", payload={
+                "message_id": message.id,
+                "media_key": inbound.media_key,
+            }))
         await db.commit()
     except IntegrityError:
         # Lost a redelivery race against another request for the same
@@ -269,36 +413,62 @@ async def whatsapp_webhook(
         },
     )
 
-    summary_due = await contact_memory_service.record_interaction(
-        db, contact, inbound.text, source="whatsapp"
+    if defer_audio:
+        return WebhookAck(message_id=message.id)
+    await dispatch_inbound(db, provider, inbound, contact, message, media_type)
+    return WebhookAck(message_id=message.id)
+
+
+async def dispatch_inbound(db, provider, inbound, contact, message, media_type):
+    """Shared continuation for typed messages and completed voice transcriptions."""
+    settings = get_settings()
+    is_personal_instance = (
+        bool(settings.evolution_personal_instance)
+        and inbound.instance == settings.evolution_personal_instance
     )
 
+    summary_due = False
+
+    # Qdrant/memória comercial só recebe conversas da loja.
+    if not is_personal_instance:
+        summary_due = await contact_memory_service.record_interaction(
+            db, contact, inbound.text, source="whatsapp"
+        )
+
     jobs = JobService(db)
-    await jobs.enqueue(
-        "workflow.trigger",
-        {
-            "workflow": "whatsapp-inbound",
-            "data": {
-                "contact_id": contact.id,
-                "message_id": message.id,
-                "phone": inbound.phone,
-                "name": contact.name,
-                "body": inbound.text,
-                "media_type": media_type,
+    if not settings.store_whatsapp_enabled:
+        await jobs.enqueue(
+            "workflow.trigger",
+            {
+                "workflow": "whatsapp-inbound",
+                "data": {
+                    "contact_id": contact.id,
+                    "message_id": message.id,
+                    "phone": inbound.phone,
+                    "name": contact.name,
+                    "body": inbound.text,
+                    "media_type": media_type,
+                },
             },
-        },
-    )
+        )
     if summary_due:
         await jobs.enqueue("contact.summarize", {"contact_id": contact.id})
 
     settings = get_settings()
-    if settings.auto_reply_enabled and media_type == "text" and inbound.text.strip():
+    # media_type stays "audio" (correct media tagging) even once transcribed
+    # -- _transcribe_audio above already filled inbound.text when it worked,
+    # so a transcribed voice note flows through exactly like a typed message.
+    if (
+        settings.auto_reply_enabled
+        and media_type in ("text", "audio")
+        and inbound.text.strip()
+    ):
         # Loop/flood breaker: a runaway automation on the other end (or a
         # genuine bug) must not turn into an unbounded reply storm for one
         # contact. Reuses the same RateLimiter as HTTP throttling, just a
         # separate namespace and threshold.
         allowed = await rate_limiter.is_allowed(
-            f"auto-reply:{contact.id}",
+            f"auto-reply:{inbound.instance}:{contact.id}",
             limit=settings.auto_reply_max_per_contact_per_minute,
             window_seconds=60,
         )
@@ -312,12 +482,47 @@ async def whatsapp_webhook(
             # The Cognitive Pipeline still runs the full (LLM-backed)
             # PriorityEngine once the job executes; this only affects when
             # it gets picked up, not how it's handled.
-            delay_seconds = _PRIORITY_ENQUEUE_DELAY[quick_priority_hint(inbound.text)]
-            await jobs.enqueue(
-                "whatsapp.process_inbound",
-                {"contact_id": contact.id, "message_id": message.id},
-                delay_seconds=delay_seconds,
+            # Dual-instance deployments (evolution_personal_instance set)
+            # reserve the twin for the owner's personal number: a dedicated
+            # sales instance must always get the commercial agent, never an
+            # impersonated reply. Single-instance deployments (the default,
+            # personal instance unset) keep the flag's old, global meaning
+            # unchanged.
+            personal_instance = settings.evolution_personal_instance
+            use_twin = settings.whatsapp_twin_mode_enabled and (
+                not personal_instance or inbound.instance == personal_instance
             )
+            if use_twin:
+                # Digital twin: don't answer now. Mark the conversation as
+                # waiting and let the check job decide after the idle timeout
+                # (it is a no-op if the owner answered in the meantime).
+                if contact.awaiting_reply_since is None:
+                    contact.awaiting_reply_since = inbound.timestamp or datetime.now(
+                        timezone.utc
+                    )
+                    await db.commit()
+                await jobs.enqueue(
+                    "whatsapp.twin_autopilot_check",
+                    {
+                        "contact_id": contact.id,
+                        "message_id": message.id,
+                        "instance": inbound.instance,
+                    },
+                    delay_seconds=settings.whatsapp_twin_idle_timeout_seconds,
+                )
+            else:
+                delay_seconds = _PRIORITY_ENQUEUE_DELAY[
+                    quick_priority_hint(inbound.text)
+                ]
+                await jobs.enqueue(
+                    "whatsapp.process_inbound",
+                    {
+                        "contact_id": contact.id,
+                        "message_id": message.id,
+                        "instance": inbound.instance,
+                    },
+                    delay_seconds=delay_seconds,
+                )
         else:
             logger.warning(
                 "Auto-reply throttled for contact %s (loop/flood guard)", contact.id
@@ -337,5 +542,3 @@ async def whatsapp_webhook(
             "media_type": media_type,
         },
     )
-
-    return WebhookAck(message_id=message.id)
