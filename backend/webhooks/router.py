@@ -81,6 +81,26 @@ class WebhookAck(BaseModel):
     message_id: int | None = None
 
 
+def _administered_instance_phones(settings) -> dict[str, str]:
+    """Maps each administered instance identifier to the (digits-only)
+    phone number that owns it, built only from phone settings that
+    actually exist in utils/config.py today -- never a guessed or
+    hardcoded number. Extend the `pairs` dict below, not the cross-talk
+    check in whatsapp_webhook, when a new administered instance (e.g. a
+    dedicated b2b-sales or azusa-church number) gets its own phone
+    setting; the symmetric check already covers any instance added here.
+    """
+    pairs = {
+        settings.evolution_personal_instance: settings.whatsapp_owner_alert_phone,
+        settings.evolution_instance: settings.store_staff_notify_phone,
+    }
+    return {
+        instance: "".join(ch for ch in (phone or "") if ch.isdigit())
+        for instance, phone in pairs.items()
+        if instance and phone
+    }
+
+
 async def _handle_connection_event(
     db: AsyncSession, provider: WhatsAppProvider, payload: dict
 ) -> WebhookAck | None:
@@ -308,28 +328,27 @@ async def whatsapp_webhook(
 
     settings = get_settings()
 
-    # Os dois números administrados nunca podem disparar automação um no outro.
+    # No administered number may ever trigger automation on another one.
+    # 2026-10-08 review: generalized from two hand-matched directional
+    # pairs (store_phone-on-personal, owner_phone-on-main) to a symmetric
+    # check over a registry -- the Twin/B2B loop happened between two
+    # instances this older, narrower check never covered, since neither
+    # "b2b-sales" nor "azusa-church" has its own phone setting checked
+    # here. _administered_instance_phones only knows the two phone
+    # settings that exist in utils/config.py today; if b2b-sales or
+    # azusa-church get their own dedicated number in the future, adding it
+    # to that one dict is enough -- this check does not need to change
+    # again. Today, with only those two settings available, this is
+    # behaviourally a superset of the old check (same two numbers, but
+    # checked against every instance, not just one specific pair each).
     if not inbound.from_me:
         sender_phone = "".join(
             ch for ch in (inbound.phone or "") if ch.isdigit()
         )
-        owner_phone = "".join(
-            ch for ch in (settings.whatsapp_owner_alert_phone or "")
-            if ch.isdigit()
-        )
-        store_phone = "".join(
-            ch for ch in (settings.store_staff_notify_phone or "")
-            if ch.isdigit()
-        )
-
-        managed_cross_talk = (
-            inbound.instance == settings.evolution_personal_instance
-            and bool(store_phone)
-            and sender_phone == store_phone
-        ) or (
-            inbound.instance == settings.evolution_instance
-            and bool(owner_phone)
-            and sender_phone == owner_phone
+        administered = _administered_instance_phones(settings)
+        managed_cross_talk = bool(sender_phone) and any(
+            sender_phone == phone and inbound.instance != instance_name
+            for instance_name, phone in administered.items()
         )
 
         if managed_cross_talk:

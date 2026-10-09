@@ -1,0 +1,2 @@
+class MailProviderError(Exception):
+    pass

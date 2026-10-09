@@ -1,0 +1,2 @@
+class STTProviderError(Exception):
+    pass
