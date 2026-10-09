@@ -24,11 +24,12 @@
 - `services/conversation_control.py`, `orchestrator/incident_dedup.py`,
   `orchestrator/twin_risk_gate.py`, `services/output_safety.py` — novos,
   testados (SQLite real + 1 teste opt-in Postgres real).
-- **Novo nesta sessão:** `twin_risk_gate.py` — "sem crise" (gíria = "sem
-  problema") não escalava mais como crise real de impersonação. Corrigido com
-  exceção estreita (não ampliando a janela geral de negação, que arriscaria
-  apagar sinais reais como "sem razão, quero me matar"). 25/25 testes, lint
-  limpo, commit pushado.
+- `twin_risk_gate.py` — "sem crise" (gíria = "sem problema") não escalava
+  mais como crise real de impersonação. Corrigido com exceção estreita (não
+  ampliando a janela geral de negação, que arriscaria apagar sinais reais
+  como "sem razão, quero me matar"). 25/25 testes, lint limpo.
+- **7 bugs da revisão externa (A-G) corrigidos e testados** — ver seção
+  própria abaixo. Commit `bac6df2`, pushado.
 
 ### Identificado, ainda NÃO corrigido (incidente novo, autoria correta)
 - **Bug real em produção confirmado:** mensagens 9486/9488, hoje, contato
@@ -70,50 +71,77 @@
   automação para os três fluxos sem essa cobertura, reaproveitando o mesmo
   mecanismo já testado do Twin.
 
-### Revisão externa (2026-10-09) — 5 bugs reais confirmados por leitura direta do código, ainda SEM correção aplicada
+### Revisão externa (2026-10-09) — 7 bugs confirmados, CORRIGIDOS e TESTADOS
 
-> Documentação não é correção. Nada abaixo está implementado ainda — isto é
-> o resultado da verificação, não da implementação.
+**Commit:** `bac6df2` em `whatsapp-agents-fix-review` (pushado, PR #63).
+**Testes:** 10 testes novos em 3 arquivos, execução real contra os arquivos
+reais (não cópia, não só AST) — 97 passaram, 5 skipped (Postgres opt-in,
+inalterado), ruff limpo (só a mesma falha pré-existente e não relacionada
+em `agents/tools/flowcore_tools.py`).
 
-- **A. Reserva sem commit antes do transporte** — `send_whatsapp_text` chama
-  `claim_send`/`claim_alert` com sucesso mas nunca faz `await db.commit()`
-  antes de `provider.send_text(...)`. O próprio docstring de
-  `conversation_control.py` exige esse commit explicitamente ("Callers must
-  COMMIT a successful claim before transport"). Sem ele, um crash/timeout
-  durante o transporte pode reenviar a mesma mensagem.
-- **B. Alerta ao proprietário nunca é entregue** — o job de alerta é
-  enfileirado sem o campo `instance` no payload; `claim_alert` depois usa
-  escopo vazio (`''`), que nunca bate com o escopo real da reserva
-  (`alert_claim`, feita com a instância certa). Resultado: `claimed != 'claimed'`
-  sempre, e o alerta de segurança **nunca chega a ser enviado**, silenciosamente.
-- **C. Conclusão de envio sempre incerta + crash confirmado** — duas falhas
-  na mesma área:
-  - `finish_send(db, send_intent_id, None)` sempre passa `None` como
-    `receipt_id`, então o envio nunca é promovido a `'sent'` mesmo quando
-    o provedor aceitou de verdade (fica `needs_review` pra sempre).
-  - **Pior, confirmado por leitura da assinatura real**: `persist_outbound_message`
-    em `services/messaging.py` tem assinatura `(db, phone, content, media_type=...)`
-    — **não aceita** `is_autopilot_reply=` nem `instance=`, que é exatamente
-    o que `handlers.py` passa. Isso é um `TypeError` garantido em toda
-    chamada real. O caminho de envio, como está, nunca rodaria de ponta a
-    ponta em produção.
-- **D. Pausa humana nunca é conectada ao evento real** — `_capture_human_reply`
-  (webhooks/router.py) grava a mensagem do proprietário e zera
-  `awaiting_reply_since`, mas **nunca chama `conversation_control.pause`**.
-  Os 5 testes de `test_pause_fencing.py` provam que o mecanismo funciona
-  isolado — não provam que uma resposta humana real o aciona. Hoje, não aciona.
-- **E. Import quebrado em `output_safety.py`** — `from twin_risk_gate import
-  normalize_text` (plano) em vez de `from orchestrator.twin_risk_gate import
-  normalize_text`. Mesma classe de bug que já corrigi em `incident_dedup.py`
-  nesta sessão — deixei passar este arquivo.
+- **A. Reserva sem commit antes do transporte** — ✅ corrigido. `await
+  db.commit()` adicionado logo após `claim_send`/`claim_alert` ter sucesso,
+  antes de `provider.send_text(...)` (exigido pelo próprio docstring de
+  `conversation_control.py`). Também adicionado um commit final (os writes
+  de `finish_send`/`finish_alert` nunca eram commitados, independente
+  disso). Testado simulando um crash no meio do transporte — confirmado
+  que um retry não reenvia.
+- **B. Alerta ao proprietário nunca era entregue** — ✅ corrigido. Novo
+  campo `_twin_alert_instance` separa o escopo da reserva do alerta do
+  campo `instance` (que também seleciona o número/gateway de envio) —
+  evita trocar o remetente do alerta ao corrigir o escopo.
+- **C. Conclusão de envio sempre incerta + crash garantido** — ✅ corrigido.
+  `extract_receipt_id` captura o `receipt_id` real (`response["key"]["id"]`,
+  formato real do Baileys/Evolution API) em vez de sempre `None`.
+  `persist_outbound_message` agora aceita `is_autopilot_reply=`/`instance=`
+  (antes era `TypeError` garantido em todo envio real). Testado: recibo
+  reconhecido promove a `'sent'`; recibo não reconhecido continua
+  `'needs_review'` (nunca promove por suposição).
+- **D. Pausa humana nunca conectada ao evento real** — ✅ corrigido.
+  `_capture_human_reply` agora chama `conversation_control.pause` de
+  verdade. Testado de ponta a ponta: um evento real de resposta do
+  proprietário pausa `conversation_controls` E essa pausa de fato bloqueia
+  um `claim_send` com revisão antiga — não são duas provas desconectadas.
+- **E. Import quebrado em `output_safety.py`** — ✅ corrigido (mesmo padrão
+  já usado em `incident_dedup.py`).
+- **F. (novo, achado ao escrever os testes) `InboundMessage` sem `instance`/
+  `media_key`** — ✅ parcialmente corrigido. Campos adicionados;
+  `EvolutionProvider.parse_webhook` agora popula `instance` do envelope real
+  do webhook. `media_key` deliberadamente **não** populado — não existe
+  lógica de extração nem `download_media` em nenhum provider; documentado,
+  não inventado.
+- **G. (novo) `EvolutionProvider.send_text`/`send_image`/etc. não aceitavam
+  `instance=`** — ✅ corrigido, mesmo que `handlers.py` já chamava.
 
-### Novo achado estrutural (bloqueia a correção de C)
-- O modelo `Message` deste repositório **não tem** as colunas `sent_by_human`,
-  `is_autopilot_reply`, `whatsapp_instance` — mas `handlers.py` (já verificado
-  byte-idêntico à produção) as usa extensivamente (10+ referências). Nenhuma
-  migração existente nesta PR as adiciona. Mesma classe de divergência que
-  `config.py` — pedido de schema real (`\d messages` + `alembic_version`)
-  enviado à VPS, aguardando retorno antes de escrever a migração certa.
+### Gaps confirmados, NÃO corrigidos (sem evidência suficiente para corrigir com segurança)
+- `MessageRepository.find_unacknowledged_outbound` — chamado por
+  `_capture_human_reply`, **não existe** em nenhum lugar do repositório.
+  Detecta eco da própria mensagem enviada por nós; a semântica exata de
+  casamento não está evidenciada em lugar nenhum — implementar às cegas
+  arriscaria errar a lógica de detecção de eco. Bloqueia o caminho de texto
+  (não-áudio) de `_capture_human_reply` inteiramente.
+- `download_media` — chamado por `router.py`, **não existe** em nenhum
+  provider nem na interface base. Áudio do proprietário não pode ser
+  transcrito/baixado hoje.
+- Generalização do fencing de pausa + detecção/alerta de automação para
+  B2B/Azusa/Loja — ainda só existe de verdade no fluxo do Twin (ver seção
+  acima sobre loop entre bots).
+
+### Requisitos de produto registrados (ainda não implementados — StoreAgent)
+- **Abster-se quando não sabe:** não é silêncio — enviar uma mensagem
+  reconhecendo ("um momento, vou verificar e te retorno") **uma única vez
+  por incidente**, só quando houver encaminhamento real, e registrar em log
+  para revisão humana depois. Nunca durante atendimento humano ou bloqueio
+  entre bots. Nunca inventar preço/estoque/disponibilidade/pedido concluído.
+  Busca vazia não comprova inexistência (ex: variações "thinner"/"thiner").
+  Nunca afirmar que o proprietário já viu/leu uma mensagem sem evidência.
+- **Tom por segmento (Marquescolor):** respostas mais curtas e informais
+  para o público de oficina/pintor (tinta automotiva: PU, verniz,
+  poliéster — público mais rústico). Tinta imobiliária parece ser um
+  segmento menor/diferente, tom a confirmar.
+- Pendente do conteúdo real de `store_agent.py`/`planner.py`/`descriptions.py`/
+  `orchestrator/context.py` para aplicar (e para a correção de autoria
+  Flávio/Micael acima) — pedido enviado à VPS, retorno incompleto até agora.
 
 ### Requisitos de produto registrados (ainda não implementados — StoreAgent)
 - **Abster-se quando não sabe:** avisar o cliente ("um momento, vou
@@ -225,12 +253,28 @@ Faltam (ver Frente 1 para detalhe):
 2. **`backend/utils/config.py` também divergente da produção** (achado
    nesta sessão) — mesmo problema que já tratamos para handlers.py/router.py.
    Afeta tanto a correção de autoria quanto a generalização do loop-guard.
-3. **VPS com pouquíssima RAM livre** — qualquer trabalho de build/novo
-   serviço precisa considerar isso antes de propor.
+3. **VPS com pouquíssima RAM livre** — recomendação dada: mínimo 8GB pra
+   parar de estourar swap, 12GB recomendado (folga pra build de frontend),
+   16GB se for usar modelos maiores no Ollama. Decisão do usuário, ainda
+   não executada. **Prioridade confirmada pelo usuário: WhatsApp 24/7 vem
+   antes de Open WebUI** — Open WebUI pode continuar só local no PC por
+   enquanto, já que não é usado fora de casa.
+4. **Telegram não está nesta auditoria ainda** — o usuário apontou que os
+   bots do Telegram (se existirem na mesma arquitetura) ainda não foram
+   mapeados em nenhuma das 3 frentes. Pendente: descobrir se há
+   integração Telegram real em produção (grep no repo não achou nada
+   óbvio até agora) e, se houver, aplicar o mesmo tratamento dado ao
+   WhatsApp (auditoria antes de editar, mesma disciplina de divergência
+   de base).
 
 ## Próximo passo imediato
 
-Aguardar o conteúdo real de `planner.py`, `store_agent.py`,
-`descriptions.py`, `context.py`, `utils/config.py` (pedido já enviado) para
-desbloquear: correção de autoria (Flávio/Micael), generalização do
-loop-guard, e ajustes de tom/abstenção do StoreAgent.
+1. Aguardar o conteúdo real de `planner.py`, `store_agent.py`,
+   `descriptions.py`, `context.py`, `utils/config.py` (pedido já enviado)
+   para desbloquear: correção de autoria (Flávio/Micael) e ajustes de
+   tom/abstenção do StoreAgent.
+2. Mapear Telegram (ver bloqueio 4 acima).
+3. Decidir o que fazer com `find_unacknowledged_outbound`/`download_media`
+   (gaps confirmados, sem evidência suficiente pra implementar sem
+   adivinhar semântica) — provavelmente precisa de mais contexto/decisão
+   do usuário, não é "procurar mais no código".
