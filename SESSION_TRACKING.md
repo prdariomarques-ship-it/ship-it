@@ -49,14 +49,71 @@
   padrão ao `StoreAgent`.
 
 ### Identificado, ainda NÃO corrigido (prevenção de loop entre bots)
-- O guard de loop (`whatsapp_twin_loop_guard_max_replies`/`window_seconds`,
-  via `rate_limiter`) **só existe no fluxo do Twin** (instância pessoal).
-- Os fluxos de B2B (`b2b-sales`), Igreja/Azusa (`azusa-church`) e Loja
-  (Marquescolor, `store_whatsapp_enabled`) em
-  `process_inbound_whatsapp_message` **não têm nenhuma proteção de loop**.
-- Correção planejada: generalizar o mesmo mecanismo (já comprovado) para os
-  três fluxos sem guard. Pendente do conteúdo real de `config.py` (ver acima)
-  para confirmar os nomes exatos dos settings já usados em produção.
+- **Correção da afirmação anterior** (estava imprecisa): existe sim um
+  throttle genérico em `webhooks/router.py` (`auto-reply:{instance}:{contact_id}`,
+  `settings.auto_reply_max_per_contact_per_minute`, janela de 60s), aplicado
+  **antes de qualquer agente ser enfileirado** — cobre Twin, B2B, Azusa e
+  Loja igualmente. Não é verdade que esses três não tenham proteção alguma.
+- O que falta de fato (cobertura completa, não "proteção zero"):
+  - Detecção específica de automação no outro lado (`whatsapp_twin_loop_guard_*`
+    + alerta ao proprietário via `decide_owner_alert`) **só existe no fluxo do
+    Twin** — os outros três só silenciam após o limite genérico, sem alertar.
+  - Não há registro explícito das identidades/números das OUTRAS instâncias
+    gerenciadas (pessoal/Loja/B2B/Igreja) para detectar conversa bot-a-bot
+    especificamente, em nenhum fluxo.
+  - O fencing de pausa humana (`claim_send`/`_twin_revision`) **não se aplica
+    a B2B/Azusa/Loja**: o payload que esses fluxos enfileiram para
+    `whatsapp.send_text` não carrega `is_autopilot_reply`/`_twin_revision`/
+    `_twin_contact_id`, então a revalidação de pausa nunca é acionada pra
+    eles, mesmo depois de corrigir a conexão real da pausa (item D abaixo).
+- Correção planejada: generalizar o fencing de pausa + a detecção/alerta de
+  automação para os três fluxos sem essa cobertura, reaproveitando o mesmo
+  mecanismo já testado do Twin.
+
+### Revisão externa (2026-10-09) — 5 bugs reais confirmados por leitura direta do código, ainda SEM correção aplicada
+
+> Documentação não é correção. Nada abaixo está implementado ainda — isto é
+> o resultado da verificação, não da implementação.
+
+- **A. Reserva sem commit antes do transporte** — `send_whatsapp_text` chama
+  `claim_send`/`claim_alert` com sucesso mas nunca faz `await db.commit()`
+  antes de `provider.send_text(...)`. O próprio docstring de
+  `conversation_control.py` exige esse commit explicitamente ("Callers must
+  COMMIT a successful claim before transport"). Sem ele, um crash/timeout
+  durante o transporte pode reenviar a mesma mensagem.
+- **B. Alerta ao proprietário nunca é entregue** — o job de alerta é
+  enfileirado sem o campo `instance` no payload; `claim_alert` depois usa
+  escopo vazio (`''`), que nunca bate com o escopo real da reserva
+  (`alert_claim`, feita com a instância certa). Resultado: `claimed != 'claimed'`
+  sempre, e o alerta de segurança **nunca chega a ser enviado**, silenciosamente.
+- **C. Conclusão de envio sempre incerta + crash confirmado** — duas falhas
+  na mesma área:
+  - `finish_send(db, send_intent_id, None)` sempre passa `None` como
+    `receipt_id`, então o envio nunca é promovido a `'sent'` mesmo quando
+    o provedor aceitou de verdade (fica `needs_review` pra sempre).
+  - **Pior, confirmado por leitura da assinatura real**: `persist_outbound_message`
+    em `services/messaging.py` tem assinatura `(db, phone, content, media_type=...)`
+    — **não aceita** `is_autopilot_reply=` nem `instance=`, que é exatamente
+    o que `handlers.py` passa. Isso é um `TypeError` garantido em toda
+    chamada real. O caminho de envio, como está, nunca rodaria de ponta a
+    ponta em produção.
+- **D. Pausa humana nunca é conectada ao evento real** — `_capture_human_reply`
+  (webhooks/router.py) grava a mensagem do proprietário e zera
+  `awaiting_reply_since`, mas **nunca chama `conversation_control.pause`**.
+  Os 5 testes de `test_pause_fencing.py` provam que o mecanismo funciona
+  isolado — não provam que uma resposta humana real o aciona. Hoje, não aciona.
+- **E. Import quebrado em `output_safety.py`** — `from twin_risk_gate import
+  normalize_text` (plano) em vez de `from orchestrator.twin_risk_gate import
+  normalize_text`. Mesma classe de bug que já corrigi em `incident_dedup.py`
+  nesta sessão — deixei passar este arquivo.
+
+### Novo achado estrutural (bloqueia a correção de C)
+- O modelo `Message` deste repositório **não tem** as colunas `sent_by_human`,
+  `is_autopilot_reply`, `whatsapp_instance` — mas `handlers.py` (já verificado
+  byte-idêntico à produção) as usa extensivamente (10+ referências). Nenhuma
+  migração existente nesta PR as adiciona. Mesma classe de divergência que
+  `config.py` — pedido de schema real (`\d messages` + `alembic_version`)
+  enviado à VPS, aguardando retorno antes de escrever a migração certa.
 
 ### Requisitos de produto registrados (ainda não implementados — StoreAgent)
 - **Abster-se quando não sabe:** avisar o cliente ("um momento, vou
