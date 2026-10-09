@@ -149,6 +149,31 @@ def test_after_negation_still_works_within_the_same_clause():
     assert result is None
 
 
+def test_sem_crise_colloquial_reassurance_does_not_escalate():
+    # Real gap found in review: "sem crise" is a common Brazilian Portuguese
+    # reassurance ("no worries"), not a crisis disclosure -- e.g. a client
+    # asking "voce pode ir na minha casa?" and getting "sem crise, vou sim".
+    result = is_high_risk_for_impersonation(1, "sem crise, vou sim", [])
+    assert result is None
+
+
+def test_sem_crise_mid_sentence_still_does_not_escalate():
+    result = is_high_risk_for_impersonation(1, "pode vir, sem crise", [])
+    assert result is None
+
+
+def test_sem_does_not_broaden_into_the_general_negation_window():
+    # "sem" must only cancel "crise" when immediately adjacent to it -- it
+    # must NOT be added to the general 3-word negation window. "sem razao"
+    # here negates "razao" (reason), not "me matar" -- but "sem" still
+    # falls within 3 words of "me matar", so if "sem" were a general
+    # negator this genuine signal would be wrongly cleared.
+    result = is_high_risk_for_impersonation(1, "sem razao quero me matar", [])
+    assert result is not None
+    assert result.category == "crise"
+    assert result.snippet == "me matar"
+
+
 def test_business_sale_still_escalates():
     result = is_high_risk_for_impersonation(1, "quero vender a loja", [])
     assert result is not None

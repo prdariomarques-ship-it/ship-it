@@ -411,10 +411,28 @@ def _is_negated(normalized: str, hit: re.Match[str]) -> bool:
     return bool(_AFTER_NEGATION_PATTERN.match(_clause_after(normalized, hit.end())))
 
 
+def _is_colloquial_no_worries(normalized: str, hit: re.Match[str]) -> bool:
+    """"Sem crise" is a common colloquial reassurance ("no worries" / "no
+    problem" -- e.g. "pode vir, sem crise"), not a crisis disclosure.
+
+    This is deliberately its own narrow, immediately-adjacent check rather
+    than adding "sem" to _NEGATORS: that set drives _is_negated's 3-word
+    look-back window, and widening it would risk swallowing a genuine
+    signal whenever "sem" happens to precede an unrelated word in the same
+    window -- e.g. "sem conseguir mais, quero me matar" must still
+    escalate. Requiring "sem" as the literal word immediately before
+    "crise" avoids that."""
+    if hit.group(0) != "crise":
+        return False
+    before = normalized[: hit.start()].split()
+    return bool(before) and before[-1] == "sem"
+
+
 def classify_text(text: str) -> tuple[str, str] | None:
     """(category, matched term) for the first hit that is not excluded by a
     narrow exception (informational address-sharing, business-inventory
-    "separar", or direct negation), or None. Checked in order of urgency:
+    "separar", direct negation, or the colloquial "sem crise"), or None.
+    Checked in order of urgency:
     crisis, then negocio (business-sale/ownership-change), then financeiro
     (investment topics -- classified but no longer escalating, see module
     docstring)."""
@@ -430,6 +448,8 @@ def classify_text(text: str) -> tuple[str, str] | None:
             if category == "crise" and _is_business_separation(normalized, match):
                 continue
             if category == "crise" and _is_negated(normalized, match):
+                continue
+            if category == "crise" and _is_colloquial_no_worries(normalized, match):
                 continue
             return category, match.group(0)
     return None
