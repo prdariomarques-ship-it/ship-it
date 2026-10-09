@@ -81,7 +81,6 @@ def _evidence(snippet: str = "culpa") -> RiskEvidence:
 
 async def _create_and_migrate(dbname: str) -> None:
     from alembic.migration import MigrationContext
-    from alembic.operations import Operations
 
     admin = create_async_engine(ADMIN_URL, isolation_level="AUTOCOMMIT")
     async with admin.connect() as conn:

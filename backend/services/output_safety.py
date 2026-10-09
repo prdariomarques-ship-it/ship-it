@@ -43,7 +43,6 @@ job's payload literally contained
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 
 from twin_risk_gate import normalize_text

@@ -135,7 +135,7 @@ async def test_a_genuinely_new_message_after_resume_sends_normally(real_control_
         paused = await control.pause(db, 42, "dario", event_id="e1", reason="owner_replied", actor_id=7)
         await db.commit()
     async with sessions() as db:
-        resumed = await control.resume(db, 42, "dario", paused["revision"], actor_id=7)
+        await control.resume(db, 42, "dario", paused["revision"], actor_id=7)
         await db.commit()
 
     # A NEW twin_autopilot_check run, starting after resume, captures the

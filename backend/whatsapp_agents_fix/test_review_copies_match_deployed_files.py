@@ -12,7 +12,6 @@ this fails loudly, in CI, not silently in review.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 HERE = Path(__file__).parent

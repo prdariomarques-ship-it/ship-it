@@ -32,7 +32,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
-from incident_dedup import AlertDecision, decide_owner_alert, dedup_key, evidence_group
+from incident_dedup import decide_owner_alert, dedup_key, evidence_group
 from twin_risk_gate import MessageAuthor, RiskEvidence
 
 NOW = datetime(2026, 10, 8, 15, 19, 0, tzinfo=timezone.utc)
