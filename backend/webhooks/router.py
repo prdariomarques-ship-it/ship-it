@@ -46,6 +46,8 @@ from providers.whatsapp.base import (
 from providers.whatsapp.factory import get_whatsapp_provider
 from repositories.contact import ContactRepository
 from repositories.message import MessageRepository
+from repositories.user import UserRepository
+from services import conversation_control
 from services.audit import record_log
 from services.rate_limit import rate_limiter
 from utils.config import get_settings
@@ -220,6 +222,28 @@ async def _capture_human_reply(db: AsyncSession, provider: WhatsAppProvider, con
         await db.flush()
         if media_type == 'audio' and (not (inbound.text or '').strip()) and personal_instance and (inbound.instance == personal_instance):
             db.add(Job(name='whatsapp.transcribe_owner_audio', payload={'message_id': message.id, 'media_key': inbound.media_key}))
+        # Review fix (D): this is the real event that must pause automation
+        # for this (contact, instance) -- a human (the owner or an
+        # attendant) just replied from the actual phone. test_pause_fencing.py
+        # proves the pause/claim_send fence works once triggered; nothing
+        # before this fix ever triggered it from a real webhook. event_id is
+        # the message's own id (stable, unique, available after flush
+        # above) so a redelivered webhook for the SAME message can never
+        # double-pause/double-bump the revision -- conversation_control.pause
+        # is itself idempotent per event_id as a second layer, on top of the
+        # IntegrityError/duplicate check this function already has.
+        # Skipped only when the provider reports no instance at all (single-
+        # instance deployments with an unset evolution_instance), since
+        # conversation_control requires a nonempty scope.
+        if inbound.instance:
+            owner = await UserRepository(db).get_first_admin()
+            if owner is not None:
+                await conversation_control.pause(
+                    db, contact.id, inbound.instance,
+                    event_id=f'human-reply:{message.id}',
+                    reason='owner_replied',
+                    actor_id=owner.id,
+                )
         await db.commit()
     except IntegrityError:
         await db.rollback()

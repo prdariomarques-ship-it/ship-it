@@ -171,5 +171,106 @@ async def test_control_group_an_ordinary_unpaused_fresh_message_DOES_reach_the_p
     assert FAKE_PROVIDER.calls == [("send_text", "+5511999990000", "Oi! Temos o thinner 5L disponível, R$ 45,00.", None)]
 
 
+@pytest.mark.asyncio
+async def test_successful_send_captures_the_real_receipt_and_promotes_to_sent(real_control_db):
+    """Review fix (C): a provider response with a recognizable receipt
+    (response["key"]["id"], the real Baileys/Evolution API shape) must
+    promote the send intent to 'sent' -- before this fix, `finish_send`
+    was always called with a hardcoded None, so even a successful send
+    stayed stuck at 'needs_review' forever."""
+    _, sessions = real_control_db
+    async with sessions() as db:
+        fresh_revision = (await conversation_control.snapshot(db, 42, "dario"))["revision"]
+
+    payload = {
+        "to": "+5511999990000", "content": "Oi! Temos o thinner 5L disponível, R$ 45,00.",
+        "is_autopilot_reply": True, "instance": "dario",
+        "_twin_contact_id": 42, "_twin_source_message_id": 9005, "_twin_revision": fresh_revision,
+    }
+    async with sessions() as db:
+        await handlers.send_whatsapp_text(db, payload)
+
+    intent_id = "twin-send:42:dario:9005"
+    async with sessions() as db:
+        row = await conversation_control._one(
+            db, "SELECT status, receipt_id FROM conversation_send_intents WHERE id=:id", {"id": intent_id},
+        )
+    assert row["status"] == "sent"
+    assert row["receipt_id"] == "FAKE-RECEIPT-1"
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_provider_response_stays_needs_review_not_promoted_on_a_guess(real_control_db):
+    """The flip side of the test above: a provider response that doesn't
+    have the recognized key.id shape (here, None -- the old FAKE_PROVIDER
+    default, and what an unknown/future provider might still return) must
+    NOT be promoted to 'sent'. Acceptance by the provider is not proof of
+    anything without a real, recognized receipt."""
+    _, sessions = real_control_db
+    async with sessions() as db:
+        fresh_revision = (await conversation_control.snapshot(db, 42, "dario"))["revision"]
+
+    FAKE_PROVIDER.simulated_response = None
+    payload = {
+        "to": "+5511999990000", "content": "Mensagem de teste",
+        "is_autopilot_reply": True, "instance": "dario",
+        "_twin_contact_id": 42, "_twin_source_message_id": 9008, "_twin_revision": fresh_revision,
+    }
+    async with sessions() as db:
+        await handlers.send_whatsapp_text(db, payload)
+
+    intent_id = "twin-send:42:dario:9008"
+    async with sessions() as db:
+        row = await conversation_control._one(
+            db, "SELECT status FROM conversation_send_intents WHERE id=:id", {"id": intent_id},
+        )
+    assert row["status"] == "needs_review"
+
+
+@pytest.mark.asyncio
+async def test_claim_is_committed_before_transport_so_a_crash_during_send_cannot_cause_a_resend(real_control_db):
+    """Review fix (A): conversation_control.py's own module docstring
+    requires the claim to be committed BEFORE transport ("Callers must
+    COMMIT a successful claim before transport"). Simulated by making the
+    fake provider raise mid-call, standing in for a crash/timeout during
+    the real network call -- the claim must already be durably committed
+    at that point, so a retry's claim_send sees this intent already
+    reserved (not 'claimed' again) and refuses to resend."""
+    _, sessions = real_control_db
+    async with sessions() as db:
+        fresh_revision = (await conversation_control.snapshot(db, 42, "dario"))["revision"]
+
+    payload = {
+        "to": "+5511999990000", "content": "Mensagem de teste",
+        "is_autopilot_reply": True, "instance": "dario",
+        "_twin_contact_id": 42, "_twin_source_message_id": 9007, "_twin_revision": fresh_revision,
+    }
+
+    original_send_text = FAKE_PROVIDER.send_text
+
+    async def crash_during_transport(to, content, instance=None):
+        FAKE_PROVIDER.calls.append(("send_text", to, content, instance))
+        raise RuntimeError("simulated crash during transport")
+
+    FAKE_PROVIDER.send_text = crash_during_transport
+    try:
+        async with sessions() as db:
+            with pytest.raises(RuntimeError):
+                await handlers.send_whatsapp_text(db, payload)
+    finally:
+        FAKE_PROVIDER.send_text = original_send_text
+
+    assert len(FAKE_PROVIDER.calls) == 1  # the one call, right before the simulated crash
+
+    # Retry in a FRESH session -- exactly what a worker reclaim/retry does
+    # after a crash. Before fix (A), the claim from the first attempt was
+    # never committed, so this would have claimed again and sent a second
+    # time.
+    async with sessions() as db:
+        await handlers.send_whatsapp_text(db, payload)
+
+    assert len(FAKE_PROVIDER.calls) == 1  # still just the one call -- no resend
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

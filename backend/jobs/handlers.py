@@ -148,6 +148,7 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     Neither fence applies to any other call of this job (a plain
     dashboard-triggered send, mail-adjacent notifications, etc.) -- those
     behave exactly as before."""
+    from providers.whatsapp.base import extract_receipt_id
     from providers.whatsapp.evolution.provider import EvolutionProvider
     from services import conversation_control
     from services.output_safety import output_safe
@@ -173,16 +174,37 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     send_intent_id = None
     alert_contact_id = payload.get('_twin_alert_contact_id')
     alert_dedup_key = payload.get('_twin_alert_dedup_key')
+    # Review fix (B): the alert's reservation SCOPE (set by decide_owner_alert
+    # -> alert_claim when the alert was first decided) is a separate concern
+    # from `instance` above, which only ever means "which Evolution gateway
+    # number sends this job's transport" -- reusing `instance` here would
+    # either (a) be empty for an owner-alert job (no top-level 'instance' key
+    # is set when enqueuing an alert, by design, so claim_alert's scope would
+    # never match the original reservation's real instance, and the alert
+    # would silently never claim), or (b) if 'instance' were added instead,
+    # change the alert's sending number to match the twin's source instance
+    # as an unintended side effect. _twin_alert_instance carries the real
+    # reservation scope without touching transport routing at all.
+    alert_instance = payload.get('_twin_alert_instance') or ''
     if alert_contact_id is not None and alert_dedup_key:
-        claimed = await conversation_control.claim_alert(db, int(alert_contact_id), instance or '', alert_dedup_key)
+        claimed = await conversation_control.claim_alert(db, int(alert_contact_id), alert_instance, alert_dedup_key)
         if claimed != 'claimed':
             await record_log(
                 db, source='twin_owner_alert', level='info',
                 message=f'Envio de alerta ao proprietário não realizado (status: {claimed})',
-                payload={'contact_id': alert_contact_id, 'instance': instance, 'dedup_key': alert_dedup_key},
+                payload={'contact_id': alert_contact_id, 'instance': alert_instance, 'dedup_key': alert_dedup_key},
             )
             await db.commit()
             return
+        # Review fix (A): the claim above must be durably committed BEFORE
+        # transport, never only after. conversation_control.py's own module
+        # docstring requires this ("Callers must COMMIT a successful claim
+        # before transport"): a committed claim is already needs_review, so
+        # a crash/timeout during provider.send_text below can never cause
+        # an automatic resend -- a retry's claim_alert/claim_send sees the
+        # same intent/dedup key already reserved and skips, instead of
+        # resending blind.
+        await db.commit()
     elif payload.get('is_autopilot_reply') and payload.get('_twin_contact_id') is not None and payload.get('_twin_revision') is not None:
         contact_id = int(payload['_twin_contact_id'])
         source_message_id = payload.get('_twin_source_message_id')
@@ -196,20 +218,29 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
             )
             await db.commit()
             return
+        # Same fix (A) as the alert branch above -- commit the reservation
+        # before transport, not after.
+        await db.commit()
     provider = get_whatsapp_provider()
     if instance and isinstance(provider, EvolutionProvider):
-        await provider.send_text(to, content, instance=instance)
+        send_result = await provider.send_text(to, content, instance=instance)
     else:
-        await provider.send_text(to, content)
+        send_result = await provider.send_text(to, content)
     await persist_outbound_message(db, to, content, is_autopilot_reply=bool(payload.get('is_autopilot_reply')), instance=instance)
-    # No receipt id is available from this provider call in the sources
-    # this delivery was built from -- an uncertain outcome is recorded
-    # honestly (`receipt_id=None` keeps the intent at 'needs_review') and
-    # is never promoted to "sent" without one. See DELIVERY_NOTES.md.
+    # Review fix (C): capture whatever receipt id the provider actually
+    # returned instead of always discarding it as None. extract_receipt_id
+    # is deliberately defensive -- an unrecognized/absent shape (including
+    # a test double returning None) still falls back to None, keeping the
+    # intent at 'needs_review' exactly as before. Only a real, recognized
+    # receipt promotes it to 'sent'. Acceptance by the provider is still
+    # not proof the client read it -- that stays a separate concern
+    # (delivery_status / parse_delivery_ack), untouched here.
+    receipt_id = extract_receipt_id(send_result)
     if send_intent_id is not None:
-        await conversation_control.finish_send(db, send_intent_id, None)
+        await conversation_control.finish_send(db, send_intent_id, receipt_id)
     if alert_contact_id is not None and alert_dedup_key:
-        await conversation_control.finish_alert(db, int(alert_contact_id), instance or '', alert_dedup_key, None)
+        await conversation_control.finish_alert(db, int(alert_contact_id), alert_instance, alert_dedup_key, receipt_id)
+    await db.commit()
 
 
 @job_handler("mail.send_reply")
@@ -517,6 +548,16 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
                 await jobs.enqueue('whatsapp.send_text', {
                     'to': settings.whatsapp_owner_alert_phone, 'content': alert,
                     '_twin_alert_contact_id': contact_id, '_twin_alert_dedup_key': decision.key,
+                    # Review fix (B): the SCOPE the alert was reserved under
+                    # (decide_owner_alert -> alert_claim, above) must travel
+                    # with the job so claim_alert/finish_alert use the same
+                    # scope later -- a bare 'instance' key here would be
+                    # wrong, since send_whatsapp_text ALSO reads 'instance'
+                    # to pick which Evolution gateway number sends FROM,
+                    # which would silently change the alert's sender to the
+                    # twin's personal number instead of the default. Keep
+                    # the two concerns in separate fields.
+                    '_twin_alert_instance': instance,
                 })
             else:
                 await record_log(

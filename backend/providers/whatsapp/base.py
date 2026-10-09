@@ -32,6 +32,26 @@ class WhatsAppProviderError(RuntimeError):
     pass
 
 
+def extract_receipt_id(response: object) -> str | None:
+    """Best-effort extraction of the provider-assigned message id from a
+    send_text/send_image/... response -- `response["key"]["id"]`, the
+    shape shared by every provider built on the WhatsApp Web protocol
+    (Baileys, and anything wrapping it, like Evolution API).
+
+    Returns None -- never raises -- for anything that doesn't have this
+    shape (including a fake/test provider returning None, or a future
+    provider with a different contract). A caller must treat None exactly
+    like "no receipt available": the send stays `needs_review`, never
+    promoted to `sent` on a guess. See jobs/handlers.py's send_whatsapp_text."""
+    if not isinstance(response, Mapping):
+        return None
+    key = response.get("key")
+    if not isinstance(key, Mapping):
+        return None
+    receipt_id = key.get("id")
+    return receipt_id if isinstance(receipt_id, str) and receipt_id else None
+
+
 class InboundMessage(BaseModel):
     """Webhook payload normalized across providers."""
 
@@ -45,6 +65,19 @@ class InboundMessage(BaseModel):
     # ordering by this (falling back to arrival order when absent) keeps
     # conversation history and agent context chronologically correct.
     timestamp: datetime | None = None
+    # Review finding (new, 2026-10-09): webhooks/router.py and jobs/handlers.py
+    # both read `inbound.instance` extensively (loop guards, pause scoping,
+    # Message.whatsapp_instance) and router.py also reads `inbound.media_key`
+    # for owner-audio download -- but this model never declared either
+    # field, so every real webhook call would raise AttributeError the
+    # moment either was read. Added here with evidence from the Evolution
+    # webhook shape itself (`{event, instance, data: {...}}`, see
+    # evolution/provider.py's parse_webhook comment). `media_key` is left
+    # unpopulated by any provider for now -- see providers/whatsapp/evolution/
+    # provider.py's parse_webhook docstring for why extraction isn't
+    # implemented yet (no download_media method exists anywhere either).
+    instance: str = ""
+    media_key: str | None = None
 
 
 class ConnectionStatus(str, Enum):

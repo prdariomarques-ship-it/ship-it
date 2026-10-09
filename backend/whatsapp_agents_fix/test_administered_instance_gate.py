@@ -50,6 +50,10 @@ APP_STUB = str(HERE / "app_stub")
 if APP_STUB not in sys.path:
     sys.path.insert(0, APP_STUB)
 
+# Review fix (D) made router.py import `from services import
+# conversation_control` -- load the real module first, same technique as
+# test_send_whatsapp_text_real_execution.py, so that import resolves.
+load_real_module("services.conversation_control", BACKEND_ROOT / "services" / "conversation_control.py")
 router = load_real_module("webhooks.router", BACKEND_ROOT / "webhooks" / "router.py")
 
 
