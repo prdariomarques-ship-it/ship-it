@@ -174,6 +174,39 @@ def test_sem_does_not_broaden_into_the_general_negation_window():
     assert result.snippet == "me matar"
 
 
+def test_colon_separated_clauses_do_not_contaminate_each_other():
+    # Review regression: "nao estou bem" and "quero morrer" are two
+    # separate statements separated by a colon -- the first's "nao" must
+    # not negate the second's real crisis signal. Before this fix, ":"
+    # was not a recognized clause break.
+    result = is_high_risk_for_impersonation(1, "nao estou bem: quero morrer", [])
+    assert result is not None
+    assert result.category == "crise"
+    assert result.snippet == "quero morrer"
+
+
+def test_line_break_separated_clauses_do_not_contaminate_each_other():
+    # Same real message, split across two lines (a client might send
+    # "nao estou bem" then, on the next line, "quero morrer"). Before
+    # this fix, normalize_text collapsed the line break to a plain space,
+    # erasing the clause boundary entirely.
+    result = is_high_risk_for_impersonation(1, "nao estou bem\nquero morrer", [])
+    assert result is not None
+    assert result.category == "crise"
+    assert result.snippet == "quero morrer"
+
+
+def test_quero_morrer_nao_e_facil_still_escalates():
+    # Review regression: "nao e facil" comments on the DIFFICULTY of the
+    # feeling, it does not deny wanting to die -- unlike "a culpa nao e
+    # nossa", where "nao e X" negates an attribution. The old pattern
+    # matched any copula after the negator and could not tell these apart.
+    result = is_high_risk_for_impersonation(1, "quero morrer nao e facil", [])
+    assert result is not None
+    assert result.category == "crise"
+    assert result.snippet == "quero morrer"
+
+
 def test_business_sale_still_escalates():
     result = is_high_risk_for_impersonation(1, "quero vender a loja", [])
     assert result is not None

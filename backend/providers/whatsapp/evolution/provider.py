@@ -34,6 +34,10 @@ class EvolutionProvider(WhatsAppProvider):
             f"{self._base_url}/{path}/{instance or self._instance}",
             json_body=body,
             headers=self._headers(),
+            # Review fix: every call through here is a send -- a timed-out
+            # response doesn't mean the message wasn't delivered. See
+            # base.py's _request docstring.
+            retry_on_response_timeout=False,
         )
 
     async def send_text(self, to: str, content: str, instance: str | None = None) -> dict:
@@ -93,7 +97,7 @@ class EvolutionProvider(WhatsAppProvider):
             return None  # malformed payload (e.g. "data": null) — not a crash
         key = data.get("key") or {}
         remote_jid = key.get("remoteJid")
-        if not remote_jid or key.get("fromMe"):
+        if not remote_jid:
             return None
 
         media_type, text = extract_baileys_content(data.get("message", {}) or {})
@@ -109,6 +113,15 @@ class EvolutionProvider(WhatsAppProvider):
             # read -- every caller of inbound.instance was getting the
             # Pydantic default, which did not exist until base.py's fix.
             instance=str(payload.get("instance") or ""),
+            # Review fix: this method used to discard every fromMe=True
+            # event right here (`or key.get("fromMe"): return None`),
+            # which made webhooks/router.py's entire owner-reply-capture
+            # path (inbound.from_me -> _capture_human_reply) unreachable.
+            # router.py is the one place that decides what to do with a
+            # fromMe=True event (ignore it, or treat it as the owner
+            # answering from his own phone) -- this method's only job is
+            # to report what the webhook actually said.
+            from_me=bool(key.get("fromMe")),
             # media_key is intentionally NOT populated: no extraction logic
             # exists for it in this payload shape, and no download_media
             # method exists on this provider to consume it either. Left as

@@ -300,10 +300,19 @@ _ESCALATING_CATEGORIES = frozenset({"crise", "negocio"})
 
 
 def normalize_text(text: str) -> str:
-    """Lowercase, accent-stripped, whitespace-collapsed (ç -> c, ã -> a...)."""
+    """Lowercase, accent-stripped, whitespace-collapsed (ç -> c, ã -> a...).
+
+    Review fix: a line break becomes a clause break (period) BEFORE
+    whitespace is collapsed -- two sentences split across lines (e.g.
+    "nao estou bem\\nquero morrer", a real crisis message a client might
+    actually send) must not let the first line's negation contaminate the
+    second. Collapsing "\\s+" straight to a single space erased that
+    boundary entirely, with nothing left afterward for _clause_before's
+    clause-break logic to find."""
     decomposed = unicodedata.normalize("NFKD", text or "")
     stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return re.sub(r"\s+", " ", stripped.lower()).strip()
+    with_line_breaks_as_clause_breaks = re.sub(r"\n+", ". ", stripped)
+    return re.sub(r"\s+", " ", with_line_breaks_as_clause_breaks.lower()).strip()
 
 
 # Exceções restritas ao compartilhamento de endereço.
@@ -382,10 +391,22 @@ def _is_business_separation(normalized: str, hit: re.Match[str]) -> bool:
 #      _CRISIS_TERMS entry that itself starts with a negator is exempt.
 _NEGATORS = {"nao", "nunca", "jamais"}
 _NEGATION_WINDOW_WORDS = 3
-_CLAUSE_BREAK = re.compile(r"[.,;!?]")
+_CLAUSE_BREAK = re.compile(r"[.,;!?:]")
 _COPULA_VERBS = {"e", "eh", "foi", "foram", "sao", "era", "eram", "seja"}
+# Review fix: the original pattern matched ANY copula right after the
+# negator -- "a culpa NAO E nossa" (attribution/ownership, the motivating
+# case) and "quero morrer NAO E facil" (a quality of the feeling, not a
+# denial of it) look identical to a bare "nao + copula" check, but mean
+# opposite things for crisis detection. Requiring an attribution/
+# possessive complement keeps the former negated and lets the latter
+# -- a real crisis statement -- through.
+_ATTRIBUTION_COMPLEMENTS = (
+    "nossa", "nossas", "minha", "minhas", "meu", "meus",
+    "sua", "suas", "seu", "seus", "dele", "dela", "deles", "delas",
+)
 _AFTER_NEGATION_PATTERN = re.compile(
-    r"^\s*(?:\S+\s+){0,2}?(?:nao|nunca|jamais)\s+(?:" + "|".join(_COPULA_VERBS) + r")\b"
+    r"^\s*(?:\S+\s+){0,2}?(?:nao|nunca|jamais)\s+(?:" + "|".join(_COPULA_VERBS) + r")\s+(?:"
+    + "|".join(_ATTRIBUTION_COMPLEMENTS) + r")\b"
 )
 _SELF_NEGATING_TERM_PREFIXES = ("nao ", "nunca ", "jamais ")
 

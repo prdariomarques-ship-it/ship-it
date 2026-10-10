@@ -1,0 +1,223 @@
+"""Review fix (priority 3): send_whatsapp_text's commit-before-transport
+fence (jobs/handlers.py, review finding A) only protects against the JOB
+WORKER blindly re-running a whole job after a crash. It does nothing
+about THIS layer -- providers/whatsapp/base.py's `_request` -- retrying
+the HTTP call again INSIDE the same job execution after the provider
+accepted the message but the response timed out. That could still send
+the same WhatsApp message twice, with no crash or worker retry involved
+at all.
+
+Tested here against a REAL httpx.AsyncClient call path (not a mock of
+_request itself) with a deterministic fake transport standing in for the
+network -- proving:
+
+  1. A response timeout on a send (EvolutionProvider._post, used by every
+     send_* method) results in exactly ONE POST attempt, not a blind retry.
+  2. This is NOT a blanket "sends never retry" rule: a ConnectError (the
+     request never left this process, no delivery ambiguity at all)
+     still retries normally through the same send path.
+  3. The `retry_on_response_timeout` flag genuinely controls the
+     behavior -- a caller that opts back into retrying (as some future
+     read-only/idempotent call might) still retries on timeout too.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import httpx
+import pytest
+
+from conftest import load_real_module
+
+HERE = Path(__file__).parent
+BACKEND_ROOT = HERE.parents[0]
+APP_STUB = str(HERE / "app_stub")
+if APP_STUB not in sys.path:
+    sys.path.insert(0, APP_STUB)
+
+_REAL_MODULE_KEYS = ("providers.whatsapp.base", "providers.whatsapp.evolution.provider")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _real_modules():
+    saved = {key: sys.modules.get(key) for key in _REAL_MODULE_KEYS}
+    try:
+        load_real_module("providers.whatsapp.base", BACKEND_ROOT / "providers" / "whatsapp" / "base.py")
+        load_real_module(
+            "providers.whatsapp.evolution.provider",
+            BACKEND_ROOT / "providers" / "whatsapp" / "evolution" / "provider.py",
+        )
+        yield
+    finally:
+        for key, mod in saved.items():
+            if mod is None:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = mod
+
+
+@pytest.fixture
+def base_module(_real_modules):
+    return sys.modules["providers.whatsapp.base"]
+
+
+@pytest.fixture
+def evolution_provider_class(_real_modules):
+    return sys.modules["providers.whatsapp.evolution.provider"].EvolutionProvider
+
+
+class _CountingAsyncClient:
+    """Deterministic stand-in for httpx.AsyncClient -- no real network,
+    no real timing, just a scripted sequence of outcomes and an exact
+    call count every assertion below checks."""
+
+    outcomes: list[object] = []
+    calls: int = 0
+
+    def __init__(self, *, timeout=None):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    async def request(self, method, url, json=None, headers=None):
+        type(self).calls += 1
+        outcome = type(self).outcomes[min(type(self).calls - 1, len(type(self).outcomes) - 1)]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.fixture
+def fake_transport(base_module):
+    original = base_module.httpx.AsyncClient
+    base_module.httpx.AsyncClient = _CountingAsyncClient
+    _CountingAsyncClient.calls = 0
+    _CountingAsyncClient.outcomes = []
+    try:
+        yield _CountingAsyncClient
+    finally:
+        base_module.httpx.AsyncClient = original
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, json_body=None):
+        self.status_code = status_code
+        self.headers = {"content-type": "application/json"}
+        self._json_body = json_body or {"key": {"id": "EVT-OK"}}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            request = httpx.Request("POST", "http://example.invalid")
+            raise httpx.HTTPStatusError("bad status", request=request, response=self)
+
+    def json(self):
+        return self._json_body
+
+
+def _settings_for(base_module, *, max_attempts, backoff_seconds=0.0):
+    from utils.config import get_settings
+
+    settings = get_settings()
+    saved = {
+        "whatsapp_request_max_attempts": getattr(settings, "whatsapp_request_max_attempts", None),
+        "whatsapp_request_backoff_seconds": getattr(settings, "whatsapp_request_backoff_seconds", None),
+    }
+    settings.whatsapp_request_max_attempts = max_attempts
+    settings.whatsapp_request_backoff_seconds = backoff_seconds
+    return settings, saved
+
+
+def _restore_settings(settings, saved):
+    for key, value in saved.items():
+        setattr(settings, key, value)
+
+
+@pytest.mark.asyncio
+async def test_send_through_evolution_provider_does_not_retry_on_read_timeout(
+    evolution_provider_class, fake_transport,
+):
+    """The exact scenario the review described: the provider may have
+    already accepted/processed the message, and the response never came
+    back. Must attempt the POST exactly once -- not resend it."""
+    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
+    settings.evolution_base_url = "http://example.invalid"
+    settings.evolution_api_key = ""
+    settings.evolution_instance = "dario"
+    fake_transport.outcomes = [httpx.ReadTimeout("simulated: response never arrived")]
+    try:
+        provider = evolution_provider_class()
+        with pytest.raises(Exception):
+            await provider.send_text("+5511999990000", "mensagem de teste")
+        assert fake_transport.calls == 1, "retentou o POST apos um timeout de resposta -- risco de enviar a mensagem duas vezes"
+    finally:
+        _restore_settings(settings, saved)
+
+
+@pytest.mark.asyncio
+async def test_send_through_evolution_provider_still_retries_on_connect_error(
+    evolution_provider_class, fake_transport,
+):
+    """Not a blanket "sends never retry": a ConnectError means the
+    request never reached the provider at all -- no delivery ambiguity --
+    so the normal retry-with-backoff policy still applies."""
+    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
+    settings.evolution_base_url = "http://example.invalid"
+    settings.evolution_api_key = ""
+    settings.evolution_instance = "dario"
+    fake_transport.outcomes = [
+        httpx.ConnectError("simulated: connection refused"),
+        httpx.ConnectError("simulated: connection refused"),
+        _FakeResponse(200),
+    ]
+    try:
+        provider = evolution_provider_class()
+        result = await provider.send_text("+5511999990000", "mensagem de teste")
+        assert result == {"key": {"id": "EVT-OK"}}
+        assert fake_transport.calls == 3, "nao tentou de novo apos ConnectError -- isso nao deveria ter sido bloqueado"
+    finally:
+        _restore_settings(settings, saved)
+
+
+@pytest.mark.asyncio
+async def test_retry_on_response_timeout_flag_genuinely_controls_the_behavior(
+    base_module, fake_transport,
+):
+    """Calling _request directly with retry_on_response_timeout=True (the
+    default, for any future read-only/idempotent caller) must still retry
+    on a read timeout -- proving the no-retry behavior above comes from
+    the flag _post sets, not a hardcoded blanket rule inside _request."""
+    settings, saved = _settings_for(base_module, max_attempts=3)
+    fake_transport.outcomes = [
+        httpx.ReadTimeout("simulated"),
+        httpx.ReadTimeout("simulated"),
+        _FakeResponse(200),
+    ]
+    try:
+        class _Probe(base_module.WhatsAppProvider):
+            name = "probe"
+
+            async def send_text(self, to, content, **kw): ...
+            async def send_image(self, to, url, **kw): ...
+            async def send_file(self, to, url, **kw): ...
+            async def send_audio(self, to, url, **kw): ...
+            async def send_location(self, to, lat, lng, **kw): ...
+            def parse_webhook(self, payload): ...
+
+        probe = _Probe()
+        result = await probe._request(
+            "GET", "http://example.invalid/status", retry_on_response_timeout=True,
+        )
+        assert result == {"key": {"id": "EVT-OK"}}
+        assert fake_transport.calls == 3
+    finally:
+        _restore_settings(settings, saved)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-v"]))

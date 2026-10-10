@@ -78,6 +78,16 @@ class InboundMessage(BaseModel):
     # implemented yet (no download_media method exists anywhere either).
     instance: str = ""
     media_key: str | None = None
+    # Review finding (new, 2026-10-10): webhooks/router.py's whatsapp_webhook
+    # reads `inbound.from_me` to decide between the real human-reply path
+    # (_capture_human_reply) and the normal client-inbound path -- but this
+    # model never declared the field, AND both providers' parse_webhook
+    # discarded every fromMe=True event before router.py ever saw it. That
+    # combination made the owner-reply-capture path (and the Twin's
+    # "quiet while the owner answers from his own phone" behavior) entirely
+    # unreachable, regardless of settings. Added here; populated by each
+    # provider's parse_webhook instead of being filtered out beforehand.
+    from_me: bool = False
 
 
 class ConnectionStatus(str, Enum):
@@ -181,6 +191,7 @@ class WhatsAppProvider(ABC):
         headers: dict | None = None,
         timeout: float = 30,
         max_attempts: int | None = None,
+        retry_on_response_timeout: bool = True,
     ) -> dict:
         """Shared HTTP helper: uniform error translation, retry with
         exponential backoff for transient failures, and availability metrics
@@ -190,7 +201,22 @@ class WhatsAppProvider(ABC):
         `max_attempts` overrides the configured default — pass 1 for calls
         that must stay fast and single-shot (e.g. a readiness probe polled
         frequently by an orchestrator should never block for several seconds
-        retrying a gateway that's genuinely down)."""
+        retrying a gateway that's genuinely down).
+
+        Review fix: `retry_on_response_timeout=False` (set by `_post`, the
+        transport every send_* method goes through) disables retry
+        specifically for `httpx.ReadTimeout`/`WriteTimeout` -- the one
+        failure mode where the request may have already reached and been
+        processed by the provider, and we simply never got the response
+        back. `conversation_control`'s commit-before-transport fence (see
+        jobs/handlers.py's send_whatsapp_text) only protects against the
+        WORKER blindly re-running the whole job; it does nothing about
+        THIS layer retrying the HTTP call again inside that same single
+        job execution, which could still double-send. A `ConnectError`/
+        `ConnectTimeout` (the request never left this process) carries no
+        such ambiguity and keeps retrying exactly as before -- this is not
+        a blanket "never retry sends" rule, only the specific case where
+        we genuinely don't know what the provider did with it."""
         from observability.metrics import record_whatsapp_request
 
         settings = get_settings()
@@ -216,7 +242,16 @@ class WhatsAppProvider(ABC):
                 return {"status": "ok"}
             except httpx.HTTPError as exc:
                 last_exc = exc
-                if attempt >= max_attempts:
+                ambiguous_delivery = isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout))
+                if attempt >= max_attempts or (ambiguous_delivery and not retry_on_response_timeout):
+                    if ambiguous_delivery and not retry_on_response_timeout and attempt < max_attempts:
+                        logger.error(
+                            "%s provider call (%s %s) timed out waiting for the response -- "
+                            "NOT retrying: the provider may have already processed it, and a "
+                            "blind retry here risks sending it twice. Leaving the outcome "
+                            "unknown for reconciliation, not asserting success or failure: %s",
+                            self.name, method, url, exc,
+                        )
                     break
                 backoff = settings.whatsapp_request_backoff_seconds * (
                     2 ** (attempt - 1)
