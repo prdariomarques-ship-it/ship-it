@@ -11,6 +11,23 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # Ephemeral, CI-only database for the tests that exercise real
+      # PostgreSQL behavior (migration ownership, the full alembic chain,
+      # concurrent claims). Never a production credential.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WHATSAPP_DEDUP_PG_ADMIN_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -32,6 +49,13 @@ jobs:
         continue-on-error: true
       - name: Tests
         run: pytest -q
+      # Separate invocation on purpose: whatsapp_agents_fix/ deliberately
+      # loads real production modules under their real dotted names and
+      # uses an app_stub/ tree that shadows the `providers` package -- both
+      # suites in one pytest process collide in sys.modules at collection
+      # time (see whatsapp_agents_fix/conftest.py's docstring).
+      - name: Review regression tests (whatsapp_agents_fix, real PostgreSQL)
+        run: pytest -q whatsapp_agents_fix/
       - name: Migrations apply and roll back
         env:
           DATABASE_URL: sqlite+aiosqlite:///./ci-migrations.db

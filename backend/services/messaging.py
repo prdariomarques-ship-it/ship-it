@@ -22,11 +22,20 @@ async def persist_outbound_message(
     phone: str,
     content: str,
     media_type: MessageMediaType = MessageMediaType.TEXT,
+    is_autopilot_reply: bool = False,
+    instance: str | None = None,
 ) -> Message:
     """Record an outbound WhatsApp message and feed the contact memory.
 
     Call this AFTER the provider send succeeds — never before, so a failed
     send doesn't leave a message row claiming something was delivered.
+
+    `is_autopilot_reply`/`instance` default to the dashboard-triggered
+    endpoint's old behaviour (a human-sent message, no instance scope) --
+    the job-triggered send (jobs/handlers.py) passes both explicitly, since
+    authorship and instance-scoping (loop guards, pause fencing, the
+    Flávio/Micael review) both depend on this being recorded accurately,
+    not inferred later from message content.
     """
     clean_phone = normalize_phone(phone)
     contact = await ContactRepository(db).get_or_create_by_phone(clean_phone)
@@ -36,6 +45,8 @@ async def persist_outbound_message(
         direction=MessageDirection.OUTBOUND,
         media_type=media_type,
         content=content,
+        is_autopilot_reply=is_autopilot_reply,
+        whatsapp_instance=instance,
     )
     db.add(message)
     await db.commit()

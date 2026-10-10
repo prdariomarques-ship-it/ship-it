@@ -137,6 +137,60 @@ class Settings(BaseSettings):
     baileys_api_key: str = ""
     baileys_session: str = "darioos"
 
+    # Review finding (round 6, "reconciliar a base"): jobs/handlers.py and
+    # webhooks/router.py already read every field below -- the Twin
+    # (digital-twin autopilot), the per-instance personal-number/store
+    # distinction, the loop/automation guard, and owner/staff alert
+    # routing, all threaded through this review's earlier rounds -- but
+    # none of them existed in this file, confirmed via `mypy` genuinely
+    # running for the first time (see SESSION_TRACKING.md). This is the
+    # same documented, cross-cutting gap as the rest of this file's
+    # divergence from production (no VPS access to confirm production's
+    # real values). The defaults below are deliberately conservative --
+    # every new optional behavior OFF, every new phone number/instance
+    # EMPTY -- matching this file's own established convention elsewhere
+    # (otel_enabled, llm_fallback_provider, openai_api_key, ...), not a
+    # reconstruction of what production actually has configured. Do not
+    # read these defaults as confirmed production behavior.
+    #
+    # Dedicated "digital twin" autopilot mode for the owner's personal
+    # WhatsApp number: off by default (old, global-reply behavior
+    # unchanged) -- see webhooks/router.py's use_twin computation.
+    whatsapp_twin_mode_enabled: bool = False
+    # How long the Twin waits for the real owner to reply before the
+    # autopilot check job considers taking over (webhooks/router.py
+    # enqueues whatsapp.twin_autopilot_check with this delay). 300s (5
+    # minutes) is a reasonable, conservative "give the human first right
+    # of reply" window, not a confirmed production value.
+    whatsapp_twin_idle_timeout_seconds: int = 300
+    # When set, scopes the Twin (and the personal/store distinction more
+    # generally, see jobs/handlers.py's _owner_audio_personal_instance) to
+    # one specific Evolution gateway instance -- the owner's own number,
+    # as opposed to a dedicated commercial/store instance. Empty means
+    # single-instance deployments keep their old, global behavior.
+    evolution_personal_instance: str = ""
+    # Loop/automation guard specific to the Twin flow (distinct from the
+    # generic auto_reply_max_per_contact_per_minute throttle above) --
+    # mirrors that generic throttle's shape (6 replies / 60s window) as a
+    # conservative default, not a confirmed production value. See
+    # jobs/handlers.py's _loop_guard_or_alert.
+    whatsapp_twin_loop_guard_max_replies: int = 6
+    whatsapp_twin_loop_guard_window_seconds: int = 60
+    # Phone number the owner is alerted at (loop/automation detected, a
+    # high-risk message, an uncertain delivery needing review). Empty
+    # disables alerting entirely -- see jobs/handlers.py's
+    # _loop_guard_or_alert and the twin owner-alert path.
+    whatsapp_owner_alert_phone: str = ""
+    # Whether the store's own WhatsApp instance auto-replies at all (a
+    # separate on/off switch from auto_reply_enabled above, scoped to the
+    # store flow specifically) -- off by default. See jobs/handlers.py and
+    # webhooks/router.py's store-instance branches.
+    store_whatsapp_enabled: bool = False
+    # Phone number store staff are notified at for store-instance events
+    # that need human attention. Empty disables -- see
+    # webhooks/router.py's per-instance alert-phone mapping.
+    store_staff_notify_phone: str = ""
+
     # FlowCore market-intelligence engine — the personal agent reaches it via
     # a REST tool shim (`agents/tools/flowcore_tools.py`), so no shared DB or
     # runtime dependency. Empty string disables the tools gracefully (they
@@ -156,6 +210,21 @@ class Settings(BaseSettings):
     # Set to any secret string of your choosing and enter the same value in
     # the Meta App Dashboard's webhook config.
     official_webhook_verify_token: str = ""
+
+    # Speech-to-text (optional -- see providers/stt/base.py's module
+    # docstring for why no real backend is implemented here: no evidence
+    # of which, if any, backend production uses). Empty provider name
+    # means STT is simply unavailable -- callers already treat
+    # get_stt_provider() is None as "keep existing behavior, never crash"
+    # (webhooks/router.py's _transcribe_audio), not a misconfiguration.
+    stt_provider: str = ""
+    # Whether an inbound CLIENT audio message (never the owner's own, see
+    # personal_empty_audio elsewhere) gets transcribed inline (blocking
+    # the webhook response) or deferred to a background job. Off by
+    # default -- inline is the simpler, more predictable path when no
+    # background wiring has been confirmed. See webhooks/router.py's
+    # defer_audio computation.
+    stt_background_enabled: bool = False
 
     # n8n
     n8n_base_url: str = "http://localhost:5678"

@@ -7,7 +7,7 @@ with atomic state transitions, audit logging, and event bus integration.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -335,7 +335,7 @@ async def _domain_status(
     db: DbSession, model, domain: str
 ) -> schemas.GoogleDomainStatus:
     statement = select(model)
-    rows = (await db.execute(statement)).scalars().all()
+    rows: list[Any] = list((await db.execute(statement)).scalars().all())
     accounts = [
         schemas.GoogleAccountInfo(
             user_id=row.user_id,

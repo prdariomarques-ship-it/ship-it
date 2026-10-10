@@ -32,6 +32,37 @@ class WhatsAppProviderError(RuntimeError):
     pass
 
 
+# Allow-list of transport failures proven to happen BEFORE any request byte
+# could have reached the provider -- a connection that never opened, or a
+# wait for a free connection from the pool that timed out. Retrying these is
+# always safe: the provider never saw the request. Everything else under
+# httpx.HTTPError (ReadTimeout/WriteTimeout, ReadError/WriteError,
+# RemoteProtocolError, and any future exception type this module doesn't
+# yet know about) is treated as ambiguous by default -- see _request's
+# docstring for why this is an allow-list, not a deny-list.
+_SAFE_TO_RETRY_TRANSPORT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
+def extract_receipt_id(response: object) -> str | None:
+    """Best-effort extraction of the provider-assigned message id from a
+    send_text/send_image/... response -- `response["key"]["id"]`, the
+    shape shared by every provider built on the WhatsApp Web protocol
+    (Baileys, and anything wrapping it, like Evolution API).
+
+    Returns None -- never raises -- for anything that doesn't have this
+    shape (including a fake/test provider returning None, or a future
+    provider with a different contract). A caller must treat None exactly
+    like "no receipt available": the send stays `needs_review`, never
+    promoted to `sent` on a guess. See jobs/handlers.py's send_whatsapp_text."""
+    if not isinstance(response, Mapping):
+        return None
+    key = response.get("key")
+    if not isinstance(key, Mapping):
+        return None
+    receipt_id = key.get("id")
+    return receipt_id if isinstance(receipt_id, str) and receipt_id else None
+
+
 class InboundMessage(BaseModel):
     """Webhook payload normalized across providers."""
 
@@ -45,6 +76,29 @@ class InboundMessage(BaseModel):
     # ordering by this (falling back to arrival order when absent) keeps
     # conversation history and agent context chronologically correct.
     timestamp: datetime | None = None
+    # Review finding (new, 2026-10-09): webhooks/router.py and jobs/handlers.py
+    # both read `inbound.instance` extensively (loop guards, pause scoping,
+    # Message.whatsapp_instance) and router.py also reads `inbound.media_key`
+    # for owner-audio download -- but this model never declared either
+    # field, so every real webhook call would raise AttributeError the
+    # moment either was read. Added here with evidence from the Evolution
+    # webhook shape itself (`{event, instance, data: {...}}`, see
+    # evolution/provider.py's parse_webhook comment). `media_key` is left
+    # unpopulated by any provider for now -- see providers/whatsapp/evolution/
+    # provider.py's parse_webhook docstring for why extraction isn't
+    # implemented yet (no download_media method exists anywhere either).
+    instance: str = ""
+    media_key: str | None = None
+    # Review finding (new, 2026-10-10): webhooks/router.py's whatsapp_webhook
+    # reads `inbound.from_me` to decide between the real human-reply path
+    # (_capture_human_reply) and the normal client-inbound path -- but this
+    # model never declared the field, AND both providers' parse_webhook
+    # discarded every fromMe=True event before router.py ever saw it. That
+    # combination made the owner-reply-capture path (and the Twin's
+    # "quiet while the owner answers from his own phone" behavior) entirely
+    # unreachable, regardless of settings. Added here; populated by each
+    # provider's parse_webhook instead of being filtered out beforehand.
+    from_me: bool = False
 
 
 class ConnectionStatus(str, Enum):
@@ -86,6 +140,10 @@ class WhatsAppProvider(ABC):
     """Strategy interface implemented by every WhatsApp integration."""
 
     name: str
+    # The gateway instance a send goes through when the caller names none.
+    # The same instance's fromMe echoes come back carrying it, so receipts
+    # recorded for default-instance sends must be scoped to it too.
+    default_instance: str = ""
 
     @abstractmethod
     async def send_text(self, to: str, content: str) -> dict: ...
@@ -148,6 +206,7 @@ class WhatsAppProvider(ABC):
         headers: dict | None = None,
         timeout: float = 30,
         max_attempts: int | None = None,
+        retry_on_ambiguous_delivery: bool = True,
     ) -> dict:
         """Shared HTTP helper: uniform error translation, retry with
         exponential backoff for transient failures, and availability metrics
@@ -157,7 +216,43 @@ class WhatsAppProvider(ABC):
         `max_attempts` overrides the configured default — pass 1 for calls
         that must stay fast and single-shot (e.g. a readiness probe polled
         frequently by an orchestrator should never block for several seconds
-        retrying a gateway that's genuinely down)."""
+        retrying a gateway that's genuinely down).
+
+        Review fix, corrected twice now after incomplete earlier attempts:
+        `retry_on_ambiguous_delivery=False` (set by `_post`, the transport
+        every send_* method goes through) disables retry for every
+        failure mode where the request may have already reached and been
+        processed by the provider and we simply never got a usable
+        response back -- not just `ReadTimeout`/`WriteTimeout` (the first
+        version), not just those plus `ReadError`/`WriteError`/
+        `RemoteProtocolError` (the second version), but `httpx.HTTPStatusError`
+        too: receiving an HTTP error response (500/502/504 included) is
+        NOT proof the provider never processed the request -- a gateway
+        can accept and queue a WhatsApp send, then fail while composing or
+        delivering its OWN response, well after the message was already
+        in flight. The earlier version of this code excluded
+        `HTTPStatusError` from "ambiguous" on the theory that a response
+        WAS received so its status told us definitively what happened;
+        that theory was wrong for exactly this reason, and treating it as
+        safe-to-retry blindly resent real WhatsApp messages on a transient
+        5xx. This is an ALLOW-list, not a deny-list, on purpose:
+        `_SAFE_TO_RETRY_TRANSPORT_ERRORS` below names ONLY the failures
+        that happen BEFORE any request byte could plausibly have reached
+        the provider (`ConnectError`, `ConnectTimeout`, `PoolTimeout`) --
+        every other `httpx.HTTPError`, `HTTPStatusError` included, is
+        ambiguous by default, so a future httpx exception type (or status
+        code) this module doesn't yet know about fails SAFE (no blind
+        retry) instead of failing open. A provider wanting retry-safe
+        error responses must document and implement real idempotency
+        (e.g. an idempotency key the gateway itself deduplicates on) --
+        none of this codebase's providers do today, so none get this
+        exemption.
+
+        `conversation_control`'s commit-before-transport fence (see
+        jobs/handlers.py's send_whatsapp_text) only protects against the
+        WORKER blindly re-running the whole job; it does nothing about
+        THIS layer retrying the HTTP call again inside that same single
+        job execution, which could still double-send."""
         from observability.metrics import record_whatsapp_request
 
         settings = get_settings()
@@ -183,7 +278,16 @@ class WhatsAppProvider(ABC):
                 return {"status": "ok"}
             except httpx.HTTPError as exc:
                 last_exc = exc
-                if attempt >= max_attempts:
+                ambiguous_delivery = not isinstance(exc, _SAFE_TO_RETRY_TRANSPORT_ERRORS)
+                if attempt >= max_attempts or (ambiguous_delivery and not retry_on_ambiguous_delivery):
+                    if ambiguous_delivery and not retry_on_ambiguous_delivery and attempt < max_attempts:
+                        logger.error(
+                            "%s provider call (%s %s) failed with an ambiguous outcome -- "
+                            "NOT retrying: the provider may have already processed it, and a "
+                            "blind retry here risks sending it twice. Leaving the outcome "
+                            "unknown for reconciliation, not asserting success or failure: %s",
+                            self.name, method, url, exc,
+                        )
                     break
                 backoff = settings.whatsapp_request_backoff_seconds * (
                     2 ** (attempt - 1)

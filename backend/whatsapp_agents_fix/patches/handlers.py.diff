@@ -1,0 +1,249 @@
+--- jobs/handlers.py.orig	2026-10-08 21:29:51.614989682 +0000
++++ jobs/handlers.py	2026-10-08 22:02:06.414627165 +0000
+@@ -123,19 +123,93 @@
+     that same Evolution gateway instance (see evolution_personal_instance) --
+     so a personal-number conversation is answered from the personal number,
+     not the store's. Only EvolutionProvider understands this; every other
+-    provider (and a call with no `instance`) behaves exactly as before."""
++    provider (and a call with no `instance`) behaves exactly as before.
++
++    Two independent, deliberately separate transactional fences apply here
++    (services/conversation_control.py, reused verbatim from the V2
++    candidate -- see DELIVERY_NOTES.md), so a failure or uncertain outcome
++    of one can never trigger a blind repeat of the other:
++
++      - an autopilot reply TO A CLIENT (`is_autopilot_reply` + the twin's
++        `_twin_*` fields) goes through `claim_send`/`finish_send`, keyed
++        by contact+instance+the source message -- this is the "revalidate
++        the human-pause control immediately before transport" fence. A
++        pause that happened after generation started (even mid-generation)
++        makes `claim_send` fail here, atomically, regardless of how long
++        generation took.
++      - an owner alert (`_twin_alert_dedup_key`, set by
++        orchestrator/incident_dedup.py's decide_owner_alert) goes through
++        `claim_alert`/`finish_alert` instead, keyed by the SAME
++        contact+instance but a content-derived dedup key -- never the
++        send fence above. The owner being alerted about a paused
++        conversation is exactly when the alert must still go out, so it
++        is never blocked by that conversation's own pause state.
++
++    Neither fence applies to any other call of this job (a plain
++    dashboard-triggered send, mail-adjacent notifications, etc.) -- those
++    behave exactly as before."""
+     from providers.whatsapp.evolution.provider import EvolutionProvider
++    from services import conversation_control
++    from services.output_safety import output_safe
+     to = str(payload['to'])
+     content = str(payload['content'])
+     instance = payload.get('instance') or None
+     if not await _owner_audio_send_guard(db, payload, to, instance):
+         return
++    # Last point before transport -- see services/output_safety.py's module
++    # docstring for why this must live here (the one chokepoint every
++    # caller converges on) and not only in the generating callers above.
++    # Covers retries and re-queued jobs for free: this runs every time the
++    # job executes, including a retry of a payload generated before this
++    # check existed.
++    safety = output_safe(content)
++    if not safety.safe:
++        await record_log(
++            db, source="output_safety", level="error",
++            message="Envio bloqueado: conteúdo não seguro para transporte",
++            payload={"to_last4": to[-4:], "reason": safety.reason, "instance": instance},
++        )
++        return
++    send_intent_id = None
++    alert_contact_id = payload.get('_twin_alert_contact_id')
++    alert_dedup_key = payload.get('_twin_alert_dedup_key')
++    if alert_contact_id is not None and alert_dedup_key:
++        claimed = await conversation_control.claim_alert(db, int(alert_contact_id), instance or '', alert_dedup_key)
++        if claimed != 'claimed':
++            await record_log(
++                db, source='twin_owner_alert', level='info',
++                message=f'Envio de alerta ao proprietário não realizado (status: {claimed})',
++                payload={'contact_id': alert_contact_id, 'instance': instance, 'dedup_key': alert_dedup_key},
++            )
++            await db.commit()
++            return
++    elif payload.get('is_autopilot_reply') and payload.get('_twin_contact_id') is not None and payload.get('_twin_revision') is not None:
++        contact_id = int(payload['_twin_contact_id'])
++        source_message_id = payload.get('_twin_source_message_id')
++        send_intent_id = f"twin-send:{contact_id}:{instance}:{source_message_id}"
++        claimed = await conversation_control.claim_send(db, contact_id, instance or '', int(payload['_twin_revision']), send_intent_id)
++        if claimed != 'claimed':
++            await record_log(
++                db, source='twin_autopilot', level='info',
++                message=f'Envio automático suprimido (status: {claimed}) -- controle humano revalidado antes do transporte',
++                payload={'contact_id': contact_id, 'instance': instance, 'intent_id': send_intent_id},
++            )
++            await db.commit()
++            return
+     provider = get_whatsapp_provider()
+     if instance and isinstance(provider, EvolutionProvider):
+         await provider.send_text(to, content, instance=instance)
+     else:
+         await provider.send_text(to, content)
+     await persist_outbound_message(db, to, content, is_autopilot_reply=bool(payload.get('is_autopilot_reply')), instance=instance)
++    # No receipt id is available from this provider call in the sources
++    # this delivery was built from -- an uncertain outcome is recorded
++    # honestly (`receipt_id=None` keeps the intent at 'needs_review') and
++    # is never promoted to "sent" without one. See DELIVERY_NOTES.md.
++    if send_intent_id is not None:
++        await conversation_control.finish_send(db, send_intent_id, None)
++    if alert_contact_id is not None and alert_dedup_key:
++        await conversation_control.finish_alert(db, int(alert_contact_id), instance or '', alert_dedup_key, None)
+ 
+ 
+ @job_handler("mail.send_reply")
+@@ -315,10 +389,23 @@
+     voice or -- for sensitive topics -- a neutral holding message goes out and
+     the owner is alerted. Never sends anything for a conversation that was
+     already answered, or superseded by a newer message (that one has its own
+-    check job)."""
++    check job).
++
++    Human-pause: before anything else (including before spending an LLM
++    call), this checks services/conversation_control.snapshot for this
++    (contact, instance). A conversation already paused (owner or an
++    attendant took over) returns immediately -- no generation, no send.
++    The `revision` read here is then carried through to the enqueued
++    send-job payload as `_twin_revision`, so send_whatsapp_text's
++    `claim_send` re-checks it atomically right before transport: a pause
++    that happens AFTER this point (including mid-generation) still blocks
++    the send, because the revision captured here will no longer match by
++    the time claim_send runs."""
+     from agents.darius_twin import TwinReplyUnavailable, generate_darius_reply
+-    from orchestrator.twin_risk_gate import is_high_risk_for_impersonation
++    from orchestrator.incident_dedup import decide_owner_alert
++    from orchestrator.twin_risk_gate import HistoryEntry, MessageAuthor, RiskEvidence, is_high_risk_for_impersonation
+     from providers.llm.base import ChatMessage
++    from services import conversation_control
+     from utils.config import get_settings
+     settings = get_settings()
+     if not settings.whatsapp_twin_mode_enabled:
+@@ -326,6 +413,15 @@
+     contact_id = int(payload['contact_id'])
+     message_id = int(payload['message_id'])
+     instance = str(payload.get('instance') or '')
++    control_state = await conversation_control.snapshot(db, contact_id, instance)
++    if control_state['paused']:
++        await record_log(
++            db, source='twin_autopilot', level='info',
++            message='Conversa pausada por controle humano -- nenhuma geração ou envio automático',
++            payload={'contact_id': contact_id, 'instance': instance},
++        )
++        return
++    revision = control_state['revision']
+     contact = await ContactRepository(db).get(contact_id)
+     if contact is None or contact.awaiting_reply_since is None:
+         return
+@@ -342,32 +438,100 @@
+         return
+     _twin_history_digest = _owner_audio_history_digest(history)
+     _twin_pending_snapshot = contact.awaiting_reply_since
+-    history_texts = [_owner_audio_history_content(m) for m in history if _owner_audio_history_content(m)]
+-    is_risky, reason = is_high_risk_for_impersonation(message.content, history_texts)
++
++    def _author_of(m) -> 'MessageAuthor':
++        # Conservative by design: anything that is not clearly inbound
++        # (client), a recorded human send (owner) or our own autopilot
++        # reply (bot) is UNKNOWN -- never silently defaulted to CLIENT,
++        # per the review's "origem incerta deve ser registrada como
++        # incerta".
++        if m.direction == MessageDirection.INBOUND:
++            return MessageAuthor.CLIENT
++        if getattr(m, 'is_autopilot_reply', False):
++            return MessageAuthor.BOT
++        if getattr(m, 'sent_by_human', False):
++            return MessageAuthor.OWNER
++        return MessageAuthor.UNKNOWN
++
++    history_entries = [
++        HistoryEntry(m.id, _author_of(m), m.provider_timestamp or m.created_at, _owner_audio_history_content(m))
++        for m in history
++        if _owner_audio_history_content(m)
++    ]
++    evidence = is_high_risk_for_impersonation(message.id, message.content, history_entries)
++    is_risky = evidence is not None
++    reason = evidence.reason() if evidence else ''
+     if not is_risky:
+         loop_allowed = await rate_limiter.is_allowed(f'twin-loop:{instance}:{contact_id}', limit=settings.whatsapp_twin_loop_guard_max_replies, window_seconds=settings.whatsapp_twin_loop_guard_window_seconds)
+         if not loop_allowed:
+-            is_risky, reason = (True, f'loop: {settings.whatsapp_twin_loop_guard_max_replies}+ respostas automáticas em {settings.whatsapp_twin_loop_guard_window_seconds // 60}min -- provável automação do outro lado')
++            is_risky = True
++            reason = f'loop: {settings.whatsapp_twin_loop_guard_max_replies}+ respostas automáticas em {settings.whatsapp_twin_loop_guard_window_seconds // 60}min -- provável automação do outro lado'
++            # Synthetic evidence so the dedup fingerprint below is stable
++            # for this category too (no RiskEvidence from the content gate
++            # in the loop-guard branch).
++            evidence = RiskEvidence(
++                category='loop', snippet='loop_guard', source_message_id=message.id,
++                source_author=MessageAuthor.UNKNOWN, source_created_at=None, in_current_message=True,
++            )
+     reply = ''
+     if not is_risky:
+         chat_history = [ChatMessage(role='user' if m.direction == MessageDirection.INBOUND else 'assistant', content=_owner_audio_history_content(m)) for m in history if _owner_audio_history_content(m) and m.id != message_id]
+         try:
+             reply = await generate_darius_reply(chat_history, message.content, contact_name=contact.name)
+         except TwinReplyUnavailable:
+-            is_risky, reason = (True, 'resposta do LLM indisponível')
++            is_risky = True
++            reason = 'resposta do LLM indisponível'
++            evidence = RiskEvidence(
++                category='llm_unavailable', snippet='unavailable', source_message_id=message.id,
++                source_author=MessageAuthor.UNKNOWN, source_created_at=None, in_current_message=True,
++            )
+     if not await _owner_audio_after_generation(db, contact, message, instance, _twin_history_digest):
+         return
++    # Revalidate the human-pause control again right here -- generation
++    # (the LLM call above) can take long enough for a pause to happen
++    # mid-flight. This does not replace claim_send's own atomic recheck at
++    # transport time below; it is a cheap early exit so a reply that is
++    # already known-stale is not even enqueued.
++    if (await conversation_control.snapshot(db, contact_id, instance))['revision'] != revision:
++        await record_log(
++            db, source='twin_autopilot', level='info',
++            message='Controle humano mudou durante a geração -- resposta descartada antes de enfileirar',
++            payload={'contact_id': contact_id, 'instance': instance},
++        )
++        return
+     jobs = JobService(db)
+     if is_risky:
+-        await jobs.enqueue('whatsapp.send_text', {'to': contact.phone, 'content': TWIN_HOLDING_MESSAGE, 'is_autopilot_reply': True, 'instance': instance, '_twin_contact_id': contact.id, '_twin_source_message_id': message.id, '_twin_history_digest': _twin_history_digest})
++        await jobs.enqueue('whatsapp.send_text', {
++            'to': contact.phone, 'content': TWIN_HOLDING_MESSAGE, 'is_autopilot_reply': True, 'instance': instance,
++            '_twin_contact_id': contact.id, '_twin_source_message_id': message.id,
++            '_twin_history_digest': _twin_history_digest, '_twin_revision': revision,
++        })
+         if settings.whatsapp_owner_alert_phone:
+-            alert = f'[Gêmeo Darius] Mensagem sensível de {contact.name} ({contact.phone}) não foi respondida automaticamente (motivo: {reason}). Responda você mesmo.'
+-            await record_log(db, source='twin_owner_alert', level='warning', message=alert, payload={'contact_id': contact_id, 'instance': instance})
+-            await jobs.enqueue('whatsapp.send_text', {'to': settings.whatsapp_owner_alert_phone, 'content': alert})
++            decision = await decide_owner_alert(
++                conversation_control, db, contact_id=contact_id, instance=instance, evidence=evidence,
++                window_seconds=settings.whatsapp_twin_loop_guard_window_seconds,
++            )
++            if decision.should_alert:
++                alert = f'[Gêmeo Darius] Mensagem sensível de {contact.name} ({contact.phone}) não foi respondida automaticamente (motivo: {reason}). Responda você mesmo.'
++                await record_log(db, source='twin_owner_alert', level='warning', message=alert, payload={'contact_id': contact_id, 'instance': instance, 'dedup_key': decision.key})
++                await jobs.enqueue('whatsapp.send_text', {
++                    'to': settings.whatsapp_owner_alert_phone, 'content': alert,
++                    '_twin_alert_contact_id': contact_id, '_twin_alert_dedup_key': decision.key,
++                })
++            else:
++                await record_log(
++                    db, source='twin_owner_alert', level='info',
++                    message='Alerta suprimido: mesma evidência (ou paráfrase) já notificada nesta janela',
++                    payload={'contact_id': contact_id, 'instance': instance, 'dedup_key': decision.key, 'evidence_group': decision.group},
++                )
+         log_level, log_message = ('warning', 'Gate de risco acionado — retenção neutra enviada')
+         log_payload = {'contact_id': contact_id, 'reason': reason}
+     else:
+-        await jobs.enqueue('whatsapp.send_text', {'to': contact.phone, 'content': reply, 'is_autopilot_reply': True, 'instance': instance, '_twin_contact_id': contact.id, '_twin_source_message_id': message.id, '_twin_history_digest': _twin_history_digest})
++        await jobs.enqueue('whatsapp.send_text', {
++            'to': contact.phone, 'content': reply, 'is_autopilot_reply': True, 'instance': instance,
++            '_twin_contact_id': contact.id, '_twin_source_message_id': message.id,
++            '_twin_history_digest': _twin_history_digest, '_twin_revision': revision,
++        })
+         log_level, log_message = ('info', 'Resposta impersonada enviada')
+         log_payload = {'contact_id': contact_id}
+     await _owner_audio_clear_pending(db, contact, _twin_pending_snapshot, instance)

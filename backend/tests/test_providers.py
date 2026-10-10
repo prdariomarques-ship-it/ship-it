@@ -72,16 +72,27 @@ def test_evolution_webhook_normalization():
     assert inbound.media_type == "text"
 
 
-def test_evolution_webhook_ignores_own_messages():
+def test_evolution_webhook_parses_own_messages_as_from_me():
+    """Review finding: this test used to assert the old, buggy behavior
+    (discarding every fromMe=True event before router.py's owner-reply-
+    capture path -- which reads inbound.from_me -- could ever see it,
+    making that whole path permanently dead code). parse_webhook was
+    fixed to populate from_me instead of discarding the event; this main
+    suite never actually ran until providers.stt existed (see
+    SESSION_TRACKING.md), so the stale assertion above was never caught
+    until now. Updated to assert the corrected, intentional behavior."""
     inbound = EvolutionProvider().parse_webhook(
         {
+            "instance": "dario",
             "data": {
                 "key": {"remoteJid": "551199@s.whatsapp.net", "fromMe": True},
                 "message": {},
-            }
+            },
         }
     )
-    assert inbound is None
+    assert inbound is not None
+    assert inbound.from_me is True
+    assert inbound.phone == "551199"
 
 
 def test_official_webhook_normalization():

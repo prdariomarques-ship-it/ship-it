@@ -30,4 +30,8 @@ class TaskRepository(SQLAlchemyRepository[Task]):
             .group_by(Task.contact_id)
         )
         rows = (await self.session.execute(statement)).all()
-        return {contact_id: count for contact_id, count in rows}
+        # Task.contact_id is a nullable FK (Mapped[int | None]), but the
+        # `in_(contact_ids)` filter above already guarantees every row
+        # here has a real, non-null id -- mypy can't see that statically,
+        # so the explicit int() both satisfies it and asserts it at runtime.
+        return {int(contact_id): count for contact_id, count in rows}

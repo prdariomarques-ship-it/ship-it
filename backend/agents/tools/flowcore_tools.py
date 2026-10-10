@@ -22,7 +22,7 @@ import json
 
 import httpx
 
-from agents.tools.base import Tool, ToolContext, ok
+from agents.tools.base import Tool, ToolContext
 from utils.config import get_settings
 
 

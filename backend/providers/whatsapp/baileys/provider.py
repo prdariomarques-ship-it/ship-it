@@ -74,7 +74,7 @@ class BaileysProvider(WhatsAppProvider):
             return None
         key = data.get("key") or {}
         remote_jid = key.get("remoteJid")
-        if not remote_jid or key.get("fromMe"):
+        if not remote_jid:
             return None
 
         media_type, text = extract_baileys_content(data.get("message", {}) or {})
@@ -85,4 +85,11 @@ class BaileysProvider(WhatsAppProvider):
             sender_name=str(data.get("pushName", "")),
             external_id=str(key.get("id", "")),
             media_type=media_type,
+            # Review fix, same as evolution/provider.py: discarding every
+            # fromMe=True event here made router.py's owner-reply-capture
+            # path unreachable. No top-level "instance" field is evidenced
+            # in this gateway's webhook shape (unlike Evolution's), so
+            # `instance` is deliberately left at its default rather than
+            # guessed.
+            from_me=bool(key.get("fromMe")),
         )
