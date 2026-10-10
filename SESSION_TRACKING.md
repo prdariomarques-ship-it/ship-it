@@ -23,6 +23,34 @@ corrigidos; e um achado crítico novo (`Contact.awaiting_reply_since`
 inexistente no modelo), reportado mas **não corrigido** por falta de
 evidência de produção.
 
+### Rodada 7 — revisão externa sobre `567d480` (SHA final `6a04bf6`)
+
+- **Repetição pela fila (Loja, B2B, Azusa, agente, desculpas)** ✅ corrigido
+  e testado pelo worker real. Envio comum agora reserva intenção por job antes
+  do transporte e checa pausa sob o lock do escopo. Retentativa do mesmo job
+  não transmite de novo. Falha comprovadamente anterior ao envio libera a
+  reserva. Teste falso de repetição (que zerava o contador) removido.
+  - **Limite:** pausa é checada no momento do envio. Envio antigo que roda
+    após um `resume` não é barrado por revisão (só o Twin tem essa cerca).
+  - **Limite:** provedores sem escopo de instância continuam sem reserva.
+- **Eco antes do recibo** ⚠️ parcial. Recibo agora é gravado logo após o
+  transporte, antes da persistência. Janela durante o envio em andamento
+  continua aberta: eco nessa janela vira resposta humana e pausa a conversa.
+  **Decisão pendente do dono:** pausar na ambiguidade (comportamento atual,
+  silêncio do bot) ou adiar a classificação (risco de passar por cima de um
+  humano que digitou durante o envio).
+- **`Contact.awaiting_reply_since`** ⛔ bloqueado. Sem evidência do schema de
+  produção. Não adicionei coluna nem migração às cegas. Latente com o modo Twin
+  desligado. **Não ativar o Twin antes de resolver.**
+- **Transcrição de áudio** ⛔ bloqueado. Existe contrato (`providers/stt`),
+  mas nenhum backend implementado. Fonte real ausente.
+- **`9e2f1c6d7a80`** ⛔ bloqueado (ver rodada 6).
+- **mypy:** 5 erros de fonte ausente (`download_media`, `index_product`,
+  `deindex_product`, `awaiting_reply_since` ×2). CI não passa enquanto existirem.
+
+**Resultados locais (`6a04bf6`):** `backend/tests` 1144 passam;
+`whatsapp_agents_fix/` 153 passam; fila 4 testes passam; `ruff` limpo.
+
 ### Rodada 6 — bloqueadores da revisão (SHA inicial `6e19648` → código `066321c`)
 
 Este arquivo está no branch da PR de propósito: a versão em `master` só deve
