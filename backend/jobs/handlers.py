@@ -290,6 +290,70 @@ async def trigger_workflow(db: AsyncSession, payload: dict) -> None:
     )
 
 
+async def _loop_guard_or_alert(db: AsyncSession, settings, jobs: 'JobService', instance: str, contact, message) -> bool:
+    """Shared loop/flood-vs-automation guard -- generalizes the Twin
+    flow's own mechanism (twin_autopilot_check, above) to every other
+    auto-reply path (B2B, Azusa/Igreja, Loja), reusing the SAME
+    rate_limiter, SAME settings fields and SAME owner-alert dedup
+    (orchestrator.incident_dedup.decide_owner_alert) rather than building
+    a second mechanism. Returns True when the reply must be suppressed
+    (probable automation on the other side); in that case this also logs
+    it and, when decide_owner_alert agrees it is not a dup, alerts the
+    owner.
+
+    Deliberately different from the Twin's own branch in one way: this
+    NEVER sends a holding/apology message back to the contact. Twin's
+    TWIN_HOLDING_MESSAGE makes sense for a genuinely sensitive topic that
+    needs the owner personally -- replying to a probable BOT LOOP with
+    even a holding message just continues the loop. Silence toward the
+    other side, alert toward the owner, is the safer default for a new
+    mechanism; Twin's own behavior is untouched here."""
+    allowed = await rate_limiter.is_allowed(
+        f'loop:{instance}:{contact.id}',
+        limit=settings.whatsapp_twin_loop_guard_max_replies,
+        window_seconds=settings.whatsapp_twin_loop_guard_window_seconds,
+    )
+    if allowed:
+        return False
+    reason = (
+        f'loop: {settings.whatsapp_twin_loop_guard_max_replies}+ respostas automáticas '
+        f'em {settings.whatsapp_twin_loop_guard_window_seconds // 60}min -- provável automação do outro lado'
+    )
+    await record_log(
+        db, source='loop_guard', level='warning',
+        message=f'Resposta automática suprimida na instância {instance}: {reason}',
+        payload={'contact_id': contact.id, 'instance': instance},
+    )
+    if settings.whatsapp_owner_alert_phone:
+        from orchestrator.incident_dedup import decide_owner_alert
+        from orchestrator.twin_risk_gate import MessageAuthor, RiskEvidence
+        from services import conversation_control
+
+        evidence = RiskEvidence(
+            category='loop', snippet='loop_guard', source_message_id=message.id,
+            source_author=MessageAuthor.UNKNOWN, source_created_at=None, in_current_message=True,
+        )
+        decision = await decide_owner_alert(
+            conversation_control, db, contact_id=contact.id, instance=instance, evidence=evidence,
+            window_seconds=settings.whatsapp_twin_loop_guard_window_seconds,
+        )
+        if decision.should_alert:
+            alert = (
+                f'[Loop] Possível automação conversando com {contact.name} ({contact.phone}) '
+                f'na instância {instance} -- respostas automáticas suprimidas.'
+            )
+            await record_log(
+                db, source='loop_guard_alert', level='warning', message=alert,
+                payload={'contact_id': contact.id, 'instance': instance, 'dedup_key': decision.key},
+            )
+            await jobs.enqueue('whatsapp.send_text', {
+                'to': settings.whatsapp_owner_alert_phone, 'content': alert,
+                '_twin_alert_contact_id': contact.id, '_twin_alert_dedup_key': decision.key,
+                '_twin_alert_instance': instance,
+            })
+    return True
+
+
 @job_handler("whatsapp.process_inbound")
 async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> None:
     """The automatic end-to-end reply: the Cognitive Pipeline (Fase 4.2)
@@ -336,6 +400,8 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
             return
         if getattr(message.media_type, "value", message.media_type) != "text":
             logger.info("Extra WhatsApp: somente texto nesta etapa")
+            return
+        if await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
             return
         from orchestrator.service import ai_orchestrator
         result = await ai_orchestrator.run(
@@ -385,6 +451,8 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
                 )
             except ValueError as exc:
                 reply = str(exc)
+        elif await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
+            return
         else:
             result = await ai_orchestrator.run(
                 db=db,
@@ -394,6 +462,8 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
                 agent_name="store",
             )
             reply = result.reply
+    elif await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
+        return
     else:
         result = await cognitive_pipeline.process(
             db=db, user=owner, message=message.content, contact_id=contact_id
