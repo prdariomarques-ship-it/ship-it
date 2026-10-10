@@ -49,27 +49,25 @@
   `_gather_contact_identity` em `orchestrator/context.py`) — aplicar o mesmo
   padrão ao `StoreAgent`.
 
-### Identificado, ainda NÃO corrigido (prevenção de loop entre bots)
-- **Correção da afirmação anterior** (estava imprecisa): existe sim um
-  throttle genérico em `webhooks/router.py` (`auto-reply:{instance}:{contact_id}`,
-  `settings.auto_reply_max_per_contact_per_minute`, janela de 60s), aplicado
-  **antes de qualquer agente ser enfileirado** — cobre Twin, B2B, Azusa e
-  Loja igualmente. Não é verdade que esses três não tenham proteção alguma.
-- O que falta de fato (cobertura completa, não "proteção zero"):
-  - Detecção específica de automação no outro lado (`whatsapp_twin_loop_guard_*`
-    + alerta ao proprietário via `decide_owner_alert`) **só existe no fluxo do
-    Twin** — os outros três só silenciam após o limite genérico, sem alertar.
-  - Não há registro explícito das identidades/números das OUTRAS instâncias
-    gerenciadas (pessoal/Loja/B2B/Igreja) para detectar conversa bot-a-bot
-    especificamente, em nenhum fluxo.
-  - O fencing de pausa humana (`claim_send`/`_twin_revision`) **não se aplica
-    a B2B/Azusa/Loja**: o payload que esses fluxos enfileiram para
-    `whatsapp.send_text` não carrega `is_autopilot_reply`/`_twin_revision`/
-    `_twin_contact_id`, então a revalidação de pausa nunca é acionada pra
-    eles, mesmo depois de corrigir a conexão real da pausa (item D abaixo).
-- Correção planejada: generalizar o fencing de pausa + a detecção/alerta de
-  automação para os três fluxos sem essa cobertura, reaproveitando o mesmo
-  mecanismo já testado do Twin.
+### Prevenção de loop entre bots
+- Existe um throttle genérico em `webhooks/router.py`
+  (`auto-reply:{instance}:{contact_id}`, `settings.auto_reply_max_per_contact_per_minute`,
+  janela de 60s), aplicado **antes de qualquer agente ser enfileirado** —
+  cobre Twin, B2B, Azusa e Loja igualmente.
+- ✅ **Corrigido (3ª rodada):** detecção específica de automação no outro
+  lado + alerta ao proprietário (antes só no Twin) generalizada para B2B,
+  Azusa e Loja via `_loop_guard_or_alert` — ver seção da revisão externa
+  abaixo.
+- **Ainda NÃO corrigido:** não há registro explícito das identidades/números
+  das OUTRAS instâncias gerenciadas (pessoal/Loja/B2B/Igreja) para detectar
+  conversa bot-a-bot especificamente (hoje a detecção é por volume/frequência,
+  não por identidade do remetente). E o fencing de pausa humana
+  (`claim_send`/`_twin_revision`) **ainda não se aplica a B2B/Azusa/Loja**:
+  o payload que esses fluxos enfileiram para `whatsapp.send_text` não carrega
+  `is_autopilot_reply`/`_twin_revision`/`_twin_contact_id`, então a
+  revalidação de pausa nunca é acionada pra eles, mesmo com a pausa real já
+  conectada (item D). Isso é uma mudança mais estrutural (threading dos
+  campos de revisão por todos os 3 fluxos) ainda pendente.
 
 ### Revisão externa (2026-10-09) — 7 bugs confirmados, CORRIGIDOS e TESTADOS
 
@@ -162,20 +160,41 @@ em `agents/tools/flowcore_tools.py`).
   verificada e é genuinamente ambígua — não forcei uma resposta específica,
   como a revisão pediu.
 
+### Revisão externa, 3ª rodada (2026-10-10) — SHA inicial `a137aff` → SHA final `70ede22`
+
+- **Loop/automação generalizado para B2B, Azusa e Loja** ✅ corrigido e
+  testado. Antes, a detecção específica de automação + alerta ao
+  proprietário (`rate_limiter` + `incident_dedup`) só existia no fluxo do
+  Twin — B2B/Azusa/Loja tinham só o throttle genérico de `router.py`.
+  Extraído numa função compartilhada (`_loop_guard_or_alert`, reaproveita o
+  mesmo `rate_limiter`, os mesmos campos de settings e o mesmo dedup de
+  `incident_dedup` — não é mecanismo novo) e conectada nos 3 fluxos sem
+  cobertura. Diferença deliberada do Twin: **nunca envia mensagem de
+  espera ao contato** — responder a um provável loop de bots, mesmo com
+  pedido de desculpas, só alimenta o loop. Silêncio pro outro lado, alerta
+  pro proprietário. 4 testes novos contra a função real, o `rate_limiter`
+  real (fallback em memória) e o dedup real: abaixo do limite não suprime;
+  passar do limite suprime e alerta exatamente uma vez com o escopo
+  correto; repetição na mesma janela não alerta de novo; instâncias
+  diferentes do mesmo contato têm orçamentos independentes.
+- **Busca exaustiva confirmou**: `find_unacknowledged_outbound` e
+  `download_media` não aparecem em **nenhum** commit de **nenhuma** branch
+  deste repositório, além dos arquivos que eu mesmo escrevi documentando a
+  ausência deles. Não há mais evidência local a encontrar — permanecem
+  como bloqueio real, não falta de busca.
+
 ### Gaps confirmados, NÃO corrigidos (sem evidência suficiente para corrigir com segurança)
 - `MessageRepository.find_unacknowledged_outbound` — chamado por
-  `_capture_human_reply`, **não existe** em nenhum lugar do repositório.
+  `_capture_human_reply`, **não existe** em nenhum lugar do repositório
+  (confirmado via busca em todo o histórico git, todas as branches).
   Detecta eco da própria mensagem enviada por nós; a semântica exata de
   casamento não está evidenciada em lugar nenhum — implementar às cegas
   arriscaria errar a lógica de detecção de eco. Bloqueia o caminho de texto
   (não-áudio) de `_capture_human_reply` inteiramente (o caminho de áudio do
   proprietário, usado nos testes novos, não passa por aqui).
 - `download_media` — chamado por `router.py`, **não existe** em nenhum
-  provider nem na interface base. Áudio do proprietário não pode ser
-  transcrito/baixado hoje.
-- Generalização do fencing de pausa + detecção/alerta de automação para
-  B2B/Azusa/Loja — ainda só existe de verdade no fluxo do Twin (ver seção
-  acima sobre loop entre bots).
+  provider nem na interface base (mesma confirmação exaustiva). Áudio do
+  proprietário não pode ser transcrito/baixado hoje.
 - `utils/config.py` ainda divergente da produção — bloqueado no conteúdo real
   da VPS (ver Bloqueios).
 
