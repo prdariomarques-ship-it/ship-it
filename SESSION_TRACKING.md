@@ -5,7 +5,7 @@
 > declaração de implantação — implantação só ocorre com janela aprovada e
 > comprovação de rollback.
 
-Última atualização: 2026-10-10 (rodada 4 da revisão da PR #63).
+Última atualização: 2026-10-10 (acompanhamento de CI pós-rodada 4 da PR #63).
 
 ---
 
@@ -13,10 +13,64 @@
 
 **Branch:** `whatsapp-agents-fix-review` → PR #63 (`draft`, não mergeada).
 
-**Status:** em revisão. SHA atual: `62fcda3`. A falha de lint que era
+**Status:** em revisão. SHA atual: `6e19648`. A falha de lint que era
 tratada como pré-existente/não relacionada (`agents/tools/flowcore_tools.py:25`)
-foi corrigida nesta 4ª rodada, a pedido explícito do usuário — `ruff check .`
-no `backend/` inteiro está limpo (0 erros).
+foi corrigida na 4ª rodada — `ruff check .` no `backend/` inteiro está limpo
+(0 erros). Corrigir esse lint desmascarou passos da CI que nunca tinham
+rodado de fato nesta PR (ver "Acompanhamento de CI" abaixo): um crash do
+`mypy` e uma cadeia de migração quebrada desde as rodadas 1-2, ambos
+corrigidos; e um achado crítico novo (`Contact.awaiting_reply_since`
+inexistente no modelo), reportado mas **não corrigido** por falta de
+evidência de produção.
+
+### Acompanhamento de CI (2026-10-10, pós-rodada 4)
+
+Corrigir `flowcore_tools.py:25` fez a CI avançar além de `ruff check .`
+pela primeira vez nesta PR — cada passo seguinte nunca tinha sido
+realmente exercitado antes. Dois problemas pré-existentes (de rodadas
+anteriores desta mesma PR, nunca de produção) apareceram e foram
+corrigidos (commit `6e19648`):
+- `mypy` travava com "Duplicate module named 'database'"
+  (`whatsapp_agents_fix/app_stub/` colide de propósito com nomes reais) →
+  `backend/mypy.ini` excluindo esse diretório de harness.
+- `alembic upgrade head`/`downgrade base` (os comandos exatos do passo
+  "Migrations apply and roll back" da CI) travavam e depois recusavam:
+  `e610080001` apontava para o head real de produção (`9e2f1c6d7a80`),
+  revisão que não existe em nenhum arquivo deste repositório → migração-
+  placeholder sem efeito em produção, só para o grafo fechar a partir de
+  um banco em branco. `e610080002` recusava downgrade incondicionalmente,
+  tornando o teste de fumaça da CI impossível de passar para sempre →
+  aplicada a mesma política condicional de `e610080003` (recusa só com
+  dado real). Testado localmente reproduzindo os comandos exatos da CI,
+  ponta a ponta, limpo. Sem efeito prático em produção nos dois casos.
+
+**Números reais da CI neste SHA** (não mais estimativa local): `ruff`
+limpo; `mypy`, agora que roda de fato, aponta **38 erros em exatamente 4
+arquivos** — `jobs/handlers.py`, `webhooks/router.py`, `admin/router.py`,
+`repositories/task.py`. A maioria confirma com linha exata o gap já
+documentado (`utils/config.py`/`Settings` sem várias flags) mais métodos
+já sabidos como ausentes (`MessageRepository`, `JobRepository`,
+`MemoryManager`, `download_media`).
+
+**Achado crítico novo, NÃO corrigido:** `Contact.awaiting_reply_since` é
+lido/escrito em 8 lugares (`webhooks/router.py:220,542,543`;
+`jobs/handlers.py:527,541,815,911,919-920`) — inclusive numa `update()`
+do SQLAlchemy Core que referencia o atributo no nível da classe
+(`contact_type.awaiting_reply_since`) — mas **não existe em
+`models/contact.py`**. Isso não é um no-op silencioso: a instrução
+`update()` precisa de um `InstrumentedAttribute` real; se o campo não
+existe, levanta `AttributeError` toda vez que esse trecho do pipeline de
+áudio do proprietário rodar. Diferente das colunas de `e610080003`, não
+há confirmação de produção (`\d contacts`) sobre se essa coluna já
+existe lá — **não implementei uma migração às cegas**. Recomendação:
+próxima rodada começa confirmando o schema real de `contacts` antes de
+qualquer correção.
+
+Ainda sem rodar nesta CI: `backend/tests/` (passo "Tests") não coleta
+(`providers.stt` ausente, pré-existente, confirmado via `git log`) e
+`backend/pytest.ini` nunca incluiu `whatsapp_agents_fix/` no `testpaths`
+— os 133 testes de regressão desta PR nunca foram executados pela CI em
+nenhuma rodada até agora (sinalizado na PR, não alterado).
 
 ### Entregue e testado
 - `backend/jobs/handlers.py` / `backend/webhooks/router.py`: baseline real de
