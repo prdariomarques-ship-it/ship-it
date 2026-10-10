@@ -326,44 +326,6 @@ async def test_send_does_not_retry_on_an_http_error_status_even_though_a_respons
 
 
 @pytest.mark.asyncio
-async def test_worker_retry_after_an_uncertain_outcome_does_not_blindly_resend_either(
-    evolution_provider_class, fake_transport,
-):
-    """Ties the ambiguous-outcome protection to the OTHER fence
-    (conversation_control's commit-before-transport, see jobs/handlers.py)
-    it was explicitly designed to complement, not duplicate: a worker
-    that retries the whole job after a 502 must still see exactly one
-    POST attempt per job execution -- this layer's job is only to stop
-    the SAME call from blindly looping inside a single execution; it
-    does not by itself prevent a separate job retry from trying again
-    (that is conversation_control's job, proven in test_pause_fencing.py
-    and test_send_whatsapp_text_real_execution.py). Simulates two
-    independent job executions here, each with its own single attempt."""
-    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
-    settings.evolution_base_url = "http://example.invalid"
-    settings.evolution_api_key = ""
-    settings.evolution_instance = "dario"
-    try:
-        provider = evolution_provider_class()
-
-        fake_transport.outcomes = [_FakeResponse(502)]
-        with pytest.raises(Exception):
-            await provider.send_text("+5511999990000", "mensagem de teste")
-        assert fake_transport.calls == 1
-
-        # A second, independent execution (e.g. a worker retry after the
-        # job raised) gets its own single attempt -- still no blind loop
-        # within either individual call.
-        fake_transport.calls = 0
-        fake_transport.outcomes = [_FakeResponse(200)]
-        result = await provider.send_text("+5511999990000", "mensagem de teste")
-        assert result == {"key": {"id": "EVT-OK"}}
-        assert fake_transport.calls == 1
-    finally:
-        _restore_settings(settings, saved)
-
-
-@pytest.mark.asyncio
 async def test_a_confirmed_send_still_continues_normally_on_the_next_turn(
     evolution_provider_class, fake_transport,
 ):

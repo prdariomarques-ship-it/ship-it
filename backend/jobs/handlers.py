@@ -148,7 +148,7 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     Neither fence applies to any other call of this job (a plain
     dashboard-triggered send, mail-adjacent notifications, etc.) -- those
     behave exactly as before."""
-    from providers.whatsapp.base import extract_receipt_id, normalize_phone
+    from providers.whatsapp.base import extract_receipt_id, normalize_phone, provably_not_sent
     from providers.whatsapp.evolution.provider import EvolutionProvider
     from services import conversation_control
     from services.output_safety import output_safe
@@ -222,10 +222,39 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
         # before transport, not after.
         await db.commit()
     provider = get_whatsapp_provider()
-    if instance and isinstance(provider, EvolutionProvider):
-        send_result = await provider.send_text(to, content, instance=instance)
-    else:
-        send_result = await provider.send_text(to, content)
+    # Round 7: a plain send (not a Twin reply, not an owner alert) used to have
+    # no reservation, so a queue retry after an unknown outcome transmitted it
+    # again, and a pause never reached it. It is now reserved under the queue
+    # job's identity before transport. The job id is stable across retries, so
+    # a retry finds the reservation and does not transmit again.
+    plain_intent_id = None
+    plain_scope_instance = instance or getattr(provider, 'default_instance', '') or ''
+    job_id = payload.get('_job_id')
+    if send_intent_id is None and alert_contact_id is None and job_id is not None and plain_scope_instance:
+        plain_contact = await ContactRepository(db).get_or_create_by_phone(normalize_phone(to))
+        plain_intent_id = f"send-job:{job_id}"
+        decision = await conversation_control.reserve_plain_send(
+            db, plain_contact.id, plain_scope_instance, plain_intent_id,
+        )
+        await db.commit()
+        if decision != 'reserved':
+            await record_log(
+                db, source='send_queue', level='info',
+                message=f'Envio não transmitido nesta execução ({decision}) -- job {job_id}',
+                payload={'to_last4': to[-4:], 'instance': plain_scope_instance, 'intent_id': plain_intent_id},
+            )
+            await db.commit()
+            return
+    try:
+        if instance and isinstance(provider, EvolutionProvider):
+            send_result = await provider.send_text(to, content, instance=instance)
+        else:
+            send_result = await provider.send_text(to, content)
+    except Exception as exc:
+        if plain_intent_id is not None and provably_not_sent(exc):
+            await conversation_control.release_unsent_plain_send(db, plain_intent_id)
+            await db.commit()
+        raise
     # Review fix (C): capture whatever receipt id the provider actually
     # returned instead of always discarding it as None. extract_receipt_id
     # is deliberately defensive -- an unrecognized/absent shape (including
@@ -235,7 +264,10 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     # not proof the client read it -- that stays a separate concern
     # (delivery_status / parse_delivery_ack), untouched here.
     receipt_id = extract_receipt_id(send_result)
-    if send_intent_id is None and receipt_id:
+    if plain_intent_id is not None:
+        await conversation_control.finish_send(db, plain_intent_id, receipt_id)
+        await db.commit()
+    elif send_intent_id is None and receipt_id:
         # Round 6 (finding #3): every send, not only the Twin's, must leave a
         # durable receipt -- otherwise its fromMe echo has no proof to be
         # recognized by, and webhooks/router.py would classify the bot's own

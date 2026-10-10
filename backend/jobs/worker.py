@@ -165,7 +165,7 @@ class JobWorker:
         try:
             handler = resolve_handler(job.name)
             await asyncio.wait_for(
-                handler(session, dict(job.payload or {})),
+                handler(session, {**(job.payload or {}), '_job_id': job.id}),
                 timeout=self._settings.jobs_execution_timeout_seconds,
             )
         except Exception as exc:  # noqa: BLE001 - handler failures feed the retry logic

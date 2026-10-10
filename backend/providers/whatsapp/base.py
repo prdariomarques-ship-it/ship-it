@@ -32,6 +32,13 @@ class WhatsAppProviderError(RuntimeError):
     pass
 
 
+def provably_not_sent(exc: BaseException) -> bool:
+    """True only when the provider's own transport failure happened before any
+    request byte could have reached the gateway (see _SAFE_TO_RETRY_TRANSPORT_ERRORS).
+    Any other failure, including an HTTP status, is treated as possibly sent."""
+    return isinstance(exc.__cause__, _SAFE_TO_RETRY_TRANSPORT_ERRORS)
+
+
 # Allow-list of transport failures proven to happen BEFORE any request byte
 # could have reached the provider -- a connection that never opened, or a
 # wait for a free connection from the pool that timed out. Retrying these is

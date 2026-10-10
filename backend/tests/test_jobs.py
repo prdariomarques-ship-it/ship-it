@@ -43,7 +43,7 @@ async def test_job_succeeds(session_factory, worker):
         job = await JobService(session).enqueue("test.ok", {"x": 1})
 
     assert await worker.run_once() == 1
-    assert ran == [{"x": 1}]
+    assert ran == [{"x": 1, "_job_id": job.id}]  # the queue always passes the job's identity
 
     async with session_factory() as session:
         refreshed = await session.get(type(job), job.id)

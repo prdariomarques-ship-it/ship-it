@@ -4,6 +4,8 @@ part of the three sources this delivery was built from."""
 
 from enum import Enum
 
+import httpx
+
 
 class ConnectionStatus(str, Enum):
     CONNECTED = "connected"
@@ -49,3 +51,16 @@ def extract_receipt_id(response: object) -> str | None:
         return None
     receipt_id = key.get("id")
     return receipt_id if isinstance(receipt_id, str) and receipt_id else None
+
+
+# NOT a placeholder -- mirrors backend/providers/whatsapp/base.py exactly
+# (round 7): jobs/handlers.py's send_whatsapp_text decides, from this, whether a
+# failed transport call provably never left the process.
+_SAFE_TO_RETRY_TRANSPORT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
+def provably_not_sent(exc: BaseException) -> bool:
+    """True only when the provider's own transport failure happened before any
+    request byte could have reached the gateway (see _SAFE_TO_RETRY_TRANSPORT_ERRORS).
+    Any other failure, including an HTTP status, is treated as possibly sent."""
+    return isinstance(exc.__cause__, _SAFE_TO_RETRY_TRANSPORT_ERRORS)

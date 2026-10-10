@@ -256,3 +256,37 @@ async def close_unknown(db, contact_id, instance, kind, key, expected_revision, 
         (id,contact_id,instance,revision,prior_revision,action,actor_id,reason,intent_kind,intent_key)
         VALUES (:id,:contact_id,:instance,:revision,:prior_revision,'close_unknown',:actor_id,:reason,:kind,:key)"""), params)
     return await inspect_delivery(db, contact_id, instance, kind, key)
+
+
+async def reserve_plain_send(db, contact_id, instance, intent_id):
+    """Idempotency and pause fence for a send that holds no conversation fence.
+
+    The pause is checked under the scope lock, and the reservation row is
+    inserted in the caller's transaction, which the caller commits before
+    transport. Unlike claim_send it never sets `inflight`, so an unresolved
+    send cannot freeze the other messages of the same conversation. A retry
+    of the same intent finds the row and must not transmit again.
+    """
+    if not intent_id:
+        raise ValueError('A stable intent id is required')
+    params = _scope(contact_id, instance)
+    params['id'] = intent_id
+    await _lock(db, params)
+    control = await _one(db, '''SELECT paused FROM conversation_controls
+        WHERE contact_id=:contact_id AND instance=:instance''', params)
+    if control is not None and bool(control['paused']):
+        return 'paused'
+    inserted = await _one(db, '''INSERT INTO conversation_send_intents
+        (id,contact_id,instance,revision,status) VALUES (:id,:contact_id,:instance,NULL,'needs_review')
+        ON CONFLICT (id) DO NOTHING RETURNING id''', params)
+    if inserted is None:
+        existing = await _one(db, 'SELECT status FROM conversation_send_intents WHERE id=:id', params)
+        return 'duplicate:' + existing['status']
+    return 'reserved'
+
+
+async def release_unsent_plain_send(db, intent_id):
+    """Drop a plain-send reservation whose transport provably never left this
+    process. Only an unfinished needs_review row can be released."""
+    await db.execute(text("""DELETE FROM conversation_send_intents
+        WHERE id=:id AND status='needs_review' AND transport_finished=false"""), {'id': intent_id})
