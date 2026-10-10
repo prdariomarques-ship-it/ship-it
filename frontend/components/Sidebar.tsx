@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/conversas", label: "Conversas" },
   { href: "/agenda", label: "Agenda" },
   { href: "/calendario", label: "Calendário" },
+  { href: "/calendario-economico", label: "Econômico" },
   { href: "/tarefas", label: "Tarefas" },
   { href: "/metas", label: "Metas" },
   { href: "/notas", label: "Notas" },
