@@ -475,10 +475,10 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
     elif await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
         return
     else:
-        result = await cognitive_pipeline.process(
+        cognitive_result = await cognitive_pipeline.process(
             db=db, user=owner, message=message.content, contact_id=contact_id
         )
-        reply = result.reply
+        reply = cognitive_result.reply
 
     if reply.strip():
         await JobService(db).enqueue(
