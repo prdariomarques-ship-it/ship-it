@@ -5,7 +5,7 @@
 > declaração de implantação — implantação só ocorre com janela aprovada e
 > comprovação de rollback.
 
-Última atualização: 2026-10-10.
+Última atualização: 2026-10-10 (rodada 4 da revisão da PR #63).
 
 ---
 
@@ -13,8 +13,10 @@
 
 **Branch:** `whatsapp-agents-fix-review` → PR #63 (`draft`, não mergeada).
 
-**Status:** em revisão. CI com 1 falha pré-existente em `master`
-(`agents/tools/flowcore_tools.py:25`), não relacionada a esta PR.
+**Status:** em revisão. SHA atual: `62fcda3`. A falha de lint que era
+tratada como pré-existente/não relacionada (`agents/tools/flowcore_tools.py:25`)
+foi corrigida nesta 4ª rodada, a pedido explícito do usuário — `ruff check .`
+no `backend/` inteiro está limpo (0 erros).
 
 ### Entregue e testado
 - `backend/jobs/handlers.py` / `backend/webhooks/router.py`: baseline real de
@@ -183,20 +185,93 @@ em `agents/tools/flowcore_tools.py`).
   ausência deles. Não há mais evidência local a encontrar — permanecem
   como bloqueio real, não falta de busca.
 
+### Revisão externa, 4ª rodada (2026-10-10) — SHA inicial `a137aff` → SHA final `62fcda3`
+
+> Esta rodada confirmou os avanços da rodada anterior mas encontrou 2
+> regressões reais (introduzidas pela própria correção da rodada 3) e 3
+> gaps que precisavam de mais profundidade do que a rodada anterior deu.
+
+- **1. Regressão na normalização (`normalize_text`)** ✅ corrigida e testada.
+  A correção da rodada 3 (trocar toda quebra de linha por `". "`) resolveu a
+  contaminação entre cláusulas mas quebrou termos fixos de crise partidos por
+  uma quebra de linha ("quero\nmorrer", "me\nmatar", "não quero mais\nviver",
+  "sem\nesperança") — e, como `output_safety.py` importava a mesma função,
+  também passou a deixar passar um marcador interno/alegação de leitura
+  partidos por quebra de linha. Separado em duas normalizações independentes:
+  `output_safety.py` ganhou a sua própria (colapso total de espaço em
+  branco — seus padrões não precisam de consciência de cláusula);
+  `twin_risk_gate.py` passou a preservar `\n` como caractere literal
+  (`\s` já casa `\n` nativamente nos padrões de termo) e adicionar `\n` ao
+  conjunto de quebra de cláusula (`_CLAUSE_BREAK`) — resolve as duas
+  direções com uma representação só. Os 3 exemplos já corrigidos antes e a
+  exceção de "sem crise" foram preservados; 6 testes novos (4 +2).
+- **2. Resposta humana por texto e eco do bot (`find_unacknowledged_outbound`)**
+  ✅ implementado e testado — resolve o gap que a 3ª rodada deixou aberto
+  por falta de evidência. A semântica foi derivada da própria chamada em
+  `_capture_human_reply` e do modelo `Message`: casa uma linha OUTBOUND,
+  **não** `sent_by_human`, com `external_id IS NULL` (nunca escrito por
+  `persist_outbound_message`, logo toda mensagem enviada pelo sistema
+  começa "não confirmada"), mesmo `content` e mesmo `whatsapp_instance`.
+  2 testes novos cobrindo exatamente a distinção que o usuário pediu: uma
+  resposta humana genuína (sem casamento → nova linha, pausa automação) e
+  o eco do próprio bot (casamento → anexa o `external_id` na linha
+  existente, não cria linha nova, **não** pausa). "Não tratar todo `fromMe`
+  como humano" está provado nos dois sentidos.
+- **3. Erro de rede ambíguo ainda podia repetir envio** ✅ corrigido e
+  testado. A proteção da rodada 3 só cobria `ReadTimeout`/`WriteTimeout`;
+  `ReadError`, `WriteError` e `RemoteProtocolError` ainda podiam disparar
+  reenvio cego. Troquei a lista de bloqueio por uma lista de permissão
+  (`ConnectError`/`ConnectTimeout`/`PoolTimeout` — falhas comprovadamente
+  anteriores ao envio) para que qualquer erro não listado, conhecido ou
+  futuro, falhe seguro por padrão em vez de repetir por padrão. 5
+  testes novos/atualizados.
+- **4. Downgrade ainda não provava quem criou as colunas** ✅ corrigido e
+  testado. O check por valor de dado (TRUE/não-nulo) não provava autoria —
+  uma tabela preexistente e não-vazia cujas colunas carregassem só os
+  padrões FALSE/FALSE/NULL parecia "segura para apagar" sem nunca ter
+  passado por esta migração. Adicionada uma tabela-marcadora que o
+  `upgrade()` só escreve quando realmente cria uma coluna antes ausente;
+  `downgrade()` agora exige a marca (prova de autoria) **e** a ausência de
+  dado real (defesa em profundidade) antes de apagar. Novo cenário de teste
+  (colunas preexistentes com valores padrão, tabela não vazia) — recusa
+  corretamente agora. 5 cenários verificados em PostgreSQL real.
+- **5. Lint** ✅ corrigido — import não usado em
+  `agents/tools/flowcore_tools.py:25` removido; `ruff check .` limpo em todo
+  o `backend/`.
+
+**Resultados de teste (commit `62fcda3`, mesmo ambiente desta sessão):**
+- `whatsapp_agents_fix/` com PostgreSQL local real habilitado: **133
+  passaram, 0 pulados, 0 falharam**.
+- Mesma suíte sem a variável de ambiente do Postgres (testes opt-in
+  pulados em vez de rodados): **123 passaram, 10 pulados, 0 falharam**.
+- `ruff check .` no `backend/` inteiro: **limpo, 0 erros**.
+- `backend/tests/` (a suíte principal do app, via `main.py`/`conftest.py`)
+  **não pôde ser coletada** neste ambiente: `ModuleNotFoundError: No
+  module named 'providers.stt'`. Confirmado via `git log` que
+  `providers/stt` nunca existiu em nenhum commit deste repositório — é um
+  gap pré-existente do ambiente/repositório, não relacionado a nada desta
+  rodada nem introduzido/corrigido por ela. Não tentei corrigir (fora do
+  escopo desta tarefa).
+
+**Explicitamente NÃO feito nesta rodada** (mesmos itens de antes, ainda
+pendentes): reconciliação completa de `utils/config.py`, implementação de
+`download_media`, escrita de volta do `receipt_id` real de um envio na
+própria linha `Message` (hoje é calculado em `jobs/handlers.py` mas só é
+persistido pelo caminho de eco do `fromMe` que esta rodada adicionou), e
+cobertura dos outros agentes (B2B/Azusa/Loja) equivalente à do Twin. Nenhum
+merge, downgrade, migração ou implantação em produção foi executado.
+
 ### Gaps confirmados, NÃO corrigidos (sem evidência suficiente para corrigir com segurança)
-- `MessageRepository.find_unacknowledged_outbound` — chamado por
-  `_capture_human_reply`, **não existe** em nenhum lugar do repositório
-  (confirmado via busca em todo o histórico git, todas as branches).
-  Detecta eco da própria mensagem enviada por nós; a semântica exata de
-  casamento não está evidenciada em lugar nenhum — implementar às cegas
-  arriscaria errar a lógica de detecção de eco. Bloqueia o caminho de texto
-  (não-áudio) de `_capture_human_reply` inteiramente (o caminho de áudio do
-  proprietário, usado nos testes novos, não passa por aqui).
 - `download_media` — chamado por `router.py`, **não existe** em nenhum
-  provider nem na interface base (mesma confirmação exaustiva). Áudio do
-  proprietário não pode ser transcrito/baixado hoje.
+  provider nem na interface base (confirmação exaustiva, ver 3ª rodada).
+  Áudio do proprietário não pode ser transcrito/baixado hoje.
 - `utils/config.py` ainda divergente da produção — bloqueado no conteúdo real
   da VPS (ver Bloqueios).
+- Correlação do `receipt_id` real de um envio de volta na própria linha
+  `Message` (`jobs/handlers.py` calcula `extract_receipt_id(send_result)`
+  mas nada escreve esse valor em `Message.external_id` no momento do envio
+  — só o caminho de eco do `fromMe`, novo nesta rodada, chega a preencher
+  esse campo, e só quando o eco realmente chega).
 
 ### Requisitos de produto registrados (ainda não implementados — StoreAgent)
 - **Abster-se quando não sabe:** não é silêncio — enviar uma mensagem
@@ -335,7 +410,7 @@ Faltam (ver Frente 1 para detalhe):
    para desbloquear: correção de autoria (Flávio/Micael) e ajustes de
    tom/abstenção do StoreAgent.
 2. Mapear Telegram (ver bloqueio 4 acima).
-3. Decidir o que fazer com `find_unacknowledged_outbound`/`download_media`
-   (gaps confirmados, sem evidência suficiente pra implementar sem
-   adivinhar semântica) — provavelmente precisa de mais contexto/decisão
+3. `download_media` ainda é um gap confirmado (ver Frente 1) —
+   `find_unacknowledged_outbound` foi implementado e testado na 4ª rodada.
+   `download_media` provavelmente também precisa de mais contexto/decisão
    do usuário, não é "procurar mais no código".
