@@ -87,9 +87,15 @@ integração completa.
     efêmero (`postgres:16`, credencial só de CI). Passo separado porque os dois
     harnesses sombreiam o pacote `providers` e não coexistem no mesmo processo.
 
-  **Mypy, estado final local: 4 erros.**
-  - `agents/tools/gcalendar.py` (stubs de `dateutil`): ambiente local apenas.
-    A CI instala `types-python-dateutil` (`requirements-dev.txt`).
+  **Mypy, reproduzido num venv limpo com `requirements-dev.txt` (igual à CI):
+  5 erros, todos de fonte ausente.** Rodar localmente sem essas dependências
+  escondeu erros; a CI do `066321c` mostrou 7 e eles foram corrigidos em
+  `373b51c` (`task.py` e um reuso de variável em `handlers.py`).
+  - `Contact.awaiting_reply_since` (2 ocorrências em `jobs/handlers.py`): não
+    está no modelo nem em nenhuma migração. Latente enquanto
+    `whatsapp_twin_mode_enabled` estiver desligado. Ligá-lo levanta
+    `AttributeError` em `webhooks/router.py:593`. **Não ativar o modo Twin
+    antes de confirmar o schema de `contacts` contra produção.**
   - `webhooks/router.py:185` — `WhatsAppProvider.download_media` **não existe**
     em nenhum provedor. Bloqueio: é preciso o endpoint real de download de mídia
     do Evolution. Não há evidência dele neste repositório. Hoje o trecho é
@@ -127,11 +133,12 @@ integração completa.
 - `backend/tests` (suíte principal): **1140 passaram, 0 falharam**.
 - `whatsapp_agents_fix/`: **153 passaram, 0 falharam**.
 - `ruff check .`: **limpo**.
-- `mypy`: 4 erros locais (1 de ambiente, 3 bloqueios acima).
+- `mypy` (venv limpo, igual à CI): 5 erros de fonte ausente, detalhados acima.
 - `alembic upgrade head` → `downgrade base`: **limpo** em SQLite e em
   PostgreSQL isolado.
-- **CI do GitHub deste SHA**: ainda não verificada no momento deste texto. Vai
-  falhar no passo "Type check", pelos 3 bloqueios.
+- **CI do GitHub do `066321c`: falhou no passo "Type check"** (7 erros, dos
+  quais 2 corrigidos em `373b51c`). A CI do `373b51c` ainda não foi reportada.
+  Os 5 erros restantes continuam a fazer o passo falhar.
 
 **Plano de implantação/reversão: não emitido.** Compatibilidade com produção não
 foi demonstrada (item 2 bloqueado). Nenhuma implantação, migração, restart ou
