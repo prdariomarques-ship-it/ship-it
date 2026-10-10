@@ -15,7 +15,7 @@ test harness does).
 Revision ID: e610080003
 Revises: e610080002
 """
-from alembic import op
+import alembic.op as op
 import sqlalchemy as sa
 
 revision = 'e610080003'
@@ -23,111 +23,199 @@ down_revision = 'e610080002'
 branch_labels = None
 depends_on = None
 
-# Review fix (round 2 of the downgrade-safety finding): a database-level
-# marker, not an inference from column values, is the only reliable proof
-# that THIS migration's upgrade() -- in THIS database -- is what created
-# messages.sent_by_human / is_autopilot_reply / whatsapp_instance. The
-# previous check ("do any rows have non-default values?") missed a real
-# case: a pre-existing, non-empty messages table whose authorship columns
-# happen to carry only FALSE/FALSE/NULL (e.g. a freshly-migrated-but-
-# unused environment, or simply no owner reply or autopilot send has
-# happened yet) looked "safe to drop" under that check even though this
-# migration never created those columns there. The marker table is only
-# ever written inside the branch that actually adds a column that was
-# previously absent -- the no-op branch (columns already present, as on
-# real production) never writes it, so downgrade() has unambiguous proof
-# either way instead of a data-shaped guess.
-_MARKER_TABLE = '_mig_e610080003_created_authorship_columns'
+# Review fix (round 5 of the downgrade-safety finding): the previous marker
+# was a single GLOBAL flag ("upgrade() created *something* here") -- that
+# let creating just ONE missing object (say, only whatsapp_instance was
+# absent while sent_by_human/is_autopilot_reply pre-existed with real data)
+# authorize downgrade() to drop ALL THREE, including the two it never
+# created. This version tracks ownership PER OBJECT: one row per column/
+# index name, written only for the specific objects THIS call of upgrade()
+# actually created. upgrade() always ensures this table exists once it has
+# run here at all (even if it creates zero objects, i.e. the full
+# production no-op case) -- that is what lets downgrade() tell "upgrade
+# ran here and genuinely found everything pre-existing" (marker table
+# exists, empty/missing rows for the pre-existing objects -- safe to leave
+# them alone, no error) apart from "upgrade() never ran against this
+# database at all" (marker table absent entirely -- unresolvable, must
+# refuse rather than guess).
+_MARKER_TABLE = '_mig_e610080003_created_objects'
+# The OLD, global-flag marker from the previous version of this migration.
+# If this exists, some earlier run already executed the old upgrade()
+# logic -- its single row proves only "something was created", never WHICH
+# column(s)/index, so it cannot be reinterpreted under the new per-object
+# scheme without inventing provenance this migration never actually
+# recorded. downgrade() must recognize and refuse on sight, not migrate or
+# reuse its meaning.
+_LEGACY_MARKER_TABLE = '_mig_e610080003_created_authorship_columns'
+
+_TRACKED_COLUMNS = ('sent_by_human', 'is_autopilot_reply', 'whatsapp_instance')
+_INDEX_NAME = 'ix_messages_whatsapp_instance'
+
+
+def _ensure_marker_table(bind) -> None:
+    if not sa.inspect(bind).has_table(_MARKER_TABLE):
+        op.create_table(
+            _MARKER_TABLE,
+            sa.Column('object_name', sa.String(128), primary_key=True),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        )
+
+
+def _record_created(bind, object_name: str) -> None:
+    bind.execute(
+        sa.text(f'INSERT INTO "{_MARKER_TABLE}" (object_name) VALUES (:name)'),
+        {'name': object_name},
+    )
 
 
 def upgrade():
     bind = op.get_bind()
     existing_columns = {c['name'] for c in sa.inspect(bind).get_columns('messages')}
-    columns_to_add = {'sent_by_human', 'is_autopilot_reply', 'whatsapp_instance'} - existing_columns
+    existing_indexes = {ix['name'] for ix in sa.inspect(bind).get_indexes('messages')}
+
+    created: list[str] = []
     with op.batch_alter_table('messages') as batch:
         if 'sent_by_human' not in existing_columns:
             batch.add_column(sa.Column('sent_by_human', sa.Boolean(), nullable=False,
                                         server_default=sa.false()))
+            created.append('sent_by_human')
         if 'is_autopilot_reply' not in existing_columns:
             batch.add_column(sa.Column('is_autopilot_reply', sa.Boolean(), nullable=False,
                                         server_default=sa.false()))
+            created.append('is_autopilot_reply')
         if 'whatsapp_instance' not in existing_columns:
             batch.add_column(sa.Column('whatsapp_instance', sa.String(128), nullable=True))
-    existing_indexes = {ix['name'] for ix in sa.inspect(bind).get_indexes('messages')}
-    if 'ix_messages_whatsapp_instance' not in existing_indexes:
-        op.create_index('ix_messages_whatsapp_instance', 'messages', ['whatsapp_instance'])
+            created.append('whatsapp_instance')
 
-    if columns_to_add and not sa.inspect(bind).has_table(_MARKER_TABLE):
-        op.create_table(
-            _MARKER_TABLE,
-            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
-        )
-        op.execute(sa.text(f'INSERT INTO "{_MARKER_TABLE}" DEFAULT VALUES'))
+    if _INDEX_NAME not in existing_indexes:
+        op.create_index(_INDEX_NAME, 'messages', ['whatsapp_instance'])
+        created.append(_INDEX_NAME)
+
+    # Always ensure the marker table exists once upgrade() has run here at
+    # all -- even with zero rows (every tracked object pre-existed, as on
+    # real production) -- so downgrade() can tell that apart from upgrade()
+    # never having run against this database in the first place.
+    _ensure_marker_table(bind)
+    for name in created:
+        _record_created(bind, name)
 
 
 def downgrade():
-    # Review finding: column existence alone does not prove THIS migration
-    # created it. On the real production database (darioos_cutover_20260927)
-    # these three columns, with real historical data, already existed
-    # before this migration's upgrade() ever ran there -- upgrade() was a
-    # pure no-op catch-up (see module docstring). A downgrade that drops
-    # "whatever exists" would silently destroy that real authorship/
-    # instance history, not just undo what this migration actually built.
-    #
-    # Review fix (round 2): a data-value check alone ("are they all still
-    # FALSE/FALSE/NULL?") is not proof of ownership either -- a pre-
-    # existing, non-empty messages table can carry exactly those defaults
-    # without this migration ever having touched it. The ONLY reliable
-    # proof is the marker table upgrade() writes, and only in the branch
-    # where it actually added a column that was previously absent. Both
-    # checks below must pass: ownership (the marker) AND no real data has
-    # accumulated since (the original data check, kept as a second,
-    # independent guard -- even a database this migration legitimately
-    # created the columns in should not have its real authorship history
-    # silently dropped by an operator deciding to roll back later).
+    # Review finding (round 5): "did this migration create *something*
+    # here" is not the right question -- it must be "did this migration
+    # create *this specific* column/index here", object by object, or a
+    # database with even one genuinely pre-existing authorship column (real
+    # production: all three pre-exist) gets ALL of them dropped the moment
+    # any ONE object happens to be missing and gets created. The per-object
+    # marker table (populated only by upgrade(), only for what it actually
+    # created) is the only reliable source -- never column/table emptiness
+    # or FALSE/FALSE/NULL defaults, which a genuinely foreign, pre-existing,
+    # merely-unused column can show just as easily as one we created.
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+
+    if inspector.has_table(_LEGACY_MARKER_TABLE):
+        raise RuntimeError(
+            f'Refusing to downgrade e610080003: found "{_LEGACY_MARKER_TABLE}", '
+            "the OLD global-flag marker from an earlier version of this "
+            "migration. That marker only recorded that upgrade() created "
+            "SOMETHING here, never which specific column(s)/index -- reusing "
+            "it under the current per-object ownership scheme would mean "
+            "inventing provenance this migration never actually recorded. "
+            "Resolve this by hand: inspect messages.sent_by_human / "
+            "is_autopilot_reply / whatsapp_instance and ix_messages_"
+            "whatsapp_instance directly against this database before "
+            "deciding what, if anything, is safe to remove."
+        )
+
     existing_columns = {c['name'] for c in inspector.get_columns('messages')}
-    target_columns = {'sent_by_human', 'is_autopilot_reply', 'whatsapp_instance'} & existing_columns
-    if not target_columns:
-        return  # nothing to drop -- already absent
+    existing_indexes = {ix['name'] for ix in inspector.get_indexes('messages')}
+    present_columns = set(_TRACKED_COLUMNS) & existing_columns
+    index_present = _INDEX_NAME in existing_indexes
+
+    if not present_columns and not index_present:
+        return  # nothing of ours could possibly still be here
 
     if not inspector.has_table(_MARKER_TABLE):
-        raise RuntimeError(
-            "Refusing to downgrade e610080003: there is no reliable record "
-            "(the upgrade-time marker table) proving THIS migration's "
-            "upgrade() created messages.sent_by_human / is_autopilot_reply "
-            "/ whatsapp_instance in this database. Column existence, or "
-            "all-default values, do not prove that -- on production these "
-            "columns pre-existed this migration's upgrade() entirely (a "
-            "no-op there), and a pre-existing, non-empty table can carry "
-            "nothing but FALSE/FALSE/NULL in them with no relation to this "
-            "migration at all. Dropping them now could destroy a pre-"
-            "existing production baseline this migration never created. "
-            "To go back past this point, restore from a tested backup "
-            "taken before that decision."
-        )
-
-    has_real_data = bind.execute(sa.text(
-        "SELECT 1 FROM messages WHERE sent_by_human IS TRUE "
-        "OR is_autopilot_reply IS TRUE OR whatsapp_instance IS NOT NULL LIMIT 1"
-    )).first()
-    if has_real_data is not None:
+        # upgrade() never ran against this database at all -- there is no
+        # record of what, if anything, it evaluated here. Column/index
+        # presence alone proves nothing about who put them there.
         raise RuntimeError(
             "Refusing to downgrade e610080003: messages.sent_by_human / "
-            "is_autopilot_reply / whatsapp_instance contain real data, "
-            "even though this migration's own upgrade() created them in "
-            "this database. Dropping them now would destroy real "
-            "authorship/instance history that has accumulated since. To "
-            "go back past this point, restore from a tested backup taken "
-            "before that decision."
+            "is_autopilot_reply / whatsapp_instance (and/or "
+            f"{_INDEX_NAME}) are present, but there is no record "
+            f'("{_MARKER_TABLE}") that this migration'"'"'s own upgrade() '
+            "ever ran against this database, let alone which objects it "
+            "created here. Their existence does not prove this migration "
+            "owns them -- on production they pre-existed this migration's "
+            "upgrade() entirely. To go back past this point, restore from "
+            "a tested backup taken before that decision, or confirm "
+            "manually that every one of these objects is safe to drop and "
+            "remove them by hand."
         )
 
-    existing_indexes = {ix['name'] for ix in inspector.get_indexes('messages')}
-    if 'ix_messages_whatsapp_instance' in existing_indexes:
-        op.drop_index('ix_messages_whatsapp_instance', table_name='messages')
-    with op.batch_alter_table('messages') as batch:
-        for column_name in ('whatsapp_instance', 'is_autopilot_reply', 'sent_by_human'):
-            if column_name in existing_columns:
+    owned = {
+        row[0] for row in bind.execute(sa.text(f'SELECT object_name FROM "{_MARKER_TABLE}"'))
+    }
+
+    def _has_real_data(predicate: str) -> bool:
+        return bind.execute(sa.text(f"SELECT 1 FROM messages WHERE {predicate} LIMIT 1")).first() is not None
+
+    index_owned = index_present and _INDEX_NAME in owned
+
+    # Objects NOT in `owned` are proven foreign (upgrade() looked at every
+    # tracked name explicitly and chose not to create them because they
+    # already existed) -- always left alone, never even considered below.
+    blocked: list[str] = []
+    columns_to_drop: list[str] = []
+
+    for column, predicate in (
+        ('sent_by_human', 'sent_by_human IS TRUE'),
+        ('is_autopilot_reply', 'is_autopilot_reply IS TRUE'),
+    ):
+        if column in present_columns and column in owned:
+            if _has_real_data(predicate):
+                blocked.append(column)
+            else:
+                columns_to_drop.append(column)
+
+    if 'whatsapp_instance' in present_columns and 'whatsapp_instance' in owned:
+        if _has_real_data('whatsapp_instance IS NOT NULL'):
+            blocked.append('whatsapp_instance')
+        elif index_present and not index_owned:
+            # Dropping this column would force the database to drop the
+            # index on it as a side effect -- but that index is NOT ours
+            # (it pre-existed independently of this migration's upgrade()).
+            # Destroying someone else's index just because we own the
+            # column it happens to sit on is exactly the kind of foreign-
+            # object removal this fix exists to prevent.
+            blocked.append('whatsapp_instance (coupled to a foreign index)')
+        else:
+            columns_to_drop.append('whatsapp_instance')
+
+    if blocked:
+        raise RuntimeError(
+            "Refusing to downgrade e610080003: " + ", ".join(blocked) + " "
+            "-- created by this migration's own upgrade() in this database, "
+            "but either carrying real data that would be destroyed, or "
+            "coupled to an index this migration does not own. Objects this "
+            "migration never created are left untouched regardless; "
+            "resolve the blocked object(s) by hand (restore from a tested "
+            "backup, or confirm manually that the data/index in question is "
+            "disposable) before retrying."
+        )
+
+    drop_index_now = index_owned
+    if drop_index_now:
+        op.drop_index(_INDEX_NAME, table_name='messages')
+    if columns_to_drop:
+        with op.batch_alter_table('messages') as batch:
+            for column_name in columns_to_drop:
                 batch.drop_column(column_name)
-    op.drop_table(_MARKER_TABLE)
+
+    removed = set(columns_to_drop) | ({_INDEX_NAME} if drop_index_now else set())
+    if removed:
+        for name in removed:
+            bind.execute(sa.text(f'DELETE FROM "{_MARKER_TABLE}" WHERE object_name = :name'), {'name': name})
+        if bind.execute(sa.text(f'SELECT 1 FROM "{_MARKER_TABLE}" LIMIT 1')).first() is None:
+            op.drop_table(_MARKER_TABLE)

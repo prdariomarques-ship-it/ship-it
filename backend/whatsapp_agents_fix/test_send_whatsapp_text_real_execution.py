@@ -200,6 +200,31 @@ async def test_successful_send_captures_the_real_receipt_and_promotes_to_sent(re
 
 
 @pytest.mark.asyncio
+async def test_a_plain_non_twin_send_leaves_a_durable_receipt_so_its_own_echo_is_never_a_human_takeover(real_control_db):
+    """Round 6 regression guard. Before this change only the Twin's
+    send_intent path recorded receipts, so a store/B2B/Azusa send's fromMe
+    echo had no proof and webhooks/router.py treated it as a human reply
+    -- pausing the very conversation the bot was handling. Every send with
+    a recognized receipt must now leave a conversation_receipts row scoped
+    to the instance its echo will carry back."""
+    _, sessions = real_control_db
+    payload = {
+        "to": "+5511999990000", "content": "Temos o thinner 5L, R$ 45,00.",
+        "instance": "store",
+    }
+    async with sessions() as db:
+        await handlers.send_whatsapp_text(db, payload)
+
+    async with sessions() as db:
+        row = await conversation_control._one(
+            db,
+            "SELECT COUNT(*) AS n FROM conversation_receipts WHERE instance=:inst AND external_id=:ext",
+            {"inst": "store", "ext": "FAKE-RECEIPT-1"},
+        )
+    assert row["n"] == 1
+
+
+@pytest.mark.asyncio
 async def test_unrecognized_provider_response_stays_needs_review_not_promoted_on_a_guess(real_control_db):
     """The flip side of the test above: a provider response that doesn't
     have the recognized key.id shape (here, None -- the old FAKE_PROVIDER

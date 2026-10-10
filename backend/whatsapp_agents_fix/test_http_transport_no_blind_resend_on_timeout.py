@@ -294,26 +294,100 @@ async def test_send_still_retries_on_other_safe_to_retry_transport_errors(
 
 
 @pytest.mark.asyncio
-async def test_send_does_not_retry_on_http_status_error_passed_through_raise_for_status(
-    evolution_provider_class, fake_transport,
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [500, 502, 504], ids=["500", "502", "504"])
+async def test_send_does_not_retry_on_an_http_error_status_even_though_a_response_was_received(
+    evolution_provider_class, fake_transport, status_code,
 ):
-    """A real HTTPStatusError means a response WAS received -- there is no
-    delivery ambiguity, the provider told us definitively what happened.
-    It must not be retried as if it were ambiguous (`_post` disables
-    retry-on-ambiguous-delivery, but a definite rejection is a different
-    thing and the max_attempts=1 here isolates that this is governed by
-    attempt-exhaustion, not mistakenly treated as a retryable case)."""
-    settings, saved = _settings_for(
-        sys.modules["providers.whatsapp.base"], max_attempts=1,
-    )
+    """Review finding (round 6): the previous version of this protection
+    excluded HTTPStatusError from "ambiguous" entirely, on the theory that
+    receiving a response (even an error one) proves the provider told us
+    definitively what happened. That theory is wrong: a gateway can
+    accept and queue a WhatsApp send, then fail composing or delivering
+    its OWN response -- 500/502/504 included -- well after the message
+    was already in flight. max_attempts=3 here (not 1) is what proves
+    this: if the old exclusion were still in place, this would retry up
+    to 3 times like any ordinary transient failure; it must now stop
+    after exactly one attempt, the same as a ReadTimeout."""
+    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
     settings.evolution_base_url = "http://example.invalid"
     settings.evolution_api_key = ""
     settings.evolution_instance = "dario"
-    fake_transport.outcomes = [_FakeResponse(500)]
+    fake_transport.outcomes = [_FakeResponse(status_code)]
     try:
         provider = evolution_provider_class()
         with pytest.raises(Exception):
             await provider.send_text("+5511999990000", "mensagem de teste")
+        assert fake_transport.calls == 1, (
+            f"retentou o POST apos um {status_code} -- a mensagem pode ja ter sido aceita pelo provedor"
+        )
+    finally:
+        _restore_settings(settings, saved)
+
+
+@pytest.mark.asyncio
+async def test_worker_retry_after_an_uncertain_outcome_does_not_blindly_resend_either(
+    evolution_provider_class, fake_transport,
+):
+    """Ties the ambiguous-outcome protection to the OTHER fence
+    (conversation_control's commit-before-transport, see jobs/handlers.py)
+    it was explicitly designed to complement, not duplicate: a worker
+    that retries the whole job after a 502 must still see exactly one
+    POST attempt per job execution -- this layer's job is only to stop
+    the SAME call from blindly looping inside a single execution; it
+    does not by itself prevent a separate job retry from trying again
+    (that is conversation_control's job, proven in test_pause_fencing.py
+    and test_send_whatsapp_text_real_execution.py). Simulates two
+    independent job executions here, each with its own single attempt."""
+    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
+    settings.evolution_base_url = "http://example.invalid"
+    settings.evolution_api_key = ""
+    settings.evolution_instance = "dario"
+    try:
+        provider = evolution_provider_class()
+
+        fake_transport.outcomes = [_FakeResponse(502)]
+        with pytest.raises(Exception):
+            await provider.send_text("+5511999990000", "mensagem de teste")
+        assert fake_transport.calls == 1
+
+        # A second, independent execution (e.g. a worker retry after the
+        # job raised) gets its own single attempt -- still no blind loop
+        # within either individual call.
+        fake_transport.calls = 0
+        fake_transport.outcomes = [_FakeResponse(200)]
+        result = await provider.send_text("+5511999990000", "mensagem de teste")
+        assert result == {"key": {"id": "EVT-OK"}}
+        assert fake_transport.calls == 1
+    finally:
+        _restore_settings(settings, saved)
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_send_still_continues_normally_on_the_next_turn(
+    evolution_provider_class, fake_transport,
+):
+    """Control case: once a send genuinely succeeds (a real 200 with a
+    recognized receipt shape), the next, unrelated send on the same
+    conversation must behave exactly like an ordinary, unaffected call --
+    proving the ambiguous-outcome protection is scoped to the failing
+    attempt, not a lingering state that taints the conversation."""
+    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
+    settings.evolution_base_url = "http://example.invalid"
+    settings.evolution_api_key = ""
+    settings.evolution_instance = "dario"
+    try:
+        provider = evolution_provider_class()
+
+        fake_transport.outcomes = [_FakeResponse(200, {"key": {"id": "EVT-FIRST"}})]
+        first = await provider.send_text("+5511999990000", "primeira mensagem")
+        assert first == {"key": {"id": "EVT-FIRST"}}
+        assert fake_transport.calls == 1
+
+        fake_transport.calls = 0
+        fake_transport.outcomes = [_FakeResponse(200, {"key": {"id": "EVT-SECOND"}})]
+        second = await provider.send_text("+5511999990000", "segunda mensagem, turno seguinte")
+        assert second == {"key": {"id": "EVT-SECOND"}}
         assert fake_transport.calls == 1
     finally:
         _restore_settings(settings, saved)

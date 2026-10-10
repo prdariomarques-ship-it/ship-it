@@ -200,20 +200,71 @@ async def _transcribe_audio(
         return ""
 
 
+#: Review fix (round 6, finding #3): purely hygiene, never proof. Once
+#: `conversation_control.known_receipt` has already proven a fromMe event
+#: is this system's own echo (the provider's own message id matches a
+#: receipt WE recorded at send time -- see services/conversation_control.py's
+#: record_receipt/finish_send), this window only bounds HOW FAR BACK we'll
+#: look for the specific unacknowledged row to attach that proven receipt
+#: to, so an ancient stuck send sharing identical text by coincidence is
+#: never matched instead of the real one. 15 minutes comfortably exceeds
+#: the HTTP send retry/backoff horizon (settings.whatsapp_request_max_attempts
+#: x whatsapp_request_backoff_seconds, on the order of seconds) plus
+#: webhook delivery latency, while staying short enough that a genuinely
+#: unrelated old send with the same text is unlikely to fall inside it.
+_ECHO_CORRELATION_WINDOW_SECONDS = 15 * 60
+
+
 async def _capture_human_reply(db: AsyncSession, provider: WhatsAppProvider, contact, inbound, media_type: str) -> WebhookAck:
     """The owner answered from his phone (provider fromMe echo): record it as
     a human message and clear the pending marker so the twin stays quiet.
     No auto-reply is ever enqueued from here. Owner audio gets a history-only
-    transcription job in the same transaction as its message."""
+    transcription job in the same transaction as its message.
+
+    Review fix (round 6, finding #3): a fromMe event is classified as this
+    system's OWN echo only when a provider identifier proves it -- never
+    from text equality alone. The previous version matched any
+    unacknowledged (external_id IS NULL) outbound row with identical
+    content, with no bound on how old it was: a human typing the same
+    words as a stuck, never-acknowledged autopilot send from days earlier
+    would be silently classified as "own_echo" and returned early, BEFORE
+    ever pausing automation -- exactly the failure mode of the bot
+    disputing the conversation with a human who just took it over.
+    `conversation_control.known_receipt` is the only trusted signal
+    (populated at send time, before any webhook can arrive, from the
+    provider's own response to OUR send) -- content/instance matching
+    below only locates WHICH row that already-proven echo belongs to.
+    Lacking that proof (no external_id reported, or an id we don't
+    recognize), this always falls through to the human-reply path,
+    deliberately -- including for flows that don't yet thread receipt
+    correlation (Loja/B2B/Azusa autopilot sends, see SESSION_TRACKING.md):
+    a false pause there is a far safer failure than a missed one."""
     personal_instance = get_settings().evolution_personal_instance
     personal_empty_audio = media_type == 'audio' and (not (inbound.text or '').strip()) and bool(personal_instance) and (inbound.instance == personal_instance)
-    own = None
-    if not personal_empty_audio:
-        own = await MessageRepository(db).find_unacknowledged_outbound(contact.id, inbound.text, instance=inbound.instance)
-    if own is not None:
-        own.external_id = inbound.external_id or None
-        await db.commit()
-        return WebhookAck(status='own_echo', message_id=own.id)
+
+    if not personal_empty_audio and inbound.instance and inbound.external_id:
+        proven_echo = await conversation_control.known_receipt(db, contact.id, inbound.instance, inbound.external_id)
+        if proven_echo:
+            own = await MessageRepository(db).find_unacknowledged_outbound(
+                contact.id, inbound.text, instance=inbound.instance,
+                within_seconds=_ECHO_CORRELATION_WINDOW_SECONDS,
+            )
+            if own is not None:
+                own.external_id = inbound.external_id or None
+                await db.commit()
+                return WebhookAck(status='own_echo', message_id=own.id)
+            # Proof is independently established above; there is simply no
+            # candidate row left to attach it to (already finalized through
+            # another path, or persisted with different content). Do not
+            # fabricate a human message for something already proven not
+            # to be one -- log for investigation and stop here.
+            await record_log(
+                db, source='webhook:whatsapp:echo_unmatched', level='warning',
+                message=f'Eco confirmado por recibo do provedor, sem linha correspondente para {inbound.phone}',
+                payload={'contact_id': contact.id, 'instance': inbound.instance, 'external_id': inbound.external_id},
+            )
+            return WebhookAck(status='own_echo_unmatched')
+
     message = Message(contact_id=contact.id, direction=MessageDirection.OUTBOUND, media_type=MessageMediaType(media_type), content=inbound.text, external_id=inbound.external_id or None, provider_timestamp=inbound.timestamp, sent_by_human=True, whatsapp_instance=inbound.instance)
     db.add(message)
     if not personal_instance or inbound.instance == personal_instance:

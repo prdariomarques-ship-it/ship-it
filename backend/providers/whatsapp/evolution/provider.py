@@ -17,6 +17,7 @@ class EvolutionProvider(WhatsAppProvider):
         self._base_url = settings.evolution_base_url.rstrip("/")
         self._api_key = settings.evolution_api_key
         self._instance = settings.evolution_instance
+        self.default_instance = self._instance
 
     def _headers(self) -> dict:
         return {"apikey": self._api_key} if self._api_key else {}

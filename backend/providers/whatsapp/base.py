@@ -140,6 +140,10 @@ class WhatsAppProvider(ABC):
     """Strategy interface implemented by every WhatsApp integration."""
 
     name: str
+    # The gateway instance a send goes through when the caller names none.
+    # The same instance's fromMe echoes come back carrying it, so receipts
+    # recorded for default-instance sends must be scoped to it too.
+    default_instance: str = ""
 
     @abstractmethod
     async def send_text(self, to: str, content: str) -> dict: ...
@@ -214,25 +218,35 @@ class WhatsAppProvider(ABC):
         frequently by an orchestrator should never block for several seconds
         retrying a gateway that's genuinely down).
 
-        Review fix, corrected after an incomplete first attempt:
+        Review fix, corrected twice now after incomplete earlier attempts:
         `retry_on_ambiguous_delivery=False` (set by `_post`, the transport
         every send_* method goes through) disables retry for every
         failure mode where the request may have already reached and been
         processed by the provider and we simply never got a usable
-        response back -- not just `ReadTimeout`/`WriteTimeout`
-        (the first version), but also `ReadError`/`WriteError`
-        (a connection reset mid-request/response) and
-        `RemoteProtocolError` (the server closed the connection or spoke
-        invalid HTTP, after we started talking to it). This is an
-        ALLOW-list, not a deny-list, on purpose: `_SAFE_TO_RETRY_TRANSPORT_ERRORS`
-        below names only the failures that happen BEFORE any request
-        byte could plausibly have reached the provider (`ConnectError`,
-        `ConnectTimeout`, `PoolTimeout`) -- everything else under
-        `httpx.HTTPError` (other than a real `HTTPStatusError`, where a
-        response WAS received and its status code tells us definitively
-        what happened) is treated as ambiguous by default, so a future
-        httpx exception type this module doesn't yet know about fails
-        SAFE (no blind retry) instead of failing open.
+        response back -- not just `ReadTimeout`/`WriteTimeout` (the first
+        version), not just those plus `ReadError`/`WriteError`/
+        `RemoteProtocolError` (the second version), but `httpx.HTTPStatusError`
+        too: receiving an HTTP error response (500/502/504 included) is
+        NOT proof the provider never processed the request -- a gateway
+        can accept and queue a WhatsApp send, then fail while composing or
+        delivering its OWN response, well after the message was already
+        in flight. The earlier version of this code excluded
+        `HTTPStatusError` from "ambiguous" on the theory that a response
+        WAS received so its status told us definitively what happened;
+        that theory was wrong for exactly this reason, and treating it as
+        safe-to-retry blindly resent real WhatsApp messages on a transient
+        5xx. This is an ALLOW-list, not a deny-list, on purpose:
+        `_SAFE_TO_RETRY_TRANSPORT_ERRORS` below names ONLY the failures
+        that happen BEFORE any request byte could plausibly have reached
+        the provider (`ConnectError`, `ConnectTimeout`, `PoolTimeout`) --
+        every other `httpx.HTTPError`, `HTTPStatusError` included, is
+        ambiguous by default, so a future httpx exception type (or status
+        code) this module doesn't yet know about fails SAFE (no blind
+        retry) instead of failing open. A provider wanting retry-safe
+        error responses must document and implement real idempotency
+        (e.g. an idempotency key the gateway itself deduplicates on) --
+        none of this codebase's providers do today, so none get this
+        exemption.
 
         `conversation_control`'s commit-before-transport fence (see
         jobs/handlers.py's send_whatsapp_text) only protects against the
@@ -264,9 +278,7 @@ class WhatsAppProvider(ABC):
                 return {"status": "ok"}
             except httpx.HTTPError as exc:
                 last_exc = exc
-                ambiguous_delivery = not isinstance(
-                    exc, (httpx.HTTPStatusError,) + _SAFE_TO_RETRY_TRANSPORT_ERRORS
-                )
+                ambiguous_delivery = not isinstance(exc, _SAFE_TO_RETRY_TRANSPORT_ERRORS)
                 if attempt >= max_attempts or (ambiguous_delivery and not retry_on_ambiguous_delivery):
                     if ambiguous_delivery and not retry_on_ambiguous_delivery and attempt < max_attempts:
                         logger.error(

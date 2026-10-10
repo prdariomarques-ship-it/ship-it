@@ -262,13 +262,20 @@ async def test_a_genuine_text_reply_with_no_matching_outbound_row_is_captured_as
 
 
 @pytest.mark.asyncio
-async def test_the_bots_own_echo_is_not_captured_as_a_human_reply(router, real_db):
+async def test_the_bots_own_echo_is_not_captured_as_a_human_reply(router, conversation_control, real_db):
     """Review warning, verbatim: 'não trate todo fromMe como humano'. An
     unacknowledged, is_autopilot_reply row with the SAME content already
     in the table (as if jobs/handlers.py's send_whatsapp_text had just
     sent it) is this system's own delivery echo bouncing back through the
     webhook -- not a human typing. Must attach the receipt id to THAT
-    row, create no new Message, and must NOT pause automation."""
+    row, create no new Message, and must NOT pause automation.
+
+    Review fix (round 6, finding #3): text equality alone is no longer
+    enough to prove this -- `conversation_control.record_receipt` must
+    have already recorded this exact provider id as OUR OWN send's
+    receipt (exactly what jobs/handlers.py's send_whatsapp_text does via
+    finish_send, before any webhook can arrive) for the echo to be
+    trusted at all."""
     sessions, Contact, contact_id, owner_id = real_db
     from utils.config import get_settings
     settings = get_settings()
@@ -287,6 +294,12 @@ async def test_the_bots_own_echo_is_not_captured_as_a_human_reply(router, real_d
             await db.commit()
             await db.refresh(sent)
             sent_id = sent.id
+
+        # The proof: this provider id is already known as a receipt for a
+        # send WE made, recorded independently of any webhook.
+        async with sessions() as db:
+            await conversation_control.record_receipt(db, contact_id, "dario", "evt-echo-1")
+            await db.commit()
 
         async with sessions() as db:
             count_before = (await db.execute(text("SELECT COUNT(*) FROM messages"))).scalar_one()
@@ -315,6 +328,223 @@ async def test_the_bots_own_echo_is_not_captured_as_a_human_reply(router, real_d
                 "SELECT paused FROM conversation_controls WHERE contact_id=:cid AND instance=:inst"
             ), {"cid": contact_id, "inst": "dario"})).mappings().first()
         assert row is None, "o eco do proprio bot pausou a automacao -- isso nao e um evento humano"
+    finally:
+        settings.evolution_personal_instance = original_personal_instance
+
+
+@pytest.mark.asyncio
+async def test_human_reply_matching_an_old_unconfirmed_send_is_never_treated_as_an_echo(
+    router, conversation_control, real_db,
+):
+    """THE regression this round fixes: a human typing the exact same
+    words as an old, stuck, never-acknowledged autopilot send must still
+    be captured as a real human reply and pause automation -- text
+    equality is not proof of authorship, no matter how it looks. No
+    receipt was ever recorded for this external_id, so there is no proof
+    at all; the old row is left completely untouched."""
+    sessions, Contact, contact_id, owner_id = real_db
+    from utils.config import get_settings
+    settings = get_settings()
+    original_personal_instance = settings.evolution_personal_instance
+    settings.evolution_personal_instance = "dario"
+    try:
+        Message = sys.modules["models.message"].Message
+        MessageDirection = sys.modules["models.message"].MessageDirection
+        async with sessions() as db:
+            stale = Message(
+                contact_id=contact_id, direction=MessageDirection.OUTBOUND,
+                content="Oi, tudo bem?", is_autopilot_reply=True, whatsapp_instance="dario",
+            )
+            db.add(stale)
+            await db.commit()
+            await db.refresh(stale)
+            stale_id = stale.id
+
+        inbound = SimpleNamespace(
+            phone="+5511988880000", text="Oi, tudo bem?",
+            external_id="evt-human-collision-1", timestamp=datetime.now(timezone.utc),
+            instance="dario", media_key=None,
+        )
+        provider = SimpleNamespace(name="evolution")
+        async with sessions() as db:
+            contact = (await db.execute(select(Contact).where(Contact.id == contact_id))).scalar_one()
+            ack = await router._capture_human_reply(db, provider, contact, inbound, "text")
+        assert ack.status == "human_reply_captured"
+        assert ack.message_id != stale_id
+
+        async with sessions() as db:
+            new_message = (await db.execute(select(Message).where(Message.id == ack.message_id))).scalar_one()
+            old_message = (await db.execute(select(Message).where(Message.id == stale_id))).scalar_one()
+        assert new_message.sent_by_human is True
+        assert new_message.external_id == "evt-human-collision-1"
+        assert old_message.external_id is None, "a linha antiga do bot foi alterada -- nao deveria ter sido tocada"
+        assert old_message.is_autopilot_reply is True
+
+        async with sessions() as db:
+            row = (await db.execute(text(
+                "SELECT paused FROM conversation_controls WHERE contact_id=:cid AND instance=:inst"
+            ), {"cid": contact_id, "inst": "dario"})).mappings().first()
+        assert row is not None and bool(row["paused"]) is True, (
+            "resposta humana colidindo com texto antigo nao pausou a automacao"
+        )
+    finally:
+        settings.evolution_personal_instance = original_personal_instance
+
+
+@pytest.mark.asyncio
+async def test_human_reply_matching_a_recent_unconfirmed_send_without_proof_is_still_human(
+    router, conversation_control, real_db,
+):
+    """Same as above, but the old row is RECENT (well inside the
+    correlation window) -- proving recency alone never substitutes for
+    proof either. Only a recorded receipt ever authorizes 'own_echo'."""
+    sessions, Contact, contact_id, owner_id = real_db
+    from utils.config import get_settings
+    settings = get_settings()
+    original_personal_instance = settings.evolution_personal_instance
+    settings.evolution_personal_instance = "dario"
+    try:
+        Message = sys.modules["models.message"].Message
+        MessageDirection = sys.modules["models.message"].MessageDirection
+        async with sessions() as db:
+            recent = Message(
+                contact_id=contact_id, direction=MessageDirection.OUTBOUND,
+                content="Pode confirmar o endereco?", is_autopilot_reply=True, whatsapp_instance="dario",
+            )
+            db.add(recent)
+            await db.commit()
+            await db.refresh(recent)
+            recent_id = recent.id
+
+        inbound = SimpleNamespace(
+            phone="+5511988880000", text="Pode confirmar o endereco?",
+            external_id="evt-human-collision-2", timestamp=datetime.now(timezone.utc),
+            instance="dario", media_key=None,
+        )
+        provider = SimpleNamespace(name="evolution")
+        async with sessions() as db:
+            contact = (await db.execute(select(Contact).where(Contact.id == contact_id))).scalar_one()
+            ack = await router._capture_human_reply(db, provider, contact, inbound, "text")
+        assert ack.status == "human_reply_captured"
+        assert ack.message_id != recent_id
+
+        async with sessions() as db:
+            old_message = (await db.execute(select(Message).where(Message.id == recent_id))).scalar_one()
+        assert old_message.external_id is None
+    finally:
+        settings.evolution_personal_instance = original_personal_instance
+
+
+@pytest.mark.asyncio
+async def test_a_redelivered_echo_webhook_does_not_create_a_second_message_or_pause(
+    router, conversation_control, real_db,
+):
+    """Duplicate/out-of-order delivery of the SAME proven echo: the second
+    delivery finds the row already acknowledged (external_id no longer
+    NULL) -- it must report `own_echo_unmatched` (proof still holds, but
+    nothing left to attach it to), never fabricate a second message, and
+    never pause."""
+    sessions, Contact, contact_id, owner_id = real_db
+    from utils.config import get_settings
+    settings = get_settings()
+    original_personal_instance = settings.evolution_personal_instance
+    settings.evolution_personal_instance = "dario"
+    try:
+        Message = sys.modules["models.message"].Message
+        MessageDirection = sys.modules["models.message"].MessageDirection
+        async with sessions() as db:
+            sent = Message(
+                contact_id=contact_id, direction=MessageDirection.OUTBOUND,
+                content="Fechado, te mando a confirmacao.", is_autopilot_reply=True, whatsapp_instance="dario",
+            )
+            db.add(sent)
+            await db.commit()
+            await db.refresh(sent)
+            sent_id = sent.id
+
+        async with sessions() as db:
+            await conversation_control.record_receipt(db, contact_id, "dario", "evt-redelivered-1")
+            await db.commit()
+
+        inbound = SimpleNamespace(
+            phone="+5511988880000", text="Fechado, te mando a confirmacao.",
+            external_id="evt-redelivered-1", timestamp=datetime.now(timezone.utc),
+            instance="dario", media_key=None,
+        )
+        provider = SimpleNamespace(name="evolution")
+        async with sessions() as db:
+            contact = (await db.execute(select(Contact).where(Contact.id == contact_id))).scalar_one()
+            first_ack = await router._capture_human_reply(db, provider, contact, inbound, "text")
+        assert first_ack.status == "own_echo"
+        assert first_ack.message_id == sent_id
+
+        async with sessions() as db:
+            count_before_redelivery = (await db.execute(text("SELECT COUNT(*) FROM messages"))).scalar_one()
+            contact = (await db.execute(select(Contact).where(Contact.id == contact_id))).scalar_one()
+            second_ack = await router._capture_human_reply(db, provider, contact, inbound, "text")
+        assert second_ack.status == "own_echo_unmatched"
+
+        async with sessions() as db:
+            count_after_redelivery = (await db.execute(text("SELECT COUNT(*) FROM messages"))).scalar_one()
+            row = (await db.execute(text(
+                "SELECT paused FROM conversation_controls WHERE contact_id=:cid AND instance=:inst"
+            ), {"cid": contact_id, "inst": "dario"})).mappings().first()
+        assert count_after_redelivery == count_before_redelivery
+        assert row is None, "o reenvio do mesmo eco pausou a automacao"
+    finally:
+        settings.evolution_personal_instance = original_personal_instance
+
+
+@pytest.mark.asyncio
+async def test_two_contacts_with_the_same_phrase_never_cross_contaminate_echo_correlation(
+    router, conversation_control, real_db,
+):
+    """A receipt recorded for contact A's send must never authorize
+    treating contact B's identical-text fromMe event as an echo -- both
+    `known_receipt` and `find_unacknowledged_outbound` are scoped per
+    contact_id (and instance), and this proves it end to end."""
+    sessions, Contact, contact_a_id, owner_id = real_db
+    from utils.config import get_settings
+    settings = get_settings()
+    original_personal_instance = settings.evolution_personal_instance
+    settings.evolution_personal_instance = "dario"
+    try:
+        async with sessions() as db:
+            contact_b = Contact(name="Outro Cliente", phone="+5511977776666")
+            db.add(contact_b)
+            await db.commit()
+            await db.refresh(contact_b)
+            contact_b_id = contact_b.id
+
+        Message = sys.modules["models.message"].Message
+        MessageDirection = sys.modules["models.message"].MessageDirection
+        async with sessions() as db:
+            sent_for_b = Message(
+                contact_id=contact_b_id, direction=MessageDirection.OUTBOUND,
+                content="Perfeito, obrigado!", is_autopilot_reply=True, whatsapp_instance="dario",
+            )
+            db.add(sent_for_b)
+            await db.commit()
+
+        # The receipt is recorded for contact A only.
+        async with sessions() as db:
+            await conversation_control.record_receipt(db, contact_a_id, "dario", "evt-cross-contact-1")
+            await db.commit()
+
+        # Contact B's fromMe event reuses the SAME text and a DIFFERENT
+        # external_id that was never recorded as anyone's receipt.
+        inbound = SimpleNamespace(
+            phone="+5511977776666", text="Perfeito, obrigado!",
+            external_id="evt-cross-contact-2", timestamp=datetime.now(timezone.utc),
+            instance="dario", media_key=None,
+        )
+        provider = SimpleNamespace(name="evolution")
+        async with sessions() as db:
+            contact_b = (await db.execute(select(Contact).where(Contact.id == contact_b_id))).scalar_one()
+            ack = await router._capture_human_reply(db, provider, contact_b, inbound, "text")
+        assert ack.status == "human_reply_captured", (
+            "o recibo do contato A autorizou (erroneamente) tratar o evento do contato B como eco"
+        )
     finally:
         settings.evolution_personal_instance = original_personal_instance
 

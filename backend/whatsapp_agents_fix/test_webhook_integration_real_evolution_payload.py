@@ -228,6 +228,167 @@ async def test_real_evolution_fromme_payload_through_the_real_webhook_route_paus
             setattr(settings, key, value)
 
 
+def _evolution_fromme_text_payload(*, instance: str, client_jid: str, event_id: str, text_body: str) -> dict:
+    """Same shape as the audio helper above, but a real TEXT fromMe event
+    -- the branch that actually calls `find_unacknowledged_outbound` /
+    `conversation_control.known_receipt` (the audio helper's
+    `personal_empty_audio` case bypasses that logic entirely)."""
+    return {
+        "event": "messages.upsert",
+        "instance": instance,
+        "data": {
+            "key": {"remoteJid": client_jid, "fromMe": True, "id": event_id},
+            "pushName": "Dario",
+            "message": {"conversation": text_body},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_real_evolution_fromme_text_payload_with_a_proven_receipt_is_captured_as_own_echo(
+    router, conversation_control, evolution_provider_class, real_db,
+):
+    """The core regression this round fixes, through the FULL real path:
+    JSON payload -> EvolutionProvider.parse_webhook (REAL) ->
+    whatsapp_webhook (REAL) -> conversation_control.known_receipt (REAL)
+    -> find_unacknowledged_outbound (REAL). A text fromMe event whose
+    provider id is already a recorded receipt for OUR OWN send must be
+    classified as an echo, attach the id to that row, and must NOT pause."""
+    from utils.config import get_settings
+    settings = get_settings()
+    saved = {
+        "webhook_secret": getattr(settings, "webhook_secret", ""),
+        "evolution_personal_instance": settings.evolution_personal_instance,
+        "evolution_base_url": getattr(settings, "evolution_base_url", None),
+        "evolution_api_key": getattr(settings, "evolution_api_key", None),
+        "stt_background_enabled": getattr(settings, "stt_background_enabled", None),
+    }
+    settings.webhook_secret = ""
+    settings.evolution_personal_instance = "dario"
+    settings.evolution_base_url = "http://localhost:0"
+    settings.evolution_api_key = ""
+    settings.stt_background_enabled = False
+    try:
+        provider = evolution_provider_class()
+        original_get_provider = router.get_whatsapp_provider
+        router.get_whatsapp_provider = lambda: provider
+        try:
+            Message = sys.modules["models.message"].Message
+            MessageDirection = sys.modules["models.message"].MessageDirection
+            Contact = sys.modules["models.contact"].Contact
+            async with real_db() as db:
+                contact = Contact(name="Cliente Eco", phone="5511966665555")
+                db.add(contact)
+                await db.commit()
+                await db.refresh(contact)
+                contact_id = contact.id
+                sent = Message(
+                    contact_id=contact_id, direction=MessageDirection.OUTBOUND,
+                    content="Separado, te mando o boleto.", is_autopilot_reply=True,
+                    whatsapp_instance="dario",
+                )
+                db.add(sent)
+                await db.commit()
+                await db.refresh(sent)
+                sent_id = sent.id
+
+            async with real_db() as db:
+                await conversation_control.record_receipt(db, contact_id, "dario", "evt-webhook-echo-1")
+                await db.commit()
+
+            payload = _evolution_fromme_text_payload(
+                instance="dario", client_jid="5511966665555@s.whatsapp.net",
+                event_id="evt-webhook-echo-1", text_body="Separado, te mando o boleto.",
+            )
+            raw_body = json.dumps(payload).encode()
+            async with real_db() as db:
+                ack = await router.whatsapp_webhook(_fake_request(raw_body), db)
+        finally:
+            router.get_whatsapp_provider = original_get_provider
+
+        assert ack.status == "own_echo"
+        assert ack.message_id == sent_id
+
+        async with real_db() as db:
+            row = (await db.execute(text(
+                "SELECT paused FROM conversation_controls WHERE contact_id=:cid AND instance=:inst"
+            ), {"cid": contact_id, "inst": "dario"})).mappings().first()
+        assert row is None, "o eco real via webhook pausou a automacao"
+    finally:
+        for key, value in saved.items():
+            setattr(settings, key, value)
+
+
+@pytest.mark.asyncio
+async def test_real_evolution_fromme_text_payload_matching_old_unconfirmed_send_is_still_human(
+    router, evolution_provider_class, real_db,
+):
+    """Same regression, through the FULL real path: a human typing the
+    exact words of an old, never-acknowledged autopilot send, with NO
+    receipt ever recorded for this event's provider id, must still be
+    captured as a real human reply and pause automation."""
+    from utils.config import get_settings
+    settings = get_settings()
+    saved = {
+        "webhook_secret": getattr(settings, "webhook_secret", ""),
+        "evolution_personal_instance": settings.evolution_personal_instance,
+        "evolution_base_url": getattr(settings, "evolution_base_url", None),
+        "evolution_api_key": getattr(settings, "evolution_api_key", None),
+        "stt_background_enabled": getattr(settings, "stt_background_enabled", None),
+    }
+    settings.webhook_secret = ""
+    settings.evolution_personal_instance = "dario"
+    settings.evolution_base_url = "http://localhost:0"
+    settings.evolution_api_key = ""
+    settings.stt_background_enabled = False
+    try:
+        provider = evolution_provider_class()
+        original_get_provider = router.get_whatsapp_provider
+        router.get_whatsapp_provider = lambda: provider
+        try:
+            Message = sys.modules["models.message"].Message
+            MessageDirection = sys.modules["models.message"].MessageDirection
+            Contact = sys.modules["models.contact"].Contact
+            async with real_db() as db:
+                contact = Contact(name="Cliente Colisao", phone="5511955554444")
+                db.add(contact)
+                await db.commit()
+                await db.refresh(contact)
+                contact_id = contact.id
+                stale = Message(
+                    contact_id=contact_id, direction=MessageDirection.OUTBOUND,
+                    content="Oi, tudo bem?", is_autopilot_reply=True, whatsapp_instance="dario",
+                )
+                db.add(stale)
+                await db.commit()
+                await db.refresh(stale)
+                stale_id = stale.id
+
+            payload = _evolution_fromme_text_payload(
+                instance="dario", client_jid="5511955554444@s.whatsapp.net",
+                event_id="evt-webhook-collision-1", text_body="Oi, tudo bem?",
+            )
+            raw_body = json.dumps(payload).encode()
+            async with real_db() as db:
+                ack = await router.whatsapp_webhook(_fake_request(raw_body), db)
+        finally:
+            router.get_whatsapp_provider = original_get_provider
+
+        assert ack.status == "human_reply_captured"
+        assert ack.message_id != stale_id
+
+        async with real_db() as db:
+            old_message = (await db.execute(select(Message).where(Message.id == stale_id))).scalar_one()
+            row = (await db.execute(text(
+                "SELECT paused FROM conversation_controls WHERE contact_id=:cid AND instance=:inst"
+            ), {"cid": contact_id, "inst": "dario"})).mappings().first()
+        assert old_message.external_id is None
+        assert row is not None and bool(row["paused"]) is True
+    finally:
+        for key, value in saved.items():
+            setattr(settings, key, value)
+
+
 @pytest.mark.asyncio
 async def test_duplicate_webhook_delivery_of_the_same_event_is_not_double_processed(
     router, evolution_provider_class, real_db,

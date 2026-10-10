@@ -1,9 +1,17 @@
 """Durable per-contact, per-instance pause, dispatch fences and audit.
 
 Revision ID: e610080001
-Revises: 9e2f1c6d7a80 (verified source head, not an applied-database assertion)
+Revises: 9e2f1c6d7a80 -- production's real alembic head id, confirmed via
+a human relaying real VPS command output earlier in this review
+engagement. That confirms the ID only, not its content, real parent
+chain, or the full history production actually applied to reach it --
+none of that is recoverable from this repository or this session (no VPS
+shell access here). See alembic/versions/9e2f1c6d7a80_production_baseline_marker.py
+for the current, explicitly-marked-BLOCKED status of that gap, and do
+not treat its placeholder content/parentage as anything more than a
+local graph-traversal convenience.
 """
-from alembic import op
+import alembic.op as op
 import sqlalchemy as sa
 
 revision = 'e610080001'

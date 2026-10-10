@@ -4,7 +4,7 @@ Revision ID: e610080002
 Revises: e610080001
 Legacy and crashed transports default unfinished and cannot be closed.
 """
-from alembic import op
+import alembic.op as op
 import sqlalchemy as sa
 
 revision = 'e610080002'
@@ -41,6 +41,24 @@ def downgrade():
     # round applied to e610080003's downgrade. Refuse only when there is
     # real data to lose; a blank/fresh database (CI, a new environment) has
     # none, and reverting there is genuinely safe.
+    #
+    # Re-examined (round 6, "não trate esse ajuste como mera correção de
+    # CI"): unlike e610080003 -- where the per-object ownership question
+    # mattered because `messages` is a pre-existing PRODUCTION table this
+    # migration chain never created -- the three tables touched here
+    # (conversation_send_intents, conversation_alert_intents,
+    # conversation_control_audit) were THEMSELVES created by e610080001, in
+    # this SAME chain, earlier in this same review engagement. upgrade()
+    # above adds these five columns unconditionally, with no "if not
+    # already present" branch at all -- there is no code path where this
+    # migration partially owns some of them: either it created every one
+    # of them in a given database, or it never ran here and none of them
+    # exist (a stray pre-existing column from some other source would make
+    # upgrade()'s add_column calls fail loudly with a duplicate-column
+    # error, not silently succeed as ambiguous). A per-object ownership
+    # marker, like e610080003 needed, would protect against a risk that
+    # does not exist here -- the single, all-or-nothing real-data check
+    # below is correctly scoped to what actually could go wrong.
     bind = op.get_bind()
     has_real_data = bind.execute(sa.text(
         "SELECT 1 WHERE EXISTS (SELECT 1 FROM conversation_send_intents WHERE transport_finished IS TRUE) "

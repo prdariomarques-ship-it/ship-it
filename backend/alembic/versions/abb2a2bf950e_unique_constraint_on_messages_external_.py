@@ -8,7 +8,7 @@ Create Date: 2026-07-10 01:27:37.044717
 
 from typing import Sequence, Union
 
-from alembic import op
+import alembic.op as op
 
 
 revision: str = "abb2a2bf950e"

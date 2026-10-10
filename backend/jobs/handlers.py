@@ -43,12 +43,12 @@ async def transcribe_whatsapp_audio(db: AsyncSession, payload: dict) -> None:
     if await JobRepository(db).has_inbound_reply(message.id):
         return
     contact = await ContactRepository(db).get(message.contact_id)
-    if contact is None:
+    if contact is None or not contact.phone:
         return
     inbound = InboundMessage(
         phone=contact.phone, text="", external_id=message.external_id or "",
         media_type="audio", timestamp=message.provider_timestamp,
-        instance=message.whatsapp_instance,
+        instance=message.whatsapp_instance or "",
         media_key=payload.get("media_key"),
     )
     provider = get_whatsapp_provider()
@@ -226,7 +226,7 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
         send_result = await provider.send_text(to, content, instance=instance)
     else:
         send_result = await provider.send_text(to, content)
-    await persist_outbound_message(db, to, content, is_autopilot_reply=bool(payload.get('is_autopilot_reply')), instance=instance)
+    sent_message = await persist_outbound_message(db, to, content, is_autopilot_reply=bool(payload.get('is_autopilot_reply')), instance=instance)
     # Review fix (C): capture whatever receipt id the provider actually
     # returned instead of always discarding it as None. extract_receipt_id
     # is deliberately defensive -- an unrecognized/absent shape (including
@@ -238,6 +238,16 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     receipt_id = extract_receipt_id(send_result)
     if send_intent_id is not None:
         await conversation_control.finish_send(db, send_intent_id, receipt_id)
+    elif receipt_id:
+        # Round 6 (finding #3): every send, not only the Twin's, must leave a
+        # durable receipt -- otherwise its fromMe echo has no proof to be
+        # recognized by, and webhooks/router.py would classify the bot's own
+        # message as a human takeover and pause that conversation. The
+        # recipient is the send's own contact; the scope is the instance the
+        # echo will carry back (explicit, else the provider's default).
+        echo_instance = instance or getattr(provider, 'default_instance', '')
+        if echo_instance:
+            await conversation_control.record_receipt(db, sent_message.contact_id, echo_instance, receipt_id)
     if alert_contact_id is not None and alert_dedup_key:
         await conversation_control.finish_alert(db, int(alert_contact_id), alert_instance, alert_dedup_key, receipt_id)
     await db.commit()
@@ -601,7 +611,7 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
         )
         return
     jobs = JobService(db)
-    if is_risky:
+    if evidence is not None:
         await jobs.enqueue('whatsapp.send_text', {
             'to': contact.phone, 'content': TWIN_HOLDING_MESSAGE, 'is_autopilot_reply': True, 'instance': instance,
             '_twin_contact_id': contact.id, '_twin_source_message_id': message.id,
@@ -733,9 +743,15 @@ async def transcribe_owner_audio(db: AsyncSession, payload: dict) -> None:
     if not isinstance(media_key, dict) or media_key.get('fromMe') is not True or (not message.external_id) or (media_key.get('id') != message.external_id):
         raise STTProviderError('Audio do proprietario sem chave de midia correspondente')
     contact = await ContactRepository(db).get(message.contact_id)
-    if contact is None:
+    if contact is None or not contact.phone:
         return
-    inbound = InboundMessage(phone=contact.phone, text='', external_id=message.external_id, media_type='audio', timestamp=message.provider_timestamp, instance=message.whatsapp_instance, media_key=media_key, from_me=True)
+    # media_key here is the raw provider envelope used above to validate
+    # this is really the owner's own echoed audio (fromMe + matching id)
+    # -- InboundMessage.media_key is the plain string key providers
+    # actually look media up by (see provider.download_media's call
+    # shape), not that envelope; `['id']` is it, already confirmed
+    # non-empty and equal to message.external_id by the check above.
+    inbound = InboundMessage(phone=contact.phone, text='', external_id=message.external_id, media_type='audio', timestamp=message.provider_timestamp, instance=message.whatsapp_instance or '', media_key=media_key.get('id'), from_me=True)
     transcript = (await _transcribe_audio(db, get_whatsapp_provider(), inbound)).strip()
     if not transcript:
         raise STTProviderError('Audio do proprietario sem transcricao; verificar midia ou servico de voz')
