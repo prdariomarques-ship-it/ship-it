@@ -54,7 +54,17 @@ integração completa.
   (`conversation_receipts`). Texto igual e recência não provam nada. Todo envio
   com recibo reconhecido grava o recibo com o escopo que o eco vai trazer
   (correção de regressão encontrada nesta rodada: sem isso, eco de Loja, B2B e
-  Azusa pausaria a própria conversa). Testes pelo parser e pela rota reais:
+  Azusa pausaria a própria conversa). O recibo é gravado logo após o
+  transporte, **antes** de `persist_outbound_message` (teste:
+  `test_receipt_is_durable_even_when_the_later_persistence_step_fails`).
+  **Risco residual, não eliminado:** se o eco chegar ao webhook antes do
+  `commit` do recibo (janela de milissegundos entre a resposta HTTP e o commit,
+  ou eco que chega antes mesmo da resposta HTTP), não há prova e o eco é lido
+  como resposta humana: pausa a conversa e grava a mensagem do bot com
+  `sent_by_human=True`. Falha no sentido seguro para atendimento, mas erra a
+  autoria. Corrigir por completo exige identificador do provedor antes do envio,
+  que este gateway não oferece.
+  Testes pelo parser e pela rota reais:
   eco com recibo; humano igual a texto antigo sem recibo; humano igual a texto
   recente sem recibo; reenvio do mesmo eco (`own_echo_unmatched`, sem pausa,
   sem mensagem nova); mesmo texto em dois contatos (sem contaminação cruzada);

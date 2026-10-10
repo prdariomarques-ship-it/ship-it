@@ -148,7 +148,7 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     Neither fence applies to any other call of this job (a plain
     dashboard-triggered send, mail-adjacent notifications, etc.) -- those
     behave exactly as before."""
-    from providers.whatsapp.base import extract_receipt_id
+    from providers.whatsapp.base import extract_receipt_id, normalize_phone
     from providers.whatsapp.evolution.provider import EvolutionProvider
     from services import conversation_control
     from services.output_safety import output_safe
@@ -226,7 +226,6 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
         send_result = await provider.send_text(to, content, instance=instance)
     else:
         send_result = await provider.send_text(to, content)
-    sent_message = await persist_outbound_message(db, to, content, is_autopilot_reply=bool(payload.get('is_autopilot_reply')), instance=instance)
     # Review fix (C): capture whatever receipt id the provider actually
     # returned instead of always discarding it as None. extract_receipt_id
     # is deliberately defensive -- an unrecognized/absent shape (including
@@ -236,18 +235,22 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     # not proof the client read it -- that stays a separate concern
     # (delivery_status / parse_delivery_ack), untouched here.
     receipt_id = extract_receipt_id(send_result)
-    if send_intent_id is not None:
-        await conversation_control.finish_send(db, send_intent_id, receipt_id)
-    elif receipt_id:
+    if send_intent_id is None and receipt_id:
         # Round 6 (finding #3): every send, not only the Twin's, must leave a
         # durable receipt -- otherwise its fromMe echo has no proof to be
         # recognized by, and webhooks/router.py would classify the bot's own
-        # message as a human takeover and pause that conversation. The
-        # recipient is the send's own contact; the scope is the instance the
-        # echo will carry back (explicit, else the provider's default).
+        # message as a human takeover and pause that conversation. Recorded
+        # BEFORE persist_outbound_message, whose memory bookkeeping can take
+        # long enough for the echo to arrive first. The scope is the instance
+        # the echo carries back (explicit, else the provider's default).
         echo_instance = instance or getattr(provider, 'default_instance', '')
         if echo_instance:
-            await conversation_control.record_receipt(db, sent_message.contact_id, echo_instance, receipt_id)
+            recipient = await ContactRepository(db).get_or_create_by_phone(normalize_phone(to))
+            await conversation_control.record_receipt(db, recipient.id, echo_instance, receipt_id)
+            await db.commit()
+    await persist_outbound_message(db, to, content, is_autopilot_reply=bool(payload.get('is_autopilot_reply')), instance=instance)
+    if send_intent_id is not None:
+        await conversation_control.finish_send(db, send_intent_id, receipt_id)
     if alert_contact_id is not None and alert_dedup_key:
         await conversation_control.finish_alert(db, int(alert_contact_id), alert_instance, alert_dedup_key, receipt_id)
     await db.commit()

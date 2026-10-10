@@ -225,6 +225,32 @@ async def test_a_plain_non_twin_send_leaves_a_durable_receipt_so_its_own_echo_is
 
 
 @pytest.mark.asyncio
+async def test_receipt_is_durable_even_when_the_later_persistence_step_fails(real_control_db, monkeypatch):
+    """Round 6 ordering guard. The receipt must be committed right after the
+    transport returns, not after persist_outbound_message's bookkeeping. If
+    that bookkeeping fails, the send already happened, so the receipt must
+    still exist for its echo to be recognized."""
+    _, sessions = real_control_db
+
+    async def failing_persist(db, to, content, **kwargs):
+        raise RuntimeError("simulated failure in persistence after transport")
+
+    monkeypatch.setattr(handlers, "persist_outbound_message", failing_persist)
+    payload = {"to": "+5511999990000", "content": "Oi, segue o orcamento.", "instance": "store"}
+    async with sessions() as db:
+        with pytest.raises(RuntimeError):
+            await handlers.send_whatsapp_text(db, payload)
+
+    async with sessions() as db:
+        row = await conversation_control._one(
+            db,
+            "SELECT COUNT(*) AS n FROM conversation_receipts WHERE instance=:inst AND external_id=:ext",
+            {"inst": "store", "ext": "FAKE-RECEIPT-1"},
+        )
+    assert row["n"] == 1
+
+
+@pytest.mark.asyncio
 async def test_unrecognized_provider_response_stays_needs_review_not_promoted_on_a_guess(real_control_db):
     """The flip side of the test above: a provider response that doesn't
     have the recognized key.id shape (here, None -- the old FAKE_PROVIDER
