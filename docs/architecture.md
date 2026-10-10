@@ -346,6 +346,45 @@ providers/
 
 `LLM_PROVIDER` e `EMBEDDING_PROVIDER` são independentes porque nem todo vendor tem API de embeddings de dimensão previsível (Anthropic não tem API de embeddings; GLM e Ollama têm, mas com dimensão que não bate com a coleção Qdrant configurada — ambos levantam `EmbeddingsNotSupportedError` de propósito em vez de gravar vetores incompatíveis silenciosamente). Sem chave/endereço configurado, todo provider degrada para resposta stub — o sistema continua de pé.
 
+### Google Providers: confiabilidade compartilhada (`providers/google_http.py`)
+
+Gmail, Google Calendar, Google Contacts e Google Drive não têm uma ABC comum
+(ao contrário do WhatsApp), mas todos falam com o mesmo vendor e falham do
+mesmo jeito transitório — por isso a lógica de confiabilidade fica num único
+helper compartilhado, `google_request`, em vez de duplicada 4 vezes:
+
+- **Retry com backoff exponencial** (`google_request_max_attempts`,
+  `google_request_backoff_seconds`) — desde a v1.3.1. Um header
+  `Retry-After` (429/503) sobrepõe o backoff calculado, já que o próprio
+  Google está dizendo exatamente quanto esperar.
+- **Circuit breaker por provider** (Release 1.6, M2 — platform reliability).
+  Depois de `google_circuit_failure_threshold` falhas consecutivas (uma
+  falha aqui já é uma chamada que esgotou todas as tentativas de retry, não
+  uma tentativa isolada), o circuito abre: chamadas seguintes falham
+  imediatamente com `GoogleCircuitOpenError` (nenhuma requisição HTTP é
+  sequer tentada) por `google_circuit_reset_seconds`, evitando repetir a
+  mesma dança de retry-com-backoff fadada ao fracasso para cada chamador
+  durante uma indisponibilidade prolongada do Google. Passado o cooldown,
+  exatamente uma chamada é deixada passar como sonda (half-open) —
+  chamadas concorrentes nessa janela continuam falhando rápido em vez de
+  disparar uma segunda sonda. `GoogleCircuitOpenError` herda de
+  `httpx.HTTPError` de propósito: os quatro pontos de chamada (Calendar/
+  Gmail/Contacts/Drive) já capturam `except httpx.HTTPError` e traduzem
+  para seu próprio erro de domínio (`CalendarProviderError` etc.) — o
+  circuit breaker é capturado e tratado ali de forma transparente, sem
+  nenhuma mudança nesses quatro arquivos. Estado do circuito é só em
+  memória, por processo (mesmo princípio de "sem StateManager central" —
+  ver a seção correspondente abaixo), e é exposto de duas formas: métrica
+  `darioos_google_circuit_state{provider}` (0=fechado, 1=aberto) e
+  `GET /health/ready`'s check `google` (lê o estado sem fazer nenhuma
+  chamada de rede própria).
+- **Refresh de token por chamada.** Cada uma das quatro ferramentas de
+  agente (`agents/tools/{mail,gcalendar,gcontacts,gdrive}.py::
+  _get_access_token`) chama `refresh_access_token` a cada invocação, sem
+  cache — já passa pelo retry/circuit breaker acima, e uma falha de
+  refresh (token revogado) já é convertida num erro de domínio claro,
+  pedindo reconexão, em vez de propagar como exceção crua.
+
 ### WhatsApp Provider: contrato, confiabilidade e como adicionar um novo
 
 Ver **`providers/whatsapp/README.md`** para o guia completo (contrato,

@@ -59,11 +59,32 @@ async def _check_whatsapp() -> str:
     return "ok"
 
 
+class GoogleCircuitsOpenError(RuntimeError):
+    """One or more Google providers (gmail/google_calendar/google_contacts/
+    google_drive) currently have an open circuit breaker (see
+    providers/google_http.py) -- surfaced here as a degraded readiness
+    check, same as Redis/Qdrant/WhatsApp. Purely an in-memory state read, no
+    network call made by this check itself."""
+
+    def __init__(self, providers: list[str]) -> None:
+        self.providers = providers
+        super().__init__(f"circuit open for: {', '.join(providers)}")
+
+
+async def _check_google() -> str:
+    from providers.google_http import open_circuit_providers
+
+    open_providers = open_circuit_providers()
+    if open_providers:
+        raise GoogleCircuitsOpenError(open_providers)
+    return "ok"
+
+
 @router.get("/health/ready")
 async def readiness(response: Response) -> dict:
-    """Database is required; Redis, Qdrant and the WhatsApp provider degrade
-    gracefully, so they only mark the service as 'degraded' instead of
-    failing readiness."""
+    """Database is required; Redis, Qdrant, the WhatsApp provider and Google
+    integrations all degrade gracefully, so they only mark the service as
+    'degraded' instead of failing readiness."""
     checks: dict[str, str] = {}
 
     required_ok = True
@@ -72,6 +93,7 @@ async def readiness(response: Response) -> dict:
         ("redis", _check_redis, False),
         ("qdrant", _check_qdrant, False),
         ("whatsapp", _check_whatsapp, False),
+        ("google", _check_google, False),
     ):
         try:
             checks[name] = await asyncio.wait_for(check(), timeout=5)

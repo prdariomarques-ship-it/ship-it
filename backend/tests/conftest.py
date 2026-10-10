@@ -32,17 +32,21 @@ def anyio_backend() -> str:
 
 @pytest.fixture(autouse=True)
 def _reset_local_caches():
-    """Cache/rate-limit/event-bus singletons survive between tests; reset their state."""
+    """Cache/rate-limit/event-bus/circuit-breaker singletons survive between
+    tests; reset their state."""
     from events.bus import event_bus
+    from providers.google_http import _circuits
     from services.cache import cache_service
     from services.rate_limit import rate_limiter
 
     cache_service._local.clear()
     rate_limiter._local_windows.clear()
     event_bus.unsubscribe_all()
+    _circuits.clear()
     yield
     cache_service._local.clear()
     event_bus.unsubscribe_all()
+    _circuits.clear()
 
 
 @pytest_asyncio.fixture
