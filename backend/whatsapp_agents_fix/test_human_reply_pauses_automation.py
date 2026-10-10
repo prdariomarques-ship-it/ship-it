@@ -11,16 +11,22 @@ actually triggers it. This file is what does: it calls the real function,
 then checks the real `conversation_controls` table, not a mock of
 conversation_control.
 
-Honest limit: exercises the `personal_empty_audio` branch (an owner audio
-reply with no transcribed text yet on the personal instance), because the
-text-reply branch calls `MessageRepository.find_unacknowledged_outbound` --
-a method that does not exist anywhere in the real repository (a separate,
-newly confirmed gap, documented in SESSION_TRACKING.md, not fixed here
-since its intended matching semantics aren't evidenced anywhere and
-guessing them risks getting the echo-detection logic wrong). The pause-wiring
-code added by this fix runs identically on both branches -- same call,
-same place in the function, same commit -- so this still proves the real
-fix, just via the one branch that is actually callable today.
+Review fix (round 4, finding #2): the module above used to stop at the
+`personal_empty_audio` branch because `MessageRepository.find_unacknowledged_outbound`
+did not exist anywhere in the real repository, and the text-reply branch
+calls it unconditionally. It is now implemented (repositories/message.py)
+and exercised below by the TEXT-reply branch's two distinct outcomes:
+
+  - a genuine human reply (no matching unacknowledged outbound row for
+    this contact/instance/content) -- creates a new Message row with
+    `sent_by_human=True` and pauses automation, same as the audio branch.
+  - the bot's own delivery echo (an unacknowledged, `is_autopilot_reply`
+    row with the SAME content already sitting in the table, as if this
+    system had just sent it) -- attaches the webhook's `external_id` to
+    THAT existing row, creates no new Message row, and must NOT pause
+    automation (it is not a human event at all). The review's explicit
+    warning -- "não trate todo fromMe como humano" -- is exactly this
+    distinction.
 
 Isolation note: see test_persist_outbound_message_real_execution.py's
 module docstring -- the same `sys.modules` leak risk applies here (even
@@ -210,6 +216,105 @@ async def test_pause_from_the_real_event_actually_blocks_a_stale_queued_send(rou
             )
             await db.commit()
         assert outcome == "suppressed"
+    finally:
+        settings.evolution_personal_instance = original_personal_instance
+
+
+@pytest.mark.asyncio
+async def test_a_genuine_text_reply_with_no_matching_outbound_row_is_captured_as_human(
+    router, real_db,
+):
+    """No row this system sent matches the echoed text -- this must be
+    treated as a real human reply: a new Message row with sent_by_human
+    is created, and automation is paused, exactly like the audio branch."""
+    sessions, Contact, contact_id, owner_id = real_db
+    from utils.config import get_settings
+    settings = get_settings()
+    original_personal_instance = settings.evolution_personal_instance
+    settings.evolution_personal_instance = "dario"
+    try:
+        inbound = SimpleNamespace(
+            phone="+5511988880000", text="Pode vir que eu mesmo respondo daqui",
+            external_id="evt-text-1", timestamp=datetime.now(timezone.utc),
+            instance="dario", media_key=None,
+        )
+        provider = SimpleNamespace(name="evolution")
+        async with sessions() as db:
+            contact = (await db.execute(select(Contact).where(Contact.id == contact_id))).scalar_one()
+            ack = await router._capture_human_reply(db, provider, contact, inbound, "text")
+        assert ack.status == "human_reply_captured"
+
+        Message = sys.modules["models.message"].Message
+        async with sessions() as db:
+            message = (await db.execute(select(Message).where(Message.id == ack.message_id))).scalar_one()
+        assert message.sent_by_human is True
+        assert message.is_autopilot_reply is False
+        assert message.content == inbound.text
+        assert message.external_id == "evt-text-1"
+
+        async with sessions() as db:
+            row = (await db.execute(text(
+                "SELECT paused FROM conversation_controls WHERE contact_id=:cid AND instance=:inst"
+            ), {"cid": contact_id, "inst": "dario"})).mappings().first()
+        assert row is not None and bool(row["paused"]) is True
+    finally:
+        settings.evolution_personal_instance = original_personal_instance
+
+
+@pytest.mark.asyncio
+async def test_the_bots_own_echo_is_not_captured_as_a_human_reply(router, real_db):
+    """Review warning, verbatim: 'não trate todo fromMe como humano'. An
+    unacknowledged, is_autopilot_reply row with the SAME content already
+    in the table (as if jobs/handlers.py's send_whatsapp_text had just
+    sent it) is this system's own delivery echo bouncing back through the
+    webhook -- not a human typing. Must attach the receipt id to THAT
+    row, create no new Message, and must NOT pause automation."""
+    sessions, Contact, contact_id, owner_id = real_db
+    from utils.config import get_settings
+    settings = get_settings()
+    original_personal_instance = settings.evolution_personal_instance
+    settings.evolution_personal_instance = "dario"
+    try:
+        Message = sys.modules["models.message"].Message
+        MessageDirection = sys.modules["models.message"].MessageDirection
+        async with sessions() as db:
+            sent = Message(
+                contact_id=contact_id, direction=MessageDirection.OUTBOUND,
+                content="Claro, posso te ajudar com isso!",
+                is_autopilot_reply=True, whatsapp_instance="dario",
+            )
+            db.add(sent)
+            await db.commit()
+            await db.refresh(sent)
+            sent_id = sent.id
+
+        async with sessions() as db:
+            count_before = (await db.execute(text("SELECT COUNT(*) FROM messages"))).scalar_one()
+
+        inbound = SimpleNamespace(
+            phone="+5511988880000", text="Claro, posso te ajudar com isso!",
+            external_id="evt-echo-1", timestamp=datetime.now(timezone.utc),
+            instance="dario", media_key=None,
+        )
+        provider = SimpleNamespace(name="evolution")
+        async with sessions() as db:
+            contact = (await db.execute(select(Contact).where(Contact.id == contact_id))).scalar_one()
+            ack = await router._capture_human_reply(db, provider, contact, inbound, "text")
+        assert ack.status == "own_echo"
+        assert ack.message_id == sent_id
+
+        async with sessions() as db:
+            count_after = (await db.execute(text("SELECT COUNT(*) FROM messages"))).scalar_one()
+            updated = (await db.execute(select(Message).where(Message.id == sent_id))).scalar_one()
+        assert count_after == count_before, "criou uma linha nova em vez de reutilizar o eco do proprio envio"
+        assert updated.external_id == "evt-echo-1"
+        assert updated.sent_by_human is False
+
+        async with sessions() as db:
+            row = (await db.execute(text(
+                "SELECT paused FROM conversation_controls WHERE contact_id=:cid AND instance=:inst"
+            ), {"cid": contact_id, "inst": "dario"})).mappings().first()
+        assert row is None, "o eco do proprio bot pausou a automacao -- isso nao e um evento humano"
     finally:
         settings.evolution_personal_instance = original_personal_instance
 

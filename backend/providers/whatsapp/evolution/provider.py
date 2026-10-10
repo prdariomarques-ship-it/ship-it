@@ -34,10 +34,11 @@ class EvolutionProvider(WhatsAppProvider):
             f"{self._base_url}/{path}/{instance or self._instance}",
             json_body=body,
             headers=self._headers(),
-            # Review fix: every call through here is a send -- a timed-out
-            # response doesn't mean the message wasn't delivered. See
-            # base.py's _request docstring.
-            retry_on_response_timeout=False,
+            # Review fix: every call through here is a send -- an ambiguous
+            # transport failure (timeout, connection reset, protocol error)
+            # doesn't mean the message wasn't delivered. See base.py's
+            # _request docstring.
+            retry_on_ambiguous_delivery=False,
         )
 
     async def send_text(self, to: str, content: str, instance: str | None = None) -> dict:

@@ -32,6 +32,17 @@ class WhatsAppProviderError(RuntimeError):
     pass
 
 
+# Allow-list of transport failures proven to happen BEFORE any request byte
+# could have reached the provider -- a connection that never opened, or a
+# wait for a free connection from the pool that timed out. Retrying these is
+# always safe: the provider never saw the request. Everything else under
+# httpx.HTTPError (ReadTimeout/WriteTimeout, ReadError/WriteError,
+# RemoteProtocolError, and any future exception type this module doesn't
+# yet know about) is treated as ambiguous by default -- see _request's
+# docstring for why this is an allow-list, not a deny-list.
+_SAFE_TO_RETRY_TRANSPORT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
 def extract_receipt_id(response: object) -> str | None:
     """Best-effort extraction of the provider-assigned message id from a
     send_text/send_image/... response -- `response["key"]["id"]`, the
@@ -191,7 +202,7 @@ class WhatsAppProvider(ABC):
         headers: dict | None = None,
         timeout: float = 30,
         max_attempts: int | None = None,
-        retry_on_response_timeout: bool = True,
+        retry_on_ambiguous_delivery: bool = True,
     ) -> dict:
         """Shared HTTP helper: uniform error translation, retry with
         exponential backoff for transient failures, and availability metrics
@@ -203,20 +214,31 @@ class WhatsAppProvider(ABC):
         frequently by an orchestrator should never block for several seconds
         retrying a gateway that's genuinely down).
 
-        Review fix: `retry_on_response_timeout=False` (set by `_post`, the
-        transport every send_* method goes through) disables retry
-        specifically for `httpx.ReadTimeout`/`WriteTimeout` -- the one
+        Review fix, corrected after an incomplete first attempt:
+        `retry_on_ambiguous_delivery=False` (set by `_post`, the transport
+        every send_* method goes through) disables retry for every
         failure mode where the request may have already reached and been
-        processed by the provider, and we simply never got the response
-        back. `conversation_control`'s commit-before-transport fence (see
+        processed by the provider and we simply never got a usable
+        response back -- not just `ReadTimeout`/`WriteTimeout`
+        (the first version), but also `ReadError`/`WriteError`
+        (a connection reset mid-request/response) and
+        `RemoteProtocolError` (the server closed the connection or spoke
+        invalid HTTP, after we started talking to it). This is an
+        ALLOW-list, not a deny-list, on purpose: `_SAFE_TO_RETRY_TRANSPORT_ERRORS`
+        below names only the failures that happen BEFORE any request
+        byte could plausibly have reached the provider (`ConnectError`,
+        `ConnectTimeout`, `PoolTimeout`) -- everything else under
+        `httpx.HTTPError` (other than a real `HTTPStatusError`, where a
+        response WAS received and its status code tells us definitively
+        what happened) is treated as ambiguous by default, so a future
+        httpx exception type this module doesn't yet know about fails
+        SAFE (no blind retry) instead of failing open.
+
+        `conversation_control`'s commit-before-transport fence (see
         jobs/handlers.py's send_whatsapp_text) only protects against the
         WORKER blindly re-running the whole job; it does nothing about
         THIS layer retrying the HTTP call again inside that same single
-        job execution, which could still double-send. A `ConnectError`/
-        `ConnectTimeout` (the request never left this process) carries no
-        such ambiguity and keeps retrying exactly as before -- this is not
-        a blanket "never retry sends" rule, only the specific case where
-        we genuinely don't know what the provider did with it."""
+        job execution, which could still double-send."""
         from observability.metrics import record_whatsapp_request
 
         settings = get_settings()
@@ -242,11 +264,13 @@ class WhatsAppProvider(ABC):
                 return {"status": "ok"}
             except httpx.HTTPError as exc:
                 last_exc = exc
-                ambiguous_delivery = isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout))
-                if attempt >= max_attempts or (ambiguous_delivery and not retry_on_response_timeout):
-                    if ambiguous_delivery and not retry_on_response_timeout and attempt < max_attempts:
+                ambiguous_delivery = not isinstance(
+                    exc, (httpx.HTTPStatusError,) + _SAFE_TO_RETRY_TRANSPORT_ERRORS
+                )
+                if attempt >= max_attempts or (ambiguous_delivery and not retry_on_ambiguous_delivery):
+                    if ambiguous_delivery and not retry_on_ambiguous_delivery and attempt < max_attempts:
                         logger.error(
-                            "%s provider call (%s %s) timed out waiting for the response -- "
+                            "%s provider call (%s %s) failed with an ambiguous outcome -- "
                             "NOT retrying: the provider may have already processed it, and a "
                             "blind retry here risks sending it twice. Leaving the outcome "
                             "unknown for reconciliation, not asserting success or failure: %s",

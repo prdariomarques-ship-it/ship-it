@@ -300,19 +300,44 @@ _ESCALATING_CATEGORIES = frozenset({"crise", "negocio"})
 
 
 def normalize_text(text: str) -> str:
-    """Lowercase, accent-stripped, whitespace-collapsed (ç -> c, ã -> a...).
+    """Lowercase, accent-stripped (ç -> c, ã -> a...). Horizontal
+    whitespace (spaces/tabs) collapses to a single space; a line break
+    is kept as its own "\\n" character instead of being collapsed away.
 
-    Review fix: a line break becomes a clause break (period) BEFORE
-    whitespace is collapsed -- two sentences split across lines (e.g.
-    "nao estou bem\\nquero morrer", a real crisis message a client might
-    actually send) must not let the first line's negation contaminate the
-    second. Collapsing "\\s+" straight to a single space erased that
-    boundary entirely, with nothing left afterward for _clause_before's
-    clause-break logic to find."""
+    Review fix, corrected after a regression in the first attempt: that
+    version turned every line break into ". " (a literal period) BEFORE
+    collapsing whitespace. That fixed cross-line negation contamination
+    ("nao estou bem\\nquero morrer") but broke the opposite, equally real
+    case: a FIXED multi-word term split across a line by the client's
+    own typing ("quero\\nmorrer", "me\\nmatar") no longer matched at all,
+    because the inserted period landed literally between the two words
+    of the pattern's own "\\s+" and regex only accepts whitespace there,
+    not punctuation.
+
+    The fix that serves both: "\\n" is left in the string, untouched, as
+    its own character.
+      - It still satisfies every multi-word CRISIS_TERMS/pattern's
+        "\\s+" below, since "\\n" IS a whitespace character to `re` --
+        "quero\\nmorrer" keeps matching exactly like "quero morrer".
+      - _CLAUSE_BREAK (below) now lists "\\n" explicitly as its own
+        boundary, so _clause_before/_clause_after still see it and two
+        DIFFERENT statements on two lines still don't contaminate each
+        other.
+    Only runs of space/tab collapse to one space; a run of blank lines
+    collapses to one single "\\n", not one per blank line.
+
+    services/output_safety.py deliberately does NOT reuse this function
+    -- see its own module-level normalize_text for why a leak-detection
+    barrier needs the opposite tradeoff (collapse line breaks away
+    entirely, since a leaked marker split across a line is just as
+    dangerous as one on a single line, and that module has no clause
+    logic to protect in the first place)."""
     decomposed = unicodedata.normalize("NFKD", text or "")
     stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    with_line_breaks_as_clause_breaks = re.sub(r"\n+", ". ", stripped)
-    return re.sub(r"\s+", " ", with_line_breaks_as_clause_breaks.lower()).strip()
+    lowered = stripped.lower()
+    unified_breaks = re.sub(r"\r\n?", "\n", lowered)
+    single_breaks = re.sub(r"[ \t]*\n[ \t\n]*", "\n", unified_breaks)
+    return re.sub(r"[ \t]+", " ", single_breaks).strip()
 
 
 # Exceções restritas ao compartilhamento de endereço.
@@ -391,7 +416,7 @@ def _is_business_separation(normalized: str, hit: re.Match[str]) -> bool:
 #      _CRISIS_TERMS entry that itself starts with a negator is exempt.
 _NEGATORS = {"nao", "nunca", "jamais"}
 _NEGATION_WINDOW_WORDS = 3
-_CLAUSE_BREAK = re.compile(r"[.,;!?:]")
+_CLAUSE_BREAK = re.compile(r"[.,;!?:\n]")
 _COPULA_VERBS = {"e", "eh", "foi", "foram", "sao", "era", "eram", "seja"}
 # Review fix: the original pattern matched ANY copula right after the
 # negator -- "a culpa NAO E nossa" (attribution/ownership, the motivating

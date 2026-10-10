@@ -43,9 +43,28 @@ job's payload literally contained
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
-from twin_risk_gate import normalize_text
+
+def normalize_text(text: str) -> str:
+    """Lowercase, accent-stripped, ALL whitespace (including line breaks)
+    collapsed to a single space.
+
+    Review fix: this used to import orchestrator.twin_risk_gate's
+    normalize_text, which now deliberately PRESERVES a line break as its
+    own clause boundary (needed there for negation-aware crisis
+    detection -- see that module's docstring). This barrier has no
+    clause logic to protect: the patterns below match literal multi-word
+    substrings ("audio enviado pelo proprietario"), and a leaked internal
+    marker or a false "ja leu sua mensagem" claim split across a line
+    break by the model's own formatting is exactly as dangerous as one
+    on a single line. Sharing one function caused a real regression (a
+    marker with an embedded "\\n" passed as safe) -- this module gets its
+    own, simpler normalization instead of carrying that tradeoff."""
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", stripped.lower()).strip()
 
 
 @dataclass(frozen=True)

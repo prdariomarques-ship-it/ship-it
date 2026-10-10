@@ -16,9 +16,22 @@ network -- proving:
   2. This is NOT a blanket "sends never retry" rule: a ConnectError (the
      request never left this process, no delivery ambiguity at all)
      still retries normally through the same send path.
-  3. The `retry_on_response_timeout` flag genuinely controls the
+  3. The `retry_on_ambiguous_delivery` flag genuinely controls the
      behavior -- a caller that opts back into retrying (as some future
      read-only/idempotent call might) still retries on timeout too.
+
+Review fix (second round): the first version of this protection only
+named ReadTimeout/WriteTimeout as "ambiguous". That missed ReadError,
+WriteError (a connection reset mid-request/response -- the request may
+have already reached the provider) and RemoteProtocolError (the server
+closed the connection or spoke invalid HTTP after the exchange started).
+base.py now uses an ALLOW-list of proven-safe-to-retry errors instead
+(ConnectError/ConnectTimeout/PoolTimeout -- failures before any request
+byte could have reached the provider) so these additional cases are
+covered without having to enumerate every ambiguous exception type by
+name. Covered below: ReadError, WriteError, RemoteProtocolError each
+do NOT retry when sending; ConnectTimeout and PoolTimeout (the other two
+allow-listed, pre-send failures) still DO retry, same as ConnectError.
 """
 
 from __future__ import annotations
@@ -185,10 +198,10 @@ async def test_send_through_evolution_provider_still_retries_on_connect_error(
 
 
 @pytest.mark.asyncio
-async def test_retry_on_response_timeout_flag_genuinely_controls_the_behavior(
+async def test_retry_on_ambiguous_delivery_flag_genuinely_controls_the_behavior(
     base_module, fake_transport,
 ):
-    """Calling _request directly with retry_on_response_timeout=True (the
+    """Calling _request directly with retry_on_ambiguous_delivery=True (the
     default, for any future read-only/idempotent caller) must still retry
     on a read timeout -- proving the no-retry behavior above comes from
     the flag _post sets, not a hardcoded blanket rule inside _request."""
@@ -211,10 +224,97 @@ async def test_retry_on_response_timeout_flag_genuinely_controls_the_behavior(
 
         probe = _Probe()
         result = await probe._request(
-            "GET", "http://example.invalid/status", retry_on_response_timeout=True,
+            "GET", "http://example.invalid/status", retry_on_ambiguous_delivery=True,
         )
         assert result == {"key": {"id": "EVT-OK"}}
         assert fake_transport.calls == 3
+    finally:
+        _restore_settings(settings, saved)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda: httpx.ReadError("simulated: connection reset while reading the response"),
+        lambda: httpx.WriteError("simulated: connection reset while writing the request"),
+        lambda: httpx.RemoteProtocolError("simulated: server closed the connection mid-response"),
+    ],
+    ids=["ReadError", "WriteError", "RemoteProtocolError"],
+)
+async def test_send_does_not_retry_on_other_ambiguous_transport_errors(
+    evolution_provider_class, fake_transport, exc_factory,
+):
+    """Review regression (round 4): the first version of this protection
+    only recognized ReadTimeout/WriteTimeout as ambiguous. ReadError,
+    WriteError and RemoteProtocolError are just as ambiguous -- the
+    request may already have reached the provider -- and a blind retry
+    on any of them risks exactly the same double-send."""
+    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
+    settings.evolution_base_url = "http://example.invalid"
+    settings.evolution_api_key = ""
+    settings.evolution_instance = "dario"
+    fake_transport.outcomes = [exc_factory()]
+    try:
+        provider = evolution_provider_class()
+        with pytest.raises(Exception):
+            await provider.send_text("+5511999990000", "mensagem de teste")
+        assert fake_transport.calls == 1, "retentou o POST apos um erro ambiguo de transporte -- risco de enviar a mensagem duas vezes"
+    finally:
+        _restore_settings(settings, saved)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda: httpx.ConnectTimeout("simulated: could not establish the connection in time"),
+        lambda: httpx.PoolTimeout("simulated: no free connection became available in time"),
+    ],
+    ids=["ConnectTimeout", "PoolTimeout"],
+)
+async def test_send_still_retries_on_other_safe_to_retry_transport_errors(
+    evolution_provider_class, fake_transport, exc_factory,
+):
+    """The allow-list covers more than ConnectError: ConnectTimeout and
+    PoolTimeout are also failures that happen before any request byte
+    could have reached the provider, so they keep retrying normally."""
+    settings, saved = _settings_for(sys.modules["providers.whatsapp.base"], max_attempts=3)
+    settings.evolution_base_url = "http://example.invalid"
+    settings.evolution_api_key = ""
+    settings.evolution_instance = "dario"
+    fake_transport.outcomes = [exc_factory(), exc_factory(), _FakeResponse(200)]
+    try:
+        provider = evolution_provider_class()
+        result = await provider.send_text("+5511999990000", "mensagem de teste")
+        assert result == {"key": {"id": "EVT-OK"}}
+        assert fake_transport.calls == 3, "nao tentou de novo apos um erro seguro de transporte -- isso nao deveria ter sido bloqueado"
+    finally:
+        _restore_settings(settings, saved)
+
+
+@pytest.mark.asyncio
+async def test_send_does_not_retry_on_http_status_error_passed_through_raise_for_status(
+    evolution_provider_class, fake_transport,
+):
+    """A real HTTPStatusError means a response WAS received -- there is no
+    delivery ambiguity, the provider told us definitively what happened.
+    It must not be retried as if it were ambiguous (`_post` disables
+    retry-on-ambiguous-delivery, but a definite rejection is a different
+    thing and the max_attempts=1 here isolates that this is governed by
+    attempt-exhaustion, not mistakenly treated as a retryable case)."""
+    settings, saved = _settings_for(
+        sys.modules["providers.whatsapp.base"], max_attempts=1,
+    )
+    settings.evolution_base_url = "http://example.invalid"
+    settings.evolution_api_key = ""
+    settings.evolution_instance = "dario"
+    fake_transport.outcomes = [_FakeResponse(500)]
+    try:
+        provider = evolution_provider_class()
+        with pytest.raises(Exception):
+            await provider.send_text("+5511999990000", "mensagem de teste")
+        assert fake_transport.calls == 1
     finally:
         _restore_settings(settings, saved)
 

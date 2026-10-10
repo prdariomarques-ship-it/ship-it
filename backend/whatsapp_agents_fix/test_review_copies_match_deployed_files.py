@@ -35,20 +35,16 @@ def test_twin_risk_gate_harness_copy_matches_deployed_file_exactly():
     assert deployed == harness
 
 
-def test_output_safety_harness_copy_matches_deployed_file_except_the_documented_import_line():
-    # Review fix (E): the deployed file now imports twin_risk_gate
-    # package-qualified (orchestrator.twin_risk_gate), matching the real
-    # app's convention -- the harness root copy stays flat for the same
-    # Python import-collision reason documented in conftest.py, same
-    # pattern as incident_dedup.py below.
+def test_output_safety_harness_copy_matches_deployed_file_exactly():
+    # Review fix (regression round): output_safety.py no longer imports
+    # anything from orchestrator.twin_risk_gate at all -- it has its own,
+    # deliberately separate normalize_text (see its module docstring for
+    # why sharing one with twin_risk_gate caused a real regression). No
+    # import-style difference is left to normalize; this is back to a
+    # plain exact-match comparison, same as before (E) ever existed.
     deployed = _read(BACKEND_ROOT / "services" / "output_safety.py")
     harness = _read(HERE / "output_safety.py")
-    normalized_deployed = _strip_import_line(
-        deployed,
-        flat_import="from twin_risk_gate import normalize_text",
-        qualified_import="from orchestrator.twin_risk_gate import normalize_text",
-    )
-    assert normalized_deployed == harness
+    assert deployed == harness
 
 
 def test_incident_dedup_harness_copy_matches_deployed_file_except_the_documented_import_line():

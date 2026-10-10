@@ -207,6 +207,36 @@ def test_quero_morrer_nao_e_facil_still_escalates():
     assert result.snippet == "quero morrer"
 
 
+def test_fixed_term_split_across_a_line_break_still_matches():
+    # Regression from the FIRST attempt at the line-break fix above: that
+    # version turned every "\n" into a literal ". " before collapsing
+    # whitespace, which fixed cross-clause contamination but broke this
+    # -- a fixed two-word crisis term split across a line by the
+    # client's own typing must still match as one term, the same as if
+    # it were written with an ordinary space.
+    result = is_high_risk_for_impersonation(1, "quero\nmorrer", [])
+    assert result is not None
+    assert result.category == "crise"
+
+
+def test_me_matar_split_across_a_line_break_still_matches():
+    result = is_high_risk_for_impersonation(1, "me\nmatar", [])
+    assert result is not None
+    assert result.category == "crise"
+
+
+def test_nao_quero_mais_viver_split_across_a_line_break_still_matches():
+    result = is_high_risk_for_impersonation(1, "nao quero mais\nviver", [])
+    assert result is not None
+    assert result.category == "crise"
+
+
+def test_sem_esperanca_split_across_a_line_break_still_matches():
+    result = is_high_risk_for_impersonation(1, "sem\nesperanca", [])
+    assert result is not None
+    assert result.category == "crise"
+
+
 def test_business_sale_still_escalates():
     result = is_high_risk_for_impersonation(1, "quero vender a loja", [])
     assert result is not None

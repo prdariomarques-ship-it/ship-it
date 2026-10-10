@@ -65,6 +65,24 @@ def test_blocks_dario_leu_sua_mensagem_variant():
     assert result.reason == "unverifiable_read_claim"
 
 
+def test_blocks_internal_marker_split_across_a_line_break():
+    # Review regression: when twin_risk_gate's line-break fix briefly
+    # shared its normalization with this module, a line break inside the
+    # marker (plausible if a model/template wraps text) made this pass
+    # as safe -- the leak is exactly as dangerous either way.
+    reply = "[Áudio enviado\npelo proprietário desta conta nesta conversa]"
+    result = output_safe(reply)
+    assert result.safe is False
+    assert result.reason == "internal_marker"
+
+
+def test_blocks_read_claim_split_across_a_line_break():
+    reply = "Dario já leu\nsua mensagem"
+    result = output_safe(reply)
+    assert result.safe is False
+    assert result.reason == "unverifiable_read_claim"
+
+
 def test_does_not_block_unrelated_use_of_viu():
     result = output_safe("Já viu nosso catálogo novo?")
     assert result.safe is True

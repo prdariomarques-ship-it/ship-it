@@ -13,3 +13,6 @@ class MessageRepository:
 
     async def get_latest_inbound(self, contact_id, instance=None):
         raise NotImplementedError("MessageRepository.get_latest_inbound was reached")
+
+    async def find_unacknowledged_outbound(self, contact_id, text, instance=None):
+        raise NotImplementedError("MessageRepository.find_unacknowledged_outbound was reached -- load the real repositories.message module for any test exercising webhooks/router.py's text-reply/echo path")

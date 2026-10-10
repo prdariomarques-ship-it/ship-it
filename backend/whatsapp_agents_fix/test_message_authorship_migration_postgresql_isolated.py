@@ -1,6 +1,6 @@
 """Real PostgreSQL 16 (local to this sandbox), proving e610080003's
-upgrade/downgrade behavior against the four scenarios the review asked
-for -- not just read as source, actually run against a real database:
+upgrade/downgrade behavior against the scenarios the review asked for --
+not just read as source, actually run against a real database:
 
   1. A database WITHOUT the three columns: upgrade() actually adds them.
   2. A database WITH the columns and real historical data (simulating
@@ -13,6 +13,13 @@ for -- not just read as source, actually run against a real database:
   4. Downgrade on a database where the columns exist but carry no data
      (the genuinely safe case -- a fresh DB that just ran upgrade()):
      succeeds and actually removes them.
+  5. Review fix (round 2): a database with the columns PRE-EXISTING (not
+     created by this migration's upgrade()) and a non-empty table, but
+     every row carries only the DEFAULT values (false/false/null) -- the
+     exact gap the first version of the downgrade check missed, since
+     "no non-default data" was being treated as proof of safety. Must
+     still refuse: the columns' existence (even with no "real" data) is
+     not evidence that upgrade() created them here.
 
 Opt-in only, same pattern as test_dedup_key_postgresql_isolated.py: set
 WHATSAPP_DEDUP_PG_ADMIN_URL before running; without it, every test here is
@@ -189,6 +196,49 @@ async def test_downgrade_refuses_and_preserves_real_data(isolated_db):
             ))).fetchone()
         assert {"sent_by_human", "is_autopilot_reply", "whatsapp_instance"} <= cols
         assert row == ("historico real do proprietario", True, "dario")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_downgrade_refuses_on_preexisting_columns_with_only_default_values(isolated_db):
+    """Review fix (round 2): the first version of this protection checked
+    only whether the columns held non-default data -- it missed a
+    pre-existing, non-empty table whose authorship columns happen to
+    carry nothing but the defaults (no owner reply or autopilot send has
+    happened yet in this environment). That is NOT proof upgrade() created
+    them here. Must refuse even though every value is false/false/null."""
+    dbname = isolated_db
+    engine = create_async_engine(_db_url(dbname))
+    migration = _load_migration()
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "CREATE TABLE messages (id serial primary key, content text, "
+                "sent_by_human boolean not null default false, "
+                "is_autopilot_reply boolean not null default false, "
+                "whatsapp_instance varchar(128))"
+            ))
+            await conn.execute(text(
+                "INSERT INTO messages (content) VALUES "
+                "('mensagem anterior a esta migracao'), "
+                "('outra mensagem anterior, sem autoria registrada')"
+            ))
+            await conn.run_sync(lambda c: _run_sync_migration(c, migration.upgrade))  # no-op, columns already present
+
+        with pytest.raises(Exception):
+            async with engine.begin() as conn:
+                await conn.run_sync(lambda c: _run_sync_migration(c, migration.downgrade))
+
+        async with engine.connect() as conn:
+            cols = {row[0] for row in (await conn.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='messages'"
+            ))).fetchall()}
+            rows = (await conn.execute(text(
+                "SELECT content FROM messages ORDER BY id"
+            ))).fetchall()
+        assert {"sent_by_human", "is_autopilot_reply", "whatsapp_instance"} <= cols
+        assert len(rows) == 2
     finally:
         await engine.dispose()
 
