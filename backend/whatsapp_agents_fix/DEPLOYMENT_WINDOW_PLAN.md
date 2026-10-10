@@ -39,16 +39,24 @@ no fluxo financeiro/Telegram.
   rollback em tempo real — execução passo a passo, cada comando
   confirmado antes do próximo.
 - **Fase 4 (rollback)**: critérios e comandos preparados, incluindo o
-  aviso de que a migração mais recente bloqueia `alembic downgrade` por
-  design (requer `DROP TABLE` manual, nunca automático, e só depois do
-  rollback de código).
+  aviso de que a migração mais recente bloqueia `alembic downgrade`
+  sempre que há dado real a perder (requer `DROP TABLE` manual, nunca
+  automático, e só depois do rollback de código).
 
 ## Avisos importantes preservados do plano completo
 
-- A migração mais recente (`e610080002`) **bloqueia downgrade
-  automático** de propósito, para nunca perder auditoria de entregas já
-  resolvidas — qualquer reversão de schema é manual, documentada, e só
-  depois de revertido o código.
+- Revisão (rodada 4, "rode a CI completa"): `e610080002` bloqueava
+  downgrade de forma **incondicional**, o que tornava o passo de CI
+  "Migrations apply and roll back" (que roda `alembic downgrade base`
+  contra um banco de teste em branco) impossível de passar para sempre,
+  independente de qualquer outra coisa nesta PR. Corrigido para a mesma
+  política já usada em `e610080003`: recusa (levanta erro) só quando há
+  dado real (resultado de entrega fechado, metadado de auditoria) a
+  perder; um banco vazio/novo (CI, ambiente novo) passa limpo. **Em
+  produção isso não muda nada na prática** — produção já vai ter dado
+  real nessas colunas, então o bloqueio automático continua se aplicando
+  lá exatamente como antes; qualquer reversão de schema em produção
+  continua manual, documentada, e só depois de revertido o código.
 - O arquivo de Compose confirmado pina a imagem por **digest**, não por
   tag — a atualização pós-implantação preserva essa convenção.
 - Não há confirmação de que esse arquivo de Compose não é regenerado
