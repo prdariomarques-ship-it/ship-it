@@ -5,7 +5,7 @@
 > declaração de implantação — implantação só ocorre com janela aprovada e
 > comprovação de rollback.
 
-Última atualização: 2026-10-09.
+Última atualização: 2026-10-10.
 
 ---
 
@@ -113,19 +113,71 @@ em `agents/tools/flowcore_tools.py`).
 - **G. (novo) `EvolutionProvider.send_text`/`send_image`/etc. não aceitavam
   `instance=`** — ✅ corrigido, mesmo que `handlers.py` já chamava.
 
+### Revisão externa, 2ª rodada (2026-10-10) — SHA inicial `bac6df2` → SHA final `a137aff`
+
+> Esta rodada partiu exatamente do commit revisado (`bac6df23ab0b9a...`, HEAD
+> confirmado antes de editar) e tratou as 5 prioridades indicadas, nessa ordem.
+
+- **Prioridade 1 — downgrade destrutivo da migração `e610080003`** ✅ corrigido
+  e testado em PostgreSQL real (4 cenários pedidos: upgrade sem as colunas,
+  upgrade como no-op com dados reais, downgrade recusando e preservando dados
+  reais, downgrade funcionando limpo quando não há dados). `downgrade()` agora
+  recusa (levanta erro) sempre que as 3 colunas carregam qualquer dado real —
+  existência da coluna nunca prova que esta migração a criou.
+- **Prioridade 2 — pausa humana pelo webhook real** ✅ corrigido e testado de
+  ponta a ponta. Achado novo, mais profundo que o da rodada anterior:
+  `InboundMessage` não tinha campo `from_me`, **e os dois providers
+  descartavam todo evento `fromMe=True` antes do router.py sequer ver** —
+  mesmo com o router já esperando `inbound.from_me` para decidir entre
+  captura humana e fluxo normal. Ou seja, o caminho de captura de resposta do
+  proprietário era código morto, não só "pausa não conectada". Corrigido nos
+  dois providers + `InboundMessage`. Teste novo parte de um payload JSON real
+  da Evolution → parser real → `whatsapp_webhook` real (função da rota, não
+  só `_capture_human_reply` direto) → pausa real → revisão incrementada →
+  `claim_send` antigo bloqueado. Mais um teste de webhook duplicado
+  (idempotência).
+- **Prioridade 3 — reenvio cego em timeout de resposta** ✅ corrigido e
+  testado com transporte HTTP determinístico (sem rede real). O commit antes
+  do transporte (rodada anterior) só protege contra o *worker* repetir o job
+  inteiro depois de um crash — não protege contra a própria camada HTTP
+  tentando de novo *dentro* da mesma execução depois que o provedor aceitou o
+  envio e a resposta deu timeout. `_request` agora distingue
+  `ReadTimeout`/`WriteTimeout` (ambíguo — a mensagem pode já ter sido
+  entregue) de `ConnectError`/`ConnectTimeout` (nunca saiu daqui, sem
+  ambiguidade) — só o primeiro caso deixa de repetir.
+- **Prioridade 4 — lint/CI** — sem mudança: ainda só a mesma falha
+  pré-existente e não relacionada (`agents/tools/flowcore_tools.py:25`).
+  114/114 testes passam, **0 pulados** nesta rodada (rodados com PostgreSQL
+  local real, não pulados por falta de banco).
+- **Prioridade 5 (parcial) — 3 falsos negativos reais em `twin_risk_gate.py`**
+  ✅ corrigidos: `:` não era reconhecido como quebra de cláusula ("não estou
+  bem: quero morrer" deixava a negação da primeira frase cancelar o sinal
+  real da segunda); quebra de linha era colapsada num espaço antes de
+  qualquer lógica de cláusula rodar (mesmo problema, variante com `\n`); e o
+  padrão de "negação depois" aceitava qualquer cópula depois do negador
+  ("quero morrer não é fácil" era lido como "a culpa não é nossa" apesar de
+  significarem coisas opostas) — restringido para exigir complemento de
+  atribuição/posse. Abstenção/tom do StoreAgent continuam bloqueados (ver
+  abaixo). Dupla negação ("não quero morrer, mas às vezes penso") foi
+  verificada e é genuinamente ambígua — não forcei uma resposta específica,
+  como a revisão pediu.
+
 ### Gaps confirmados, NÃO corrigidos (sem evidência suficiente para corrigir com segurança)
 - `MessageRepository.find_unacknowledged_outbound` — chamado por
   `_capture_human_reply`, **não existe** em nenhum lugar do repositório.
   Detecta eco da própria mensagem enviada por nós; a semântica exata de
   casamento não está evidenciada em lugar nenhum — implementar às cegas
   arriscaria errar a lógica de detecção de eco. Bloqueia o caminho de texto
-  (não-áudio) de `_capture_human_reply` inteiramente.
+  (não-áudio) de `_capture_human_reply` inteiramente (o caminho de áudio do
+  proprietário, usado nos testes novos, não passa por aqui).
 - `download_media` — chamado por `router.py`, **não existe** em nenhum
   provider nem na interface base. Áudio do proprietário não pode ser
   transcrito/baixado hoje.
 - Generalização do fencing de pausa + detecção/alerta de automação para
   B2B/Azusa/Loja — ainda só existe de verdade no fluxo do Twin (ver seção
   acima sobre loop entre bots).
+- `utils/config.py` ainda divergente da produção — bloqueado no conteúdo real
+  da VPS (ver Bloqueios).
 
 ### Requisitos de produto registrados (ainda não implementados — StoreAgent)
 - **Abster-se quando não sabe:** não é silêncio — enviar uma mensagem
@@ -142,16 +194,6 @@ em `agents/tools/flowcore_tools.py`).
 - Pendente do conteúdo real de `store_agent.py`/`planner.py`/`descriptions.py`/
   `orchestrator/context.py` para aplicar (e para a correção de autoria
   Flávio/Micael acima) — pedido enviado à VPS, retorno incompleto até agora.
-
-### Requisitos de produto registrados (ainda não implementados — StoreAgent)
-- **Abster-se quando não sabe:** avisar o cliente ("um momento, vou
-  verificar") + registrar em log para revisão humana depois — nunca inventar
-  preço/estoque/disponibilidade, e nunca ficar em silêncio total.
-- **Tom por segmento (Marquescolor):** respostas mais curtas e informais
-  para o público de oficina/pintor (tinta automotiva: PU, verniz,
-  poliéster — público mais rústico). Tinta imobiliária parece ser um
-  segmento menor/diferente, tom a confirmar.
-- Pendente do conteúdo real de `store_agent.py`/`planner.py` para aplicar.
 
 ---
 
