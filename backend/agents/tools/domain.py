@@ -331,6 +331,37 @@ async def _get_store_hours(context: ToolContext, date: str | None = None) -> str
         return ok(erro="Informe a data como AAAA-MM-DD ou deixe em branco para consultar agora.")
 
 
+async def _report_unknown(context: ToolContext, question: str, reason: str = "") -> str:
+    """O agente não tem informação confiável para responder: registra no Dario OS (aba de logs) para o dono revisar e AJUSTAR
+    depois, e o handler da mensagem recebida NÃO envia resposta ao cliente neste turno (ver jobs/handlers.py)."""
+    from services.audit import record_log
+
+    await record_log(
+        context.db, source="store_agent:unknown", level="warning",
+        message="Agente sem informação confiável: não respondeu ao cliente; aguardando revisão",
+        payload={"contact_id": context.contact_id, "question": str(question)[:300], "reason": str(reason)[:300]},
+    )
+    return ok(registered=True, instruction="Não envie nenhuma resposta ao cliente. Encerre o turno sem texto.")
+
+
+report_unknown_tool = Tool(
+    name="report_unknown",
+    description=(
+        "Use quando NÃO houver informação confiável para responder (ferramenta sem resultado, assunto fora do catálogo/serviços, "
+        "política ou prazo desconhecido, pergunta que exige decisão da equipe). Registra a lacuna para o dono revisar e NÃO "
+        "responde ao cliente. Prefira esta ferramenta a adivinhar ou prometer algo."
+    ),
+    handler=_report_unknown,
+    parameters={
+        "type": "object",
+        "properties": {
+            "question": {"type": "string", "description": "O que o cliente perguntou/pediu, resumido."},
+            "reason": {"type": "string", "description": "Por que não há resposta segura (ex.: produto fora do catálogo)."},
+        },
+        "required": ["question"],
+    },
+)
+
 get_store_hours_tool = Tool(
     name="get_store_hours",
     description=(

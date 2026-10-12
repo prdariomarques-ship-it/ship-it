@@ -12,6 +12,7 @@ from agents.tools.domain import (
     create_quote_tool,
     get_store_hours_tool,
     list_products_tool,
+    report_unknown_tool,
     list_store_customers_tool,
     record_order_tool,
     search_products_tool,
@@ -70,6 +71,12 @@ class StoreAgent(BaseAgent):
             "(horario_confirmado_pela_equipe=false), diga ao cliente que o horário ainda não foi confirmado pela "
             "equipe e sugira confirmar antes de ir à loja. Consulta por data informa só o horário do dia, não "
             "se está aberto agora.\n\n"
+            "Quando você NÃO tiver informação confiável (a ferramenta não trouxe resultado, o assunto está fora do "
+            "catálogo/serviços, ou a resposta depende de decisão da equipe), é melhor NÃO responder: chame "
+            "report_unknown e encerre sem texto. Não adivinhe, não prometa e não improvise. O dono revisa o registro "
+            "e ajusta depois.\n\n"
+            "Não se apresente como assistente/robô a cada mensagem: apresente-se só no primeiro contato da conversa "
+            "ou se o cliente perguntar.\n\n"
             "Se um produto não existir no catálogo ou o estoque for insuficiente, "
             "diga isso claramente ao cliente em vez de prometer o que não pode "
             "cumprir."
@@ -84,6 +91,7 @@ class StoreAgent(BaseAgent):
             list_products_tool,
             search_products_tool,
             get_store_hours_tool,
+            report_unknown_tool,
             create_quote_tool,
             record_order_tool,
             find_contact_tool,

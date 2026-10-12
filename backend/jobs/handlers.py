@@ -1,6 +1,7 @@
 """Built-in job handlers."""
 
 import functools
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -402,6 +403,48 @@ async def trigger_workflow(db: AsyncSession, payload: dict) -> None:
     )
 
 
+async def _conversation_paused(db: AsyncSession, contact_id: int, instance: str) -> bool:
+    """Conversa em atendimento humano (o dono ou a equipe respondeu pelo próprio aparelho): NENHUM agente age, nem gera resposta
+    nem chama ferramentas. A pausa também é conferida no envio (reserve_plain_send); esta checagem evita o trabalho e os efeitos
+    colaterais de gerar uma resposta que não será enviada."""
+    if not instance:
+        return False
+    from services import conversation_control
+
+    return bool((await conversation_control.snapshot(db, contact_id, instance))["paused"])
+
+
+_SELF_INTRO = re.compile(
+    r"^\s*(?:(?:ol[aá]|oi|bom dia|boa tarde|boa noite)[!,.]?\s*)?(?:aqui\s+[ée]|eu\s+sou|sou)\s+(?:o|a|um|uma)?\s*"
+    r"(?:assistente|atendente|rob[oô]|bot)\b[^.!?\n]*[.!?]\s*",
+    re.I,
+)
+
+
+async def _drop_repeated_intro(db: AsyncSession, settings, contact_id: int, instance: str, reply: str) -> str:
+    """Tira a frase de apresentação ("Aqui é o assistente virtual…") do INÍCIO da resposta quando o bot já falou com este contato
+    nas últimas `store_intro_suppress_hours` horas. Só mexe nessa frase inicial e só se sobrar texto."""
+    from datetime import datetime, timedelta, timezone
+
+    hours = int(getattr(settings, "store_intro_suppress_hours", 0) or 0)
+    if hours <= 0:
+        return reply
+    match = _SELF_INTRO.match(reply or "")
+    if not match or not reply[match.end():].strip():
+        return reply
+    from sqlalchemy import select
+
+    from models.message import Message
+
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    already = await db.scalar(
+        select(Message.id).where(
+            Message.contact_id == contact_id, Message.direction == MessageDirection.OUTBOUND, Message.created_at >= since,
+        ).limit(1)
+    )
+    return reply[match.end():].lstrip() if already is not None else reply
+
+
 def _message_too_old(settings, message) -> bool:
     """Mensagem recebida há mais que `auto_reply_max_message_age_seconds` (0 = desligado). Sem data confiável, não bloqueia."""
     from datetime import datetime, timezone
@@ -525,6 +568,9 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
         if getattr(message.media_type, "value", message.media_type) != "text":
             logger.info("Extra WhatsApp: somente texto nesta etapa")
             return
+        if await _conversation_paused(db, contact_id, instance):
+            logger.info("Extra WhatsApp: conversa em atendimento humano; agente não age (instância %s)", instance)
+            return
         if _message_too_old(settings, message):
             logger.info("Extra WhatsApp: mensagem antiga demais; sem resposta automática (instância %s)", instance)
             return
@@ -570,6 +616,9 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
                 "instance": instance,
             })
             return
+        if await _conversation_paused(db, contact_id, instance):
+            logger.info("Loja: conversa em atendimento humano; agente não age (contato %s)", contact_id)
+            return
         if _message_too_old(settings, message):
             logger.info("Loja: mensagem antiga demais; sem resposta automática (contato %s)", contact_id)
             return
@@ -600,6 +649,14 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
                 agent_name="store",
             )
             reply = result.reply
+            if any(step.tool == "report_unknown" and step.status == "ok" for step in result.steps):
+                # Sem informação confiável: o agente registrou a lacuna (aba de logs do Dario OS) e NÃO responde ao cliente.
+                logger.info("Loja: agente sem informação confiável; resposta suprimida (contato %s)", contact_id)
+                return
+            reply = await _drop_repeated_intro(db, settings, contact_id, instance, reply)
+    elif await _conversation_paused(db, contact_id, instance):
+        logger.info("Pipeline: conversa em atendimento humano; agente não age (contato %s)", contact_id)
+        return
     elif _message_too_old(settings, message):
         logger.info("Pipeline/Twin: mensagem antiga demais; sem resposta automática (contato %s)", contact_id)
         return

@@ -359,6 +359,9 @@ class Settings(BaseSettings):
     # mensagem velha como se fosse de agora é pior que silêncio. 0 = desligado (padrão até o dono decidir o limiar). Um pedido de
     # PARAR/recusa antigo continua sendo honrado (é gravado antes desta checagem).
     auto_reply_max_message_age_seconds: int = 0
+    # A frase "Aqui é o assistente virtual…" no início de uma resposta é removida se o bot já falou com o contato nesta janela (horas).
+    # 0 = desligado. Mensagens PROATIVAS (acompanhamentos) e o aviso de voz sintética não são afetados.
+    store_intro_suppress_hours: int = 12
     store_voice_max_job_age_seconds: int = 600  # a resposta de voz de uma conversa que já andou é descartada
     store_voice_max_per_contact_per_day: int = 3
     store_voice_disclosure_days: int = 7  # reapresenta o aviso de voz sintética se passou mais que isso
