@@ -187,3 +187,40 @@ async def test_guard_roda_sob_a_trava_e_enxerga_a_recusa_gravada_antes(pg):
     assert pg.text.calls == []
     async with pg.sessions() as db:
         assert (await db.scalars(select(StoreFollowup))).one().status == "cancelled"
+
+
+async def test_dois_acompanhamentos_do_mesmo_contato_em_paralelo_geram_no_maximo_um_envio(pg, monkeypatch):
+    """Ocorrências DIFERENTES do mesmo contato, processadas por duas sessões ao mesmo tempo: o intervalo mínimo entre contatos
+    proativos continua valendo no envio (guard sob a trava da conversa): no máximo UMA chamada ao provedor."""
+    async with pg.sessions() as db:
+        created = NOW - timedelta(hours=6)
+        customer_id = (await db.scalars(select(StoreCustomer.id))).one()
+        db.add(StoreQuote(id="ZZZ999YYY888", contact_id=pg.contact_id, customer_id=customer_id, total=900,
+                          items=[dict(sku="TL18", name="Tinta Látex Branca 18L", unit="lata_18L", quantity=1, unit_price="450.00", line_total="450.00")],
+                          expires_at=created + timedelta(minutes=30), confirmed_at=None, created_at=created))
+        await db.commit()
+        await sf.plan_quote_resumes(db, now=NOW, apply=True)
+        assert len((await db.scalars(select(StoreFollowup))).all()) == 2
+    async with pg.sessions() as db:
+        ids = [f.id for f in (await db.scalars(select(StoreFollowup).order_by(StoreFollowup.id))).all()]
+    barrier = asyncio.Barrier(2)
+    original = sf._revalidate
+
+    async def after_select_wait(db, fu, now, s):
+        out = await original(db, fu, now, s)              # as duas revalidações terminam ANTES de qualquer uma enfileirar
+        await asyncio.wait_for(barrier.wait(), 10)
+        return out
+    monkeypatch.setattr(sf, "_revalidate", after_select_wait)
+
+    async def one(fid):
+        async with pg.sessions() as db:
+            return await sf.run_due(db, now=NOW, apply=True, followup_ids=[fid])
+    results = await asyncio.gather(one(ids[0]), one(ids[1]))
+    assert sorted(e["action"] for r in results for e in r) == ["queued", "queued"]      # a corrida de fato aconteceu: dois jobs
+    monkeypatch.setattr(sf, "_revalidate", original)
+    for _ in range(6):
+        await JobWorker().run_once()
+    assert len(pg.text.calls) == 1                         # o guard sob a trava deixa passar só um
+    async with pg.sessions() as db:
+        statuses = sorted(f.status for f in (await db.scalars(select(StoreFollowup))).all())
+    assert statuses == ["cancelled", "queued"], statuses

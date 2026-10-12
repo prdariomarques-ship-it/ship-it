@@ -387,16 +387,18 @@ async def _revalidate(db: AsyncSession, fu: StoreFollowup, now: datetime, s: Set
     return await _prepare_text(db, fu, customer)
 
 
-async def run_due(db: AsyncSession, *, now: datetime | None = None, apply: bool = False, limit: int | None = None) -> list[dict]:
+async def run_due(
+    db: AsyncSession, *, now: datetime | None = None, apply: bool = False, limit: int | None = None, followup_ids: list[int] | None = None,
+) -> list[dict]:
     s, now = get_settings(), now or datetime.now(timezone.utc)
     if apply and not s.store_followups_enabled:
         raise FollowupsDisabled("STORE_FOLLOWUPS_ENABLED=false: acompanhamentos desligados (use a simulação)")
     if apply and not s.store_hours_confirmed:
         raise FollowupsDisabled("STORE_HOURS_CONFIRMED=false: o horário da loja ainda não foi confirmado pela equipe (use a simulação)")
-    due = (await db.scalars(
-        select(StoreFollowup).where(StoreFollowup.status == "scheduled", StoreFollowup.due_at <= now)
-        .order_by(StoreFollowup.due_at, StoreFollowup.id).limit(limit or s.store_followup_scan_limit)
-    )).all()
+    query = select(StoreFollowup).where(StoreFollowup.status == "scheduled", StoreFollowup.due_at <= now)
+    if followup_ids is not None:  # operador (ou teste) restringe a lote conhecido
+        query = query.where(StoreFollowup.id.in_(followup_ids))
+    due = (await db.scalars(query.order_by(StoreFollowup.due_at, StoreFollowup.id).limit(limit or s.store_followup_scan_limit))).all()
     report = []
     for fu in due:
         entry: dict = {"followup_id": fu.id, "kind": fu.kind, "action": None, "reason": None}

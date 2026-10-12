@@ -1,50 +1,41 @@
-# Quadro único das frentes (candidatas isoladas)
+# Quadro único — Plano mestre de 12/10/2026 (candidata isolada)
 
-Atualizado em 2026-10-12. Ramo: `feat/vendedor-ativo-voz` (base `5372c27` = `chore/next-16.4-security`). **Nada aqui está implantado**; implantação continua dependendo das verificações e aprovações de produção.
-Legenda: ✅ feito e testado na candidata · 🟡 feito com ressalva · ⛔ bloqueio concreto (isolado; o resto segue) · ⏳ não iniciado (com o motivo).
-Código/commit: hashes são do ramo; "este lote" = commit `feat(agents+voz): …` (ver `git log --grep "este lote"` ou `git log -- <arquivo>`).
+Ramo `feat/vendedor-ativo-voz` (base `5372c27`). **Nada implantado.** Estados permitidos: a investigar · defeito comprovado · implementado sem execução · **testado pelo autor** · revisado estaticamente · validado na base integrada · implantado e verificado. "Testado pelo autor" = SQLite/PostgreSQL descartável, transporte e motor simulados; **não** significa funcionando em produção.
+Commits: `ead6af7`…`7198e7d` (série entregue), `7b221b9` (correções do parecer), `ac52203` (guarda de mensagem antiga, painel, quadro), e o commit deste quadro (`git log -- docs/QUADRO_FRENTES.md`).
+Evidência nova desta rodada: pacote `backend/whatsapp_agents_fix` (PR #63) **153 passed** com PostgreSQL 16 descartável (inclui `alembic upgrade head` → `downgrade base` na cadeia atual, cabeça única `c8f3a1d27b40`); suíte do backend 1461 passed/5 skipped; `voice-service` 65 passed/1 skipped; PG de concorrência 6 passed. Resultados do autor, não reproduzidos por terceiros.
 
-## Frente 1 — Agentes existentes (Loja, Twin pessoal, B2B, Azusa; separados)
+| ID | Frente | Pendência | Estado | Arquivo/commit | Teste e resultado | Bloqueio concreto | Próxima ação |
+|---|---|---|---|---|---|---|---|
+| A01 | Agentes | Autoria/nomes (Flávio/Micael); eco ≠ humano | testado pelo autor (captura `fromMe`/recibos/flags da PR #63); **incidente: a investigar** | `jobs/handlers.py`, `services/conversation_control.py`, `models/message.py` (base `5372c27`) | `whatsapp_agents_fix/test_human_reply_pauses_automation.py`, `test_persist_outbound_message_real_execution.py` — passam | Faltam `planner.py`, `store_agent.py`, `descriptions.py`, `context.py`, `utils/config.py` **de produção** para localizar a origem dos nomes | Quando chegarem: teste com dois nomes distintos; até lá, nenhuma afirmação sobre o agente real |
+| A02 | Agentes | Humano, pausa e mensagens antigas | testado pelo autor | pausa: `reserve_plain_send` (PR #63); mensagem antiga: `AUTO_REPLY_MAX_MESSAGE_AGE_SECONDS` (`ac52203`); `reserve_plain_send(guard=)` (`7b221b9`) | `test_pause_fencing.py`, `test_message_age_guard.py` (7, handler real, 4 fluxos) | Limiar de idade é decisão do dono (padrão 0 = desligado); retomar (`resume`) não barra envio antigo por revisão (só o Twin) | Decidir limiar; avaliar cerca de revisão para envios comuns |
+| A03 | Agentes | Informação desconhecida/catálogo | a investigar | — | — | Prompt/ferramentas de produção do agente da loja não coletados | Escrever os 6 cenários do plano contra o `StoreAgent` da candidata |
+| A04 | Agentes | "sem crise" e negações | testado pelo autor | `whatsapp_agents_fix/twin_risk_gate.py` (PR #63) | `test_twin_risk_gate.py` passa (parte dos 153) | Casos ambíguos seguem como limitação registrada | Manter; não generalizar "sem" |
+| A05 | Agentes | Alertas, loops, repetição | testado pelo autor | `_loop_guard_or_alert` + `incident_dedup.py` | `test_loop_guard_generalization.py`, `test_incident_dedup.py`, `test_http_transport_no_blind_resend_on_timeout.py` passam | Aplicar à base de produção depende dos arquivos divergentes | Cobrir também o caso "dois agentes conversando" no worker real |
+| A06 | Agentes | Texto/áudio/imagem/vídeo | a investigar (retomada de transcrição existe: `whatsapp.transcribe_audio` lança erro se não houver transcrição, sem responder) | `jobs/handlers.py` | — | Qualidade do STT em produção não verificada | Teste: falha de download/transcrição ⇒ nenhuma resposta como se tivesse ouvido |
+| B01 | Pós-venda/FH | Itens encerrados no FH4 + errata | revisado estaticamente (pelo parecer) | zips fora do git | resultados do autor nos zips | `adendo-fh4-v12.zip`/`errata` não estão neste ambiente | Integrar quando os arquivos existirem; não reimplementar |
+| B02 | Pós-venda/FH | Proteções a preservar (opt-out durável, reserva antes da rede, CAS, etc.) | implementado sem execução nesta linha (o módulo `store_aftercare` não existe nela) | — | — | Mesma ausência de arquivos | Idem B01 |
+| B03 | Pós-venda/FH | Desempate no mesmo segundo | a investigar | — | — | `adendo-v12-desempate-mesmo-segundo.zip` (SHA `1aff617d…`) não está aqui | Receber o arquivo existente e conferir `has_human_reply_after` e chamadores |
+| B04 | Pós-venda/FH | Decisões operacionais (zero, margem, triagem, 7 dias…) | a investigar | — | — | Decisões do dono | Registrar as decisões quando tomadas |
+| C01 | Vendedor | Job ignora PARAR posterior | testado pelo autor | `store_followups.send_guard`, `conversation_control.reserve_plain_send(guard=)` (`7b221b9`) | `test_parecer_vendedor_ativo.py`: zero chamadas ao provedor (PARAR, recusa, chave, horário, janela, estoque, humano, job alheio); mutantes P01–P04, P07 mortos | — | Reexecutar em base integrada |
+| C02 | Vendedor | Dois processadores, dois jobs | testado pelo autor | claim atômico `run_due` (`7b221b9`); `followup_ids` (`ac52203`+este) | **PostgreSQL 16**: 2 e 3 sessões com barreira ⇒ 1 job/1 envio; 2 ocorrências do mesmo contato ⇒ 2 jobs, **1 envio** (guard sob trava) | — | — |
+| C03 | Vendedor | "Quero áudio" ≠ recusa | testado pelo autor | `store_optout.py` (`7b221b9`) | classificação e handler real; doc de implantação corrigida (não é "idêntico") | Reversão de "só texto" por pedido afirmativo é decisão minha, documentada: confirmar com o dono | Confirmar política |
+| C04 | Vendedor | Roteiro × limite 350 | testado pelo autor | `store_voice.build_script`, config 340 | exemplo do parecer (422 → ≤340), varredura de tamanhos; simulador de voz recusa >350 | — | — |
+| C05 | Vendedor | Horário não confirmado | testado pelo autor | `STORE_HOURS_CONFIRMED=false` | ferramenta, planner, `run_due`, guard | **Confirmação da equipe da loja** | Equipe confirma ⇒ `true` |
+| C06 | Vendedor | Margem negativa | testado pelo autor | validador 0–240 | testes de carga | Política dos 30 min a registrar pelo dono | — |
+| C07 | Vendedor | Data × "agora"; fuso | testado pelo autor | `day_info`/`status_at`, validador de fuso | testes da ferramenta | — | — |
+| C08 | Vendedor | Resposta nova entre checagem e reserva (voz) | testado pelo autor | `final_gate` dentro de `reserve_plain_send` | teste injeta a resposta imediatamente antes da reserva real; PG: reserva em andamento segura o opt-out | Garantia só até o início do envio (bytes já entregues ao provedor não são cancelados) | — |
+| C09 | Vendedor | Download com limite | testado pelo autor | `voice_client._read_bounded` | com e sem Content-Length; metadados 64 KB | — | — |
+| D01 | Voz | Reuso do `voice-service`; painel | testado pelo autor (**motor simulado**) | `voice-service/app/panel/*`, `/v1/panel/status` (`ac52203`) | 65 testes + Chromium headless (conectar, gerar, tocar, rótulo "simulado") | — | Cadastro de perfil/WAV pelo painel **não foi feito** (não existe nesta rodada) |
+| D02 | Voz | Gravação, pesos, licença, máquina | defeito de ambiente: **sem áudio real** | adaptadores Chatterbox/Qwen3 nunca carregaram pesos | — | (1) OGG `WhatsApp Ptt 2026-10-12 at 13.39.29.ogg` ausente; (2) `huggingface.co` bloqueado (não contornado); (3) licença dos pesos a conferir; (4) escuta e medição na máquina | Você envia o OGG e libera a rede, ou roda `make_samples.py`/`measure.py` no PC e devolve os resultados |
+| D03 | Voz | Segurança/operação do serviço | testado pelo autor (parcial) | token por agente, perfil isolado, TTL, limites, idempotência por `request_id` | testes de API | Conflito de conteúdo por `request_id` e invalidação de cache por versão de perfil: **a investigar** | Teste de contrato dessas duas bordas |
+| E01 | Integração | Candidata integrada e rastreável | a investigar | — | — | FH, produção coletada e PR #63 são linhas diferentes | Manifesto arquivo a arquivo quando as fontes de produção/FH estiverem disponíveis |
+| E02 | Integração | Alembic | testado pelo autor (cadeia **do repositório**): `upgrade head`/`downgrade base` em PG 16 | `c8f3a1d27b40` (cabeça única) | `test_full_migration_chain_postgresql_isolated` passa | Cadeia **instalada** (inclui `9e2f1c6d7a80` real de POS) não coletada | Coleta somente leitura da cadeia instalada e confronto |
+| E03 | Integração | Frontend/dependências | a investigar | — | — | Fora do escopo desta candidata de backend | Trabalho separado |
+| E04 | Integração | CI e critérios de implantação | testado pelo autor (ruff limpo; mypy 12 erros pré-existentes, nenhum novo) | — | — | Comparar com a baseline exata em base integrada; janela/rollback/backup restaurado | Antes de qualquer implantação |
+| X01 | Segurança | Chave Groq exposta em transcrição | defeito comprovado | — | — | **Ação do responsável**: revogar/rotacionar (não colar na conversa) | — |
 
-| Pendência | Estado | Código / commit | Teste | Bloqueio ou decisão |
-|---|---|---|---|---|
-| Pausa humana antes do transporte | ✅ | `services/conversation_control.py`, `jobs/handlers.py` (PR #63, já na base `5372c27`) | `tests/test_whatsapp_send_queue_retry.py`, `whatsapp_agents_fix/*` | Limite conhecido: pausa é checada no envio; envio antigo após um `resume` não é barrado por revisão (só o Twin tem essa cerca) |
-| Duplicidade na fila / retentativa | ✅ | reserva por job (PR #63) + identidade estável por acompanhamento (`7b221b9`) | `test_followup_claim_postgres.py` (PostgreSQL real), `test_parecer_vendedor_ativo.py` | — |
-| Mensagem antiga não recebe resposta automática | 🟡 | `jobs/handlers.py::_message_too_old`, `AUTO_REPLY_MAX_MESSAGE_AGE_SECONDS` (este lote) em Loja, B2B, Azusa e Twin/pipeline; PARAR/recusa antigos continuam honrados | `tests/test_message_age_guard.py` (7, handler real) | **Desligado por padrão (0)**: o dono decide o limiar (sugestão a avaliar: 1800 s) |
-| Loop de resposta | 🟡 | `_loop_guard_or_alert` já existe na base e cobre Loja/B2B/Azusa/pipeline | testes da PR #63 | Generalização à base de produção ⛔ (config/handlers de produção divergentes) |
-| Opt-out/recusa na Loja | ✅ | `services/store_optout.py` (`021b8b6`, `7b221b9`) | `test_store_optout.py`, `test_parecer_vendedor_ativo.py` | — |
-| Opt-out em B2B/Azusa/Twin | ⏳ | — | — | **Decisão de desenho**: `Contact.preferences` é compartilhado entre instâncias; um PARAR no B2B gravaria a chave da Loja e vice-versa. Precisa de chave por fluxo antes de implementar |
-| Autoria correta (incidente Flávio/Micael) e contexto | ⛔ | — | — | Faltam os arquivos reais de produção: `planner.py`, `store_agent.py`, `descriptions.py`, `context.py`, `utils/config.py` |
-| Eco antes do recibo | ⛔ | parcial (PR #63 rodada 7) | — | Decisão do dono: pausar na ambiguidade (atual) ou adiar a classificação |
-| Pós-venda/FH (drenagem, piso de agendamento, validação de atraso) | ⛔ | FH4 + errata aceitos estaticamente no parecer; **não estão no git** (zips) | resultados do autor nos zips | Faltam `adendo-fh4-v12.zip` e `adendo-v12-desempate-mesmo-segundo.zip` aqui; coleta somente leitura da cadeia instalada; esquema/versão/volume do PostgreSQL de produção. `services/store_aftercare.py` não existe nesta linha (o handler base o importa) |
+## Decisões do dono pendentes
+Limiar de mensagem antiga · eco antes do recibo (pausar × adiar) · chave de opt-out por fluxo (B2B/Azusa/Twin; `Contact.preferences` é compartilhado) · horário confirmado · política de "só texto" revertido por pedido de áudio · onde hospedar o voice-service.
 
-## Frente 2 — Vendedor ativo da Loja
-
-| Pendência (parecer 12/10) | Estado | Código / commit | Teste |
-|---|---|---|---|
-| Envio após PARAR (job já enfileirado) | ✅ | `store_followups.send_guard` + `reserve_plain_send(guard=)` (`7b221b9`) | `test_parecer_vendedor_ativo.py` (zero chamadas ao provedor) |
-| Duplicidade concorrente | ✅ | claim atômico (`7b221b9`) | PostgreSQL 16 real, 2–3 sessões com barreira |
-| Pedido de áudio × recusa de áudio | ✅ | `store_optout` (`7b221b9`) | classificação + handler real |
-| Horário provisório, margem, data, fuso | ✅ | `STORE_HOURS_CONFIRMED=false`, validações (`7b221b9`) | testes de config/ferramenta/planner |
-| Roteiro final × limite do serviço; download com limite; atualidade na reserva da voz | ✅ | `store_voice`, `voice_client` (`7b221b9`) | `test_parecer_vendedor_ativo*.py` (28/28 mutantes mortos) |
-| Horário confirmado pela equipe | ⛔ | — | Decisão/dado: a equipe da loja confirma; depois `STORE_HOURS_CONFIRMED=true` |
-| `store_agent.py` de produção com a ferramenta de horário | ⛔ | — | arquivo de produção não coletado |
-| Migração na cadeia de produção (head `9e2f1c6d7a80` × repo `e610080003`) | ⛔ | `c8f3a1d27b40` aponta para a cadeia do repo | coleta somente leitura da cadeia instalada |
-| Pós-venda por voz | ⏳ | — | depende da linha FH fora do git |
-| Contrato do Evolution instalado e reprodução como mensagem de voz | ⛔ | `EvolutionProvider.send_voice` (contrato de documentação de terceiros) | versão instalada e teste em aparelho |
-
-## Frente 3 — Voz e painel (reutiliza o `voice-service/`)
-
-| Pendência | Estado | Código / commit | Teste |
-|---|---|---|---|
-| Serviço de voz (token por agente, perfil com consentimento, fila limitada, OGG/Opus, TTL) | ✅ **com motor simulado** | `voice-service/` (`f7fa5c1`) | 54 → 65 testes, mutantes 20/20 |
-| Painel web sobre o mesmo serviço (`/panel`, `/v1/panel/status`) | ✅ **com motor simulado** | `voice-service/app/panel/*`, `app/main.py`, `service.py::recent` (este lote) | `tests/test_panel.py` (11) + navegador real (Chromium headless, `scripts/e2e_painel.cjs`): conectar, gerar, tocar, rótulo "simulado" |
-| **Áudio real com a sua voz** | ⛔ | adaptadores Chatterbox/Qwen3 escritos contra a API lida no pacote, **nunca carregaram pesos** | — |
-
-Bloqueios concretos da voz real (isolados; não travam as outras frentes): (1) a gravação `WhatsApp Ptt 2026-10-12 at 13.39.29.ogg` não está no ambiente; (2) `huggingface.co` bloqueado pela política de rede do ambiente (não contornado) — ou rodar `scripts/make_samples.py`/`measure.py` no PC do dono; (3) licença dos **pesos** a conferir nos cartões oficiais; (4) validação por escuta e desempenho na máquina escolhida. O painel **não resolve** as falhas de envio pelo WhatsApp: ele não envia nada.
-
-## Decisões do dono (pendentes)
-1. Limiar de mensagem antiga (`AUTO_REPLY_MAX_MESSAGE_AGE_SECONDS`). 2. Eco antes do recibo: pausar ou adiar. 3. Chave de opt-out por fluxo (B2B/Azusa/Twin). 4. Horário confirmado pela equipe. 5. Onde hospedar o voice-service (PC com RTX 3060 é o candidato; a VPS não tem RAM).
-
-## Segurança
-A chave Groq que apareceu na transcrição do DSH precisa ser trocada (nunca copiada para o repositório).
+## Fora do escopo declarado
+Bot de investimentos (anexo do plano): frente separada, não tocada.
