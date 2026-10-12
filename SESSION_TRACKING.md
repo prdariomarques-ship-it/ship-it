@@ -5,7 +5,32 @@
 > declaração de implantação — implantação só ocorre com janela aprovada e
 > comprovação de rollback.
 
-Última atualização: 2026-10-10 (acompanhamento de CI pós-rodada 4 da PR #63).
+Última atualização: 2026-10-12 (Frente 4: vendedor ativo da loja com voz — implementação em ramo isolado; ver abaixo). Demais frentes: sem alteração nesta data.
+
+---
+
+## Frente 4 — Vendedor ativo da Loja Marquescolor, com resposta por voz (2026-10-12)
+
+**Ramo local:** `feat/vendedor-ativo-voz` (a partir de `chore/next-16.4-security` `5372c27`; **não enviado ao remoto**). Nenhuma implantação, nenhuma mensagem a cliente, nenhum acesso à VPS/banco de produção, nenhuma gravação enviada a serviço externo.
+Documentos: `docs/vendedor-ativo/DIAGNOSTICO.md` (matriz com evidências), `MODELO_DE_VOZ.md`, `IMPLANTACAO_E_REVERSAO.md`, `.env.vendedor-ativo.example`; serviço em `voice-service/`.
+
+**Implementado e testado (SQLite isolado, worker real, transporte e gerador simulados):**
+- `voice-service/` — serviço autenticado por agente, perfil de voz com consentimento, fila limitada, timeout, OGG/Opus validado, limpeza por TTL, ferramentas de análise/preparo da referência sem filtros. 54 testes (1 pulado: sem encoder Vorbis).
+- Backend: `services/store_voice.py` (+ `voice_client.py`, `ogg_opus.py`, `EvolutionProvider.send_voice`, job `store.voice_reply`): **texto sempre primeiro**, voz curta depois; só instância da loja; reconferência pós-geração (cliente respondeu, humano assumiu, pausa, opt-out, idade, limite diário); reserva `reserve_plain_send` confirmada antes do transporte; resultado incerto → `needs_review`, sem reenvio e sem texto de reserva.
+- `services/store_optout.py` (recusa/“PARAR”/“só texto” por frase inteira e curta) e `services/store_followups.py` (retomada de orçamento vencido e sugestão de reposição por histórico real; tabela `store_followups` com origem, horário, estado, tentativas, cancelamento, chave única e histórico; **sem agendador**, simulação por padrão, `STORE_FOLLOWUPS_ENABLED=false`).
+- Migração `c8f3a1d27b40` (2 tabelas novas; downgrade recusa se houver histórico). Testes de CLI do alembic (`upgrade head`/`downgrade base`) passam.
+- Resultados reproduzidos por mim: `backend/tests` **1144 → 1325 passaram** (+181 testes novos; 0 falhas), `ruff` limpo, `mypy` = 12 erros pré-existentes (nenhum novo). Mutantes: voz 19/19 e acompanhamentos/opt-out 23/24 mortos (1 equivalente: limite de tamanho redundante com as expressões ancoradas).
+
+**NÃO feito / bloqueado:**
+- ℹ️ Recebida transcrição de outra sessão de agente (PC do proprietário: Ryzen 7 5700X, 32 GB, **RTX 3060 12 GB**; a gravação `.ogg` também não está em OneDrive/Desktop/Documents/Downloads desse PC). Contém uma chave de API em texto puro: **rotacionar**.
+- ⛔ **Nenhuma amostra de voz e nenhuma medição de modelo real**: o ambiente não alcança `huggingface.co`/`modelscope.cn` (política de rede; não contornei) e a gravação de referência (`WhatsApp Ptt 2026-10-12 at 13.39.29.ogg`) **não está neste ambiente**. Os adaptadores Chatterbox/Qwen3-TTS foram escritos contra a API lida nos pacotes publicados e **nunca carregaram pesos**.
+- ⛔ Licença dos **pesos** não conferida nos cartões oficiais (só código e metadados dos pacotes).
+- ⛔ Versão do Evolution instalada e reprodução como mensagem de voz **no aparelho**: não confirmadas.
+- ⛔ Cadeia Alembic instalada × repositório: `down_revision` da migração nova aponta para a cabeça **do repositório**; precisa de confirmação antes de qualquer janela.
+- Pós-venda por voz **não** ligado: o pós-venda de produção pertence à linha FH (fora do git, adendo FH4 aceito na revisão estática; o do desempate sem revisão). Ligar a voz ali é passo posterior.
+- Incidente Flávio/Micael (`store_agent.py`/`planner.py`/`descriptions.py`/`context.py`/`config.py` de produção não coletados) segue **não corrigido**.
+- Três linhas de código ainda não unificadas (produção coletada × PR #63 × FH). Este ramo importou, em commit separado, os modelos de produção que o repositório não tem.
+- Ramo designado `claude/dario-os-platform-gcg6i2` é uma linha diferente (sem as proteções da PR #63); **não foi usado** — decisão de onde publicar fica com o proprietário.
 
 ---
 

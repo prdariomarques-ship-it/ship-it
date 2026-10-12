@@ -52,3 +52,16 @@ Implantação comprovada: **nenhuma** (nenhuma fonte prova o que roda na VPS; `d
 2. Os modelos de produção que o repositório não tem (`StoreQuote`, `StoreDelivery`, `StoreSupportCase`) foram **importados verbatim da coleta** em commit separado (baseline), como a PR #63 fez com `handlers.py`/`router.py`.
 3. As correções FH **não foram tocadas nem reimplementadas**: o vendedor ativo é aditivo (módulos novos) e só usa a convenção de opt-out `store_followup_opt_out` que o pós-venda de produção já respeita.
 4. Tudo novo nasce **desligado** (`STORE_VOICE_ENABLED`, `STORE_FOLLOWUPS_ENABLED`), sem rotina agendada.
+
+## 6. Material local enviado pelo proprietário (transcrição de outra sessão de agente)
+
+Arquivo recebido: `dsh-session-session-08d9e487-….zip` (234 218 bytes, SHA-256 `7019d5a9…`), contendo `session.v4.jsonl` — a transcrição de uma **sessão de outro agente** (cwd `C:\Users\dario\OneDrive\chatbot-tintas`) que tentou a mesma tarefa em 12/10. É **dado reportado por terceiro, não verificado por mim**. Usei apenas fatos de leitura direta registrados nela:
+
+| Fato | Registro na transcrição | Uso |
+|---|---|---|
+| Hardware do PC do proprietário: **Ryzen 7 5700X (8C/16T), 32 GB RAM, NVIDIA RTX 3060 12 GB** (≈4,9 GB de VRAM ocupados por outros programas na hora da leitura) | saída de `Get-CimInstance`/`nvidia-smi` | candidato real a hospedar o serviço de voz (a VPS não serve). **Não medi nada neste hardware.** |
+| A gravação `WhatsApp Ptt 2026-10-12 at 13.39.29.ogg` **não está** em OneDrive, Desktop, Documents nem Downloads desse PC | busca recursiva registrada; o agente concluiu "não localizada" | confirma que ela precisa ser anexada |
+| `chatbot-tintas`: bot mínimo (Groq + Evolution `sendText`), `docker-compose` com `atendai/evolution-api:latest` | leitura de `bot.py`/`docker-compose.yml` | **versão do Evolution local não é fixada** (tag `latest`): a versão real continua desconhecida |
+| O clone local do `ship-it` estava no ramo `claude/dario-os-platform-gcg6i2` (sem `products`, sem STT, sem `conversation_control`) | leitura de arquivos | **consistente** com o que achei: esse ramo é uma linha antiga; o ramo-base correto para este trabalho é `chore/next-16.4-security` |
+
+Não adotei: números de VRAM/RAM por modelo e "licença dos pesos MIT/Apache" afirmados na transcrição **sem fonte citada**; a lista de arquivos de `Downloads` (apenas confirma a existência local dos pacotes FH). **Aviso de segurança:** a transcrição contém, em saída de ferramenta, o conteúdo de um `.env` com uma **chave de API (Groq)** em texto puro. Recomendo **revogar/rotacionar essa chave** e não reenviar esse arquivo. Não copiei o valor para lugar nenhum e removi a cópia extraída que eu havia feito.
