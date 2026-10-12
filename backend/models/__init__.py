@@ -16,7 +16,8 @@ from models.note import Note
 from models.password_reset_token import PasswordResetToken
 from models.product import Product
 from models.refresh_token import RefreshToken
-from models.store import StoreCustomer
+from models.store import StoreCustomer, StoreQuote
+from models.store_aftercare import StoreDelivery, StoreSupportCase
 from models.task import Task, TaskPriority, TaskStatus
 from models.user import User, UserRole
 
@@ -46,6 +47,9 @@ __all__ = [
     "Product",
     "RefreshToken",
     "StoreCustomer",
+    "StoreDelivery",
+    "StoreQuote",
+    "StoreSupportCase",
     "Task",
     "TaskPriority",
     "TaskStatus",
