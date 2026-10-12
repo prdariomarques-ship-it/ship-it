@@ -37,3 +37,16 @@ Testes: `pip install -r requirements-dev.txt && pytest`.
 
 ## Limitações conhecidas
 Sem modelo real testado aqui; o `Dockerfile` não foi construído (sem Docker no ambiente) e a imagem base precisa ter o digest fixado; a licença dos **pesos** precisa ser conferida nos cartões oficiais antes do uso; o PerTh (Chatterbox) marca o áudio; a reprodução como mensagem de voz depende da versão do Evolution e deve ser conferida no aparelho.
+
+
+## Painel (`/panel`)
+
+Interface web do **mesmo** serviço: usa o mesmo motor, a mesma fila (`/v1/synthesize`), os mesmos perfis e a mesma configuração (`VOICE_*`). Não cria motor, fila nem configuração paralelos e **não envia nada por WhatsApp**.
+
+- Abrir `http://<host>:<porta>/panel` (por padrão só em `127.0.0.1`; acesso remoto, só por rede interna/VPN). As páginas estáticas não contêm dado algum; o token do agente é digitado no navegador, fica só em memória da aba e vale para `/v1/*`.
+- Mostra: modo (**simulado** ou **real**), motor/modelo/revisão, perfil (consentimento, prefixo do hash da referência), checklist de pré-requisitos da voz real, fila (em geração, admitidos, áudios guardados), últimos pedidos (**só metadados**: id, resultado, tempo, nº de caracteres) e permite gerar um áudio de teste e ouvi-lo.
+- `GET /v1/panel/status` (token obrigatório) alimenta a página; cada agente vê só o próprio perfil e o próprio histórico.
+
+**O que este painel prova e o que não prova.** Testado com o motor **simulado** (`fake`): prova painel, fila compartilhada, rótulos e formato OGG/Opus. **Não prova áudio real com a voz do titular**: isso depende da gravação de referência, dos pesos do modelo e da validação (escuta) na máquina escolhida. Com o motor simulado o painel e o áudio são rotulados "não é a sua voz" e `real_voice_possible` é sempre `false`.
+
+Teste em navegador real: `node scripts/e2e_painel.cjs captura.png` (ver variáveis no cabeçalho do script).

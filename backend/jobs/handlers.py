@@ -402,6 +402,18 @@ async def trigger_workflow(db: AsyncSession, payload: dict) -> None:
     )
 
 
+def _message_too_old(settings, message) -> bool:
+    """Mensagem recebida há mais que `auto_reply_max_message_age_seconds` (0 = desligado). Sem data confiável, não bloqueia."""
+    from datetime import datetime, timezone
+
+    limit = int(getattr(settings, "auto_reply_max_message_age_seconds", 0) or 0)
+    created = getattr(message, "created_at", None)
+    if limit <= 0 or created is None:
+        return False
+    created = created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created
+    return (datetime.now(timezone.utc) - created).total_seconds() > limit
+
+
 async def _loop_guard_or_alert(db: AsyncSession, settings, jobs: 'JobService', instance: str, contact, message) -> bool:
     """Shared loop/flood-vs-automation guard -- generalizes the Twin
     flow's own mechanism (twin_autopilot_check, above) to every other
@@ -513,6 +525,9 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
         if getattr(message.media_type, "value", message.media_type) != "text":
             logger.info("Extra WhatsApp: somente texto nesta etapa")
             return
+        if _message_too_old(settings, message):
+            logger.info("Extra WhatsApp: mensagem antiga demais; sem resposta automática (instância %s)", instance)
+            return
         if await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
             return
         from orchestrator.service import ai_orchestrator
@@ -555,6 +570,9 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
                 "instance": instance,
             })
             return
+        if _message_too_old(settings, message):
+            logger.info("Loja: mensagem antiga demais; sem resposta automática (contato %s)", contact_id)
+            return
         from orchestrator.service import ai_orchestrator
         from services.store_sales import confirmation_code, confirm_quote
 
@@ -582,6 +600,9 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
                 agent_name="store",
             )
             reply = result.reply
+    elif _message_too_old(settings, message):
+        logger.info("Pipeline/Twin: mensagem antiga demais; sem resposta automática (contato %s)", contact_id)
+        return
     elif await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
         return
     else:

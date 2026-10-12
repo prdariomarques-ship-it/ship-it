@@ -8,7 +8,7 @@ import pytest
 
 from app import audio
 from app.engines.base import EngineError
-from tests.conftest import TOKEN_LOJA, TOKEN_TWIN, auth, make_profile
+from tests.conftest import TOKEN_TWIN, auth, make_profile
 
 TEXT = "Olá! Aqui é o assistente da loja. Seu orçamento está pronto."
 

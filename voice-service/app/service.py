@@ -12,6 +12,7 @@ import hashlib
 import re
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from app import audio as audio_mod
@@ -42,6 +43,8 @@ class SynthService:
         self._inflight: dict[tuple[str, str], asyncio.Future] = {}
         self._done: dict[tuple[str, str], tuple[StoredAudio, float]] = {}
         self._profiles: dict[str, tuple[VoiceProfile, float]] = {}
+        # Histórico curto para o painel (só metadados: nunca o texto nem o áudio). Mesmo serviço, mesma fila, mesma configuração.
+        self.recent: deque[dict] = deque(maxlen=30)
 
     # ------------------------------------------------------------------ ciclo de vida
     def load_engine(self) -> None:
@@ -111,7 +114,21 @@ class SynthService:
             raise SynthError(502, "invalid_audio_format", str(exc)) from exc
         return data, info
 
+    def _record(self, agent: str, request_id: str, status: str, started: float, chars: int) -> None:
+        self.recent.appendleft({"at": time.time(), "agent": agent, "request_id": request_id, "status": status,
+                                "seconds": round(time.time() - started, 2), "chars": chars})
+
     async def synthesize(self, agent: str, request_id: str, text: str, language: str) -> StoredAudio:
+        started, chars = time.time(), len(text or "")
+        try:
+            stored = await self._synthesize(agent, request_id, text, language)
+        except SynthError as exc:
+            self._record(agent, request_id, exc.code, started, chars)
+            raise
+        self._record(agent, request_id, "ok", started, chars)
+        return stored
+
+    async def _synthesize(self, agent: str, request_id: str, text: str, language: str) -> StoredAudio:
         text = self._validate(request_id, text, language)
         if not self.ready:
             raise SynthError(503, "engine_not_ready", self.not_ready_reason or "motor indisponível")

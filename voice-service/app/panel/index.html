@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel de voz</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/panel/panel.css">
+</head>
+<body>
+<main>
+  <h1>Painel de voz</h1>
+  <p class="muted">Interface do <code>voice-service</code>: mesmo motor, mesma fila e mesma configuração usados pelo vendedor. Não envia nada por WhatsApp.</p>
+
+  <section id="connect">
+    <label for="token">Token do agente</label>
+    <div class="row">
+      <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="cole o token (fica só nesta aba, em memória)">
+      <button id="connectBtn" type="button">Conectar</button>
+    </div>
+    <p id="connectMsg" class="muted" role="status"></p>
+  </section>
+
+  <section id="panel" hidden>
+    <div id="modeBanner" class="banner" role="status"></div>
+
+    <h2>Estado</h2>
+    <dl id="state"></dl>
+
+    <h2>Para gerar áudio real com a sua voz</h2>
+    <ul id="checklist"></ul>
+
+    <h2>Fila</h2>
+    <dl id="queue"></dl>
+
+    <h2>Gerar áudio de teste</h2>
+    <label for="text">Texto (use frases fictícias; o limite vem do serviço)</label>
+    <textarea id="text" rows="4">Olá! Este é um teste do painel de voz da loja.</textarea>
+    <div class="row">
+      <button id="synthBtn" type="button">Gerar</button>
+      <span id="counter" class="muted"></span>
+    </div>
+    <p id="synthMsg" class="muted" role="status"></p>
+    <audio id="player" controls hidden></audio>
+    <p id="synthLabel" class="banner" hidden></p>
+
+    <h2>Pedidos recentes</h2>
+    <table>
+      <thead><tr><th>Quando</th><th>Pedido</th><th>Resultado</th><th>Tempo</th><th>Caracteres</th></tr></thead>
+      <tbody id="recent"></tbody>
+    </table>
+  </section>
+</main>
+<script src="/panel/panel.js"></script>
+</body>
+</html>

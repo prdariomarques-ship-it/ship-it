@@ -4,9 +4,10 @@ from __future__ import annotations
 import asyncio
 import hmac
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from app import __version__
@@ -94,6 +95,52 @@ def create_app(settings: VoiceSettings | None = None, engine: Engine | None = No
             "model_id": service.engine.model_id, "model_revision": service.engine.model_revision,
             "profiles": profiles if agent in profiles else [], "admitted": service.admitted, "inflight": service.inflight,
             "max_concurrency": settings.max_concurrency, "queue_max": settings.queue_max, "version": __version__,
+        }
+
+    # ------------------------------------------------------------------ painel (mesmo serviço: mesmo motor, fila e configuração)
+    panel_dir = Path(__file__).parent / "panel"
+    panel_csp = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src blob:; "
+                 "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+    panel_files = {"/panel": ("index.html", "text/html; charset=utf-8"), "/panel/panel.js": ("panel.js", "text/javascript; charset=utf-8"),
+                   "/panel/panel.css": ("panel.css", "text/css; charset=utf-8")}
+
+    def _panel_file(path: str):
+        name, mime = panel_files[path]
+        return FileResponse(panel_dir / name, media_type=mime, headers={"Content-Security-Policy": panel_csp, "Cache-Control": "no-store",
+                                                                           "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"})
+
+    for _path in panel_files:  # as páginas não contêm dado algum: o token é digitado no navegador e só vale para as rotas /v1
+        app.add_api_route(_path, (lambda p=_path: _panel_file(p)), methods=["GET"], include_in_schema=False)
+
+    @app.get("/v1/panel/status")
+    async def panel_status(agent: str = Depends(agent_of)):
+        simulated = service.engine.name == "fake"
+        try:
+            profile = service.profile_for(agent)
+            profile_info = {"present": True, "display_name": profile.display_name, "consent_authorized": True, "consent_scope": profile.consent_scope,
+                            "reference_sha256_prefix": profile.reference_sha256[:12], "has_reference_text": bool(profile.reference_text)}
+            profile_error = None
+        except SynthError as exc:
+            profile_info, profile_error = {"present": False}, exc.message
+        real_ready = service.ready and not simulated and bool(profile_info["present"])
+        return {
+            "agent": agent, "version": __version__, "engine": service.engine.name, "model_id": service.engine.model_id,
+            "model_revision": service.engine.model_revision, "ready": service.ready, "not_ready_reason": service.not_ready_reason,
+            "mode": "simulado" if simulated else "real",
+            # Só é "áudio real com a voz do titular" com motor real carregado E perfil com consentimento. Mesmo assim a aprovação
+            # final é humana (escuta das amostras) e não é registrada aqui.
+            "real_voice_possible": real_ready,
+            "checklist": {
+                "motor_real_configurado": not simulated, "pesos_carregados": service.ready and not simulated,
+                "perfil_com_consentimento_e_referencia": bool(profile_info["present"]),
+                "aprovacao_humana_das_amostras": "pendente (feita fora do sistema)",
+            },
+            "profile": profile_info, "profile_error": profile_error,
+            "queue": {"admitted": service.admitted, "inflight": service.inflight, "max_concurrency": settings.max_concurrency,
+                      "queue_max": settings.queue_max, "stored_audios": service.store.count()},
+            "limits": {"max_text_chars": settings.max_text_chars, "max_audio_seconds": settings.max_audio_seconds,
+                       "result_ttl_seconds": settings.result_ttl_seconds},
+            "recent": [r for r in service.recent if r["agent"] == agent][:15],
         }
 
     @app.post("/v1/synthesize")

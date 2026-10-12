@@ -355,6 +355,10 @@ class Settings(BaseSettings):
     store_voice_max_script_chars: int = 340
     store_voice_max_audio_seconds: float = 40.0
     store_voice_max_audio_bytes: int = 4_000_000
+    # Mensagem recebida há mais que isto NÃO recebe resposta automática (fila atrasada, reconexão, reprocessamento): responder a uma
+    # mensagem velha como se fosse de agora é pior que silêncio. 0 = desligado (padrão até o dono decidir o limiar). Um pedido de
+    # PARAR/recusa antigo continua sendo honrado (é gravado antes desta checagem).
+    auto_reply_max_message_age_seconds: int = 0
     store_voice_max_job_age_seconds: int = 600  # a resposta de voz de uma conversa que já andou é descartada
     store_voice_max_per_contact_per_day: int = 3
     store_voice_disclosure_days: int = 7  # reapresenta o aviso de voz sintética se passou mais que isso

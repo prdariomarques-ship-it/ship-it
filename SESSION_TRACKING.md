@@ -7,6 +7,8 @@
 
 Última atualização: 2026-10-12 (Frente 4: vendedor ativo da loja com voz — implementação em ramo isolado; ver abaixo). Demais frentes: sem alteração nesta data.
 
+> **Quadro único (pendência × commit × teste × bloqueio) das três frentes: `docs/QUADRO_FRENTES.md`.**
+
 ---
 
 ## Frente 4 — Vendedor ativo da Loja Marquescolor, com resposta por voz (2026-10-12)
