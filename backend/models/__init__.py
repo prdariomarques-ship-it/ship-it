@@ -18,6 +18,8 @@ from models.product import Product
 from models.refresh_token import RefreshToken
 from models.store import StoreCustomer, StoreQuote
 from models.store_aftercare import StoreDelivery, StoreSupportCase
+from models.store_followup import StoreFollowup
+from models.store_voice import StoreVoiceSend
 from models.task import Task, TaskPriority, TaskStatus
 from models.user import User, UserRole
 
@@ -48,8 +50,10 @@ __all__ = [
     "RefreshToken",
     "StoreCustomer",
     "StoreDelivery",
+    "StoreFollowup",
     "StoreQuote",
     "StoreSupportCase",
+    "StoreVoiceSend",
     "Task",
     "TaskPriority",
     "TaskStatus",

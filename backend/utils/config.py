@@ -339,6 +339,39 @@ class Settings(BaseSettings):
         False  # Enable Prometheus metrics reader for tracing
     )
 
+    # Vendedor ativo da Loja Marquescolor -- resposta por voz (serviço separado em voice-service/).
+    # TUDO DESLIGADO por padrão: nada aqui é valor de produção, e ligar exige revisão e janela aprovada.
+    store_voice_enabled: bool = False
+    store_voice_url: str = ""  # ex.: http://voice-service:8765 (rede interna; nunca URL pública)
+    store_voice_token: str = ""  # via variável de ambiente STORE_VOICE_TOKEN; nunca em arquivo versionado
+    store_voice_agent_profile: str = "loja"  # perfil de voz do agente; o serviço só aceita o do próprio token
+    store_voice_timeout_seconds: float = 150.0
+    # "customer_preference": áudio só se o cliente pediu (preferences.reply_mode = "audio");
+    # "mirror_audio": também quando o cliente mandou áudio. Preferência por texto SEMPRE vence.
+    store_voice_policy: str = "mirror_audio"
+    store_voice_max_script_chars: int = 300
+    store_voice_max_audio_seconds: float = 40.0
+    store_voice_max_audio_bytes: int = 4_000_000
+    store_voice_max_job_age_seconds: int = 600  # a resposta de voz de uma conversa que já andou é descartada
+    store_voice_max_per_contact_per_day: int = 3
+    store_voice_disclosure_days: int = 7  # reapresenta o aviso de voz sintética se passou mais que isso
+
+    # Acompanhamentos comerciais (retomada de orçamento, reposição). DESLIGADO por padrão; sem rotina agendada:
+    # o scanner só roda quando um operador o aciona (scripts/store_followups.py), e começa em modo de simulação.
+    store_followups_enabled: bool = False
+    store_timezone: str = "America/Sao_Paulo"
+    store_followup_window_start_hour: int = 9
+    store_followup_window_end_hour: int = 18
+    store_followup_quote_resume_delay_minutes: int = 120  # após o vencimento do orçamento
+    store_followup_max_age_days: int = 7  # orçamentos mais antigos que isto não são retomados
+    store_followup_max_attempts: int = 1
+    store_followup_min_gap_hours: int = 72  # intervalo mínimo entre contatos proativos ao mesmo cliente
+    store_followup_restock_min_orders: int = 3  # compras do MESMO item necessárias para inferir um ciclo
+    store_followup_restock_tolerance: float = 0.25  # fração do intervalo médio aceita antes de sugerir reposição
+    store_followup_scan_limit: int = 50
+    store_followup_refusal_cooldown_days: int = 30  # pausa após uma recusa (não é opt-out permanente)
+    store_followup_days: str = "0,1,2,3,4,5"  # dias da semana permitidos (segunda=0 ... domingo=6)
+
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
 

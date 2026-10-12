@@ -77,6 +77,19 @@ class EvolutionProvider(WhatsAppProvider):
             "message/sendWhatsAppAudio", {"number": normalize_phone(to), "audio": url}, instance=instance,
         )
 
+    async def send_voice(self, to: str, audio_base64: str, instance: str | None = None) -> dict:
+        """Mensagem de VOZ (PTT) a partir de OGG/Opus já validado pelo chamador, enviada como base64.
+
+        Contrato assumido (Evolution API v2, o mesmo estilo de corpo plano já usado por send_text): POST
+        /message/sendWhatsAppAudio/{instance} com {"number": ..., "audio": <url ou base64>}. A VERSÃO instalada do Evolution não
+        foi confirmada neste repositório: a reprodução como mensagem de voz precisa ser conferida no aparelho antes de ligar o
+        recurso. Um único POST (como os demais envios deste provedor): resultado ambíguo nunca é repetido aqui."""
+        if not audio_base64 or not isinstance(audio_base64, str):
+            raise ValueError("audio_base64 vazio")
+        return await self._post(
+            "message/sendWhatsAppAudio", {"number": normalize_phone(to), "audio": audio_base64}, instance=instance,
+        )
+
     async def send_location(
         self, to: str, latitude: float, longitude: float, caption: str = "", instance: str | None = None
     ) -> dict:

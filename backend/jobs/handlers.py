@@ -286,6 +286,51 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     if alert_contact_id is not None and alert_dedup_key:
         await conversation_control.finish_alert(db, int(alert_contact_id), alert_instance, alert_dedup_key, receipt_id)
     await db.commit()
+    companion = payload.get('voice_companion')
+    if isinstance(companion, dict) and (companion.get('source_message_id') is not None or companion.get('followup_id') is not None):
+        await _enqueue_voice_companion(
+            db, to, content, instance,
+            source_message_id=companion.get('source_message_id'), followup_id=companion.get('followup_id'),
+        )
+
+
+async def _enqueue_voice_companion(
+    db: AsyncSession, to: str, content: str, instance: str | None, *, source_message_id: int | None = None, followup_id: int | None = None,
+) -> None:
+    """Depois que o TEXTO foi enviado e gravado, pede (se a política permitir) o áudio curto que o acompanha. Nunca propaga
+    erro: a resposta escrita já foi entregue e a voz é opcional."""
+    try:
+        from providers.whatsapp.base import normalize_phone
+        from services import store_voice
+
+        contact = await ContactRepository(db).get_or_create_by_phone(normalize_phone(to))
+        source = None
+        if source_message_id is not None:
+            source = await MessageRepository(db).get(int(source_message_id))
+            if source is None or source.contact_id != contact.id or source.direction != MessageDirection.INBOUND:
+                return
+        elif followup_id is not None:
+            from models.store_followup import StoreFollowup
+
+            followup = await db.get(StoreFollowup, int(followup_id))
+            if followup is None or followup.contact_id != contact.id or followup.status not in ("queued", "sent"):
+                return
+        await store_voice.enqueue_reply_companion(
+            db, contact=contact, source_message=source, reply_text=content, instance=str(instance or ""),
+            kind=store_voice.KIND_FOLLOWUP if followup_id is not None and source is None else store_voice.KIND_REPLY,
+            followup_id=int(followup_id) if followup_id is not None and source is None else None,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Falha ao pedir a resposta por voz (o texto já foi enviado)")
+        await db.rollback()
+
+
+@job_handler("store.voice_reply")
+async def store_voice_reply(db: AsyncSession, payload: dict) -> None:
+    """Resposta por voz do vendedor da loja (complementa o texto já enviado). Ver services/store_voice.py."""
+    from services import store_voice
+
+    await store_voice.deliver(db, payload)
 
 
 @job_handler("mail.send_reply")
@@ -470,6 +515,14 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
 
     reply_phone = contact.phone
     if settings.store_whatsapp_enabled and not is_personal_instance:
+        # Recusa, pedido para não receber contatos ou "só texto": mensagens curtas e inequívocas do cliente encerram aqui,
+        # antes de qualquer agente ou acompanhamento (services/store_optout.py). Sem voz e sem LLM na confirmação.
+        from services import store_optout
+
+        optout_reply = await store_optout.handle_inbound(db, contact, message)
+        if optout_reply is not None:
+            await JobService(db).enqueue("whatsapp.send_text", {"to": reply_phone, "content": optout_reply, "instance": instance})
+            return
         from services.store_aftercare import is_stop_request, stop_followups
 
         if is_stop_request(message.content):
@@ -516,10 +569,12 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
         reply = cognitive_result.reply
 
     if reply.strip():
-        await JobService(db).enqueue(
-            "whatsapp.send_text",
-            {"to": reply_phone, "content": reply, "instance": instance},
-        )
+        send_payload: dict = {"to": reply_phone, "content": reply, "instance": instance}
+        if settings.store_voice_enabled and settings.store_whatsapp_enabled and not is_personal_instance:
+            # Só a resposta comercial da LOJA pode ganhar voz (nunca Twin, B2B ou Azusa): o job de envio de texto
+            # pede o áudio depois de entregar o texto, e todas as checagens são refeitas na hora da voz.
+            send_payload["voice_companion"] = {"source_message_id": message.id}
+        await JobService(db).enqueue("whatsapp.send_text", send_payload)
 
 
 TWIN_HOLDING_MESSAGE = (

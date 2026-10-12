@@ -168,6 +168,10 @@ class WhatsAppProvider(ABC):
     @abstractmethod
     async def send_audio(self, to: str, url: str) -> dict: ...
 
+    async def send_voice(self, to: str, audio_base64: str, instance: str | None = None) -> dict:
+        """Mensagem de voz (OGG/Opus em base64). Só o Evolution implementa; os demais recusam sem enviar nada."""
+        raise WhatsAppProviderError(f"{self.name}: envio de mensagem de voz não suportado")
+
     @abstractmethod
     async def send_location(
         self, to: str, latitude: float, longitude: float, caption: str = ""
