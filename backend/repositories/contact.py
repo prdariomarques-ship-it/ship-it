@@ -10,6 +10,14 @@ from repositories.base import SQLAlchemyRepository
 class ContactRepository(SQLAlchemyRepository[Contact]):
     model = Contact
 
+    async def lock_fresh(self, contact_id: int) -> Contact | None:
+        """Relê o contato DO BANCO, com trava de linha (SELECT ... FOR NO KEY UPDATE: não conflita com o FOR KEY SHARE que o INSERT de uma mensagem toma na linha do contato) e atualizando o objeto já presente na sessão.
+        Quem vai alterar `preferences` (um JSON inteiro) deve chamar isto ANTES de ler o dicionário: um objeto carregado antes
+        da trava pode estar defasado, e gravá-lo de volta apagaria o que outro escritor confirmou nesse intervalo (opt-out)."""
+        return await self.session.scalar(
+            select(Contact).where(Contact.id == contact_id).with_for_update(key_share=True).execution_options(populate_existing=True)
+        )
+
     async def get_by_phone(self, phone: str) -> Contact | None:
         return await self.find_one(phone=phone)
 

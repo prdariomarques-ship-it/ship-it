@@ -581,3 +581,77 @@ async def test_sem_confirmacao_nao_se_planeja_nem_se_aplica_acompanhamento(env, 
     assert await all_followups(env) == []
     with pytest.raises(sf.FollowupsDisabled):
         await run(env, apply=True)
+
+
+# =====================================================================================================================
+# Adendo (revisão do commit a526602): atualização concorrente não pode apagar opt-out permanente (perda de atualização do JSON)
+# =====================================================================================================================
+SEGUNDO_ESCRITOR = [("quero áudio", "audio_request"), ("só texto", "text_only"), ("não tenho interesse", "refusal")]
+
+
+async def _msg_for(db, contact_id, content):
+    m = Message(contact_id=contact_id, direction=MessageDirection.INBOUND, media_type=MessageMediaType.TEXT, content=content,
+                whatsapp_instance=STORE, created_at=NOW - timedelta(minutes=1))
+    db.add(m)
+    await db.flush()
+    return m
+
+
+@pytest.mark.parametrize("texto, tipo", SEGUNDO_ESCRITOR)
+async def test_segundo_escritor_com_objeto_antigo_nao_apaga_o_opt_out(env, texto, tipo):
+    """Duas sessões leem o contato com preferences={}; PARAR confirma primeiro; o outro escritor ainda tem o objeto ANTIGO."""
+    cid, kid = await add_customer(env)
+    async with env.sessions() as db_a, env.sessions() as db_b:
+        contact_a, contact_b = await db_a.get(Contact, kid), await db_b.get(Contact, kid)
+        assert contact_a.preferences == {} and contact_b.preferences == {}         # as duas leituras iniciais, antes de qualquer escrita
+        msg_a = await _msg_for(db_a, kid, "PARAR")
+        assert await store_optout.handle_inbound(db_a, contact_a, msg_a) == store_optout.ACK_OPTOUT
+        msg_b = await _msg_for(db_b, kid, texto)
+        assert store_optout.classify(texto) == tipo
+        await store_optout.handle_inbound(db_b, contact_b, msg_b)
+    async with env.sessions() as db:
+        prefs = (await db.get(Contact, kid)).preferences
+    assert prefs["store_contact_opt_out"] is True and prefs["store_followup_opt_out"] is True       # flags permanentes preservadas
+    assert prefs["store_contact_opt_out_message_id"] == msg_a.id and "store_contact_opt_out_at" in prefs
+    if tipo == "audio_request":
+        assert prefs["reply_mode"] == "audio"                                      # a decisão do segundo escritor também foi gravada
+    if tipo == "text_only":
+        assert prefs["reply_mode"] == "texto" and prefs["voice_opt_out"] is True
+    if tipo == "refusal":
+        assert "store_followup_paused_until" in prefs
+
+
+async def test_acompanhamento_posterior_nao_chama_o_provedor_depois_do_segundo_escritor(env):
+    cid, kid, qid, _ = await queued_followup(env)
+    async with env.sessions() as db_a, env.sessions() as db_b:
+        contact_a, contact_b = await db_a.get(Contact, kid), await db_b.get(Contact, kid)
+        await store_optout.handle_inbound(db_a, contact_a, await _msg_for(db_a, kid, "PARAR"))
+        await store_optout.handle_inbound(db_b, contact_b, await _msg_for(db_b, kid, "quero áudio"))
+    await drain()
+    assert env.text.calls == []
+    assert (await all_followups(env))[0].status == "cancelled"
+    async with env.sessions() as db:                        # e um planejamento novo continua enxergando o opt-out
+        assert store_optout.is_blocked(await db.get(Contact, kid)) == "cliente pediu para não receber contatos"
+
+
+async def test_agente_nao_consegue_apagar_opt_out_pela_ferramenta_de_preferencias(env):
+    from memory.manager import memory_manager
+    cid, kid = await add_customer(env, prefs={"store_contact_opt_out": True, "store_followup_opt_out": True})
+    async with env.sessions() as db:
+        for key in sorted(store_optout.PROTECTED_PREFERENCE_KEYS):
+            with pytest.raises(ValueError):
+                await memory_manager.set_preference(db, kid, key, False)
+        prefs = await memory_manager.set_preference(db, kid, "cor_favorita", "azul")      # chaves comuns continuam funcionando
+    assert prefs["cor_favorita"] == "azul" and prefs["store_contact_opt_out"] is True
+
+
+async def test_set_preference_nao_apaga_o_que_outra_sessao_confirmou(env):
+    from memory.manager import memory_manager
+    cid, kid = await add_customer(env)
+    async with env.sessions() as db_a, env.sessions() as db_b:
+        await db_a.get(Contact, kid)
+        stale_b = await db_b.get(Contact, kid)                                       # objeto antigo na sessão B
+        await store_optout.handle_inbound(db_a, await db_a.get(Contact, kid), await _msg_for(db_a, kid, "PARAR"))
+        assert stale_b.preferences == {}
+        prefs = await memory_manager.set_preference(db_b, kid, "cor_favorita", "azul")
+    assert prefs["store_contact_opt_out"] is True and prefs["cor_favorita"] == "azul"

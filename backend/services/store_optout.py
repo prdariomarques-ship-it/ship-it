@@ -29,12 +29,19 @@ from models.contact import Contact
 from models.message import Message
 from models.store_followup import StoreFollowup
 from models.store_voice import StoreVoiceSend
+from repositories.contact import ContactRepository
 from services import conversation_control
 from utils.config import get_settings
 
 ACK_OPTOUT = "Pronto: não vou mais enviar contatos automáticos. Se precisar de algo, é só chamar por aqui."
 ACK_REFUSAL = "Tudo bem, obrigado por avisar. Se precisar de algo, é só chamar por aqui."
 ACK_TEXT_ONLY = "Combinado: daqui para frente respondo só por texto."
+
+# Chaves que só o fluxo de recusa do cliente escreve; nenhum outro escritor de `Contact.preferences` pode alterá-las.
+PROTECTED_PREFERENCE_KEYS = frozenset({
+    "store_contact_opt_out", "store_followup_opt_out", "store_contact_opt_out_at", "store_contact_opt_out_message_id",
+    "store_followup_paused_until",
+})
 
 _MAX_LEN = 80
 _OPTOUT = re.compile(
@@ -119,6 +126,11 @@ async def handle_inbound(db: AsyncSession, contact: Contact, message: Message) -
     # Toma a trava da conversa ANTES de gravar a preferência: um envio proativo que já passou da conferência (reserve_plain_send
     # com guard) termina primeiro; um que ainda vai conferir enxerga a recusa gravada. Sem corrida entre os dois.
     await conversation_control.lock_scope(db, contact.id, message.whatsapp_instance or s.evolution_instance)
+    # O objeto `contact` pode ter sido carregado ANTES das travas: relê do banco (com trava de linha) e só então mescla. Sem isso,
+    # gravar o dicionário antigo apagaria um opt-out confirmado por outra sessão nesse intervalo (perda de atualização do JSON).
+    fresh = await ContactRepository(db).lock_fresh(contact.id)
+    if fresh is not None:
+        contact = fresh
     prefs = dict(contact.preferences or {})
     if kind == AUDIO_REQUEST:
         prefs.update(reply_mode="audio", voice_opt_out=False)

@@ -117,11 +117,17 @@ class MemoryManager:
         self, db: AsyncSession, contact_id: int, key: str, value: object
     ) -> dict:
         """Merge one preference into the contact's preferences; returns the full dict."""
+        from services.store_optout import PROTECTED_PREFERENCE_KEYS
+
+        if key in PROTECTED_PREFERENCE_KEYS:
+            # Opt-out e pausa por recusa são decisões do CLIENTE gravadas pelo fluxo de recusa; nem um agente (LLM) nem uma
+            # memória aprendida podem apagá-las ou alterá-las.
+            raise ValueError(f"Preference {key!r} is protected")
         repository = ContactRepository(db)
-        contact = await repository.get(contact_id)
+        contact = await repository.lock_fresh(contact_id)  # relê com trava: não sobrescreve preferências confirmadas por outro escritor
         if contact is None:
             raise ValueError(f"Contact {contact_id} not found")
-        preferences = {**contact.preferences, key: value}
+        preferences = {**(contact.preferences or {}), key: value}
         await repository.update(contact, preferences=preferences)
         return preferences
 

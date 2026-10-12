@@ -224,3 +224,33 @@ async def test_dois_acompanhamentos_do_mesmo_contato_em_paralelo_geram_no_maximo
     async with pg.sessions() as db:
         statuses = sorted(f.status for f in (await db.scalars(select(StoreFollowup))).all())
     assert statuses == ["cancelled", "queued"], statuses
+
+
+@pytest.mark.parametrize("texto", ["quero áudio", "só texto", "não tenho interesse"])
+async def test_duas_sessoes_com_barreira_apos_as_leituras_iniciais_preservam_o_opt_out(pg, texto):
+    """Revisão do commit a526602: duas sessões leem o contato (preferences={}), esperam uma pela outra e SÓ ENTÃO escrevem —
+    PARAR e outro escritor concorrentes. Qualquer ordem de execução termina com as flags permanentes verdadeiras."""
+    barrier = asyncio.Barrier(2)
+
+    async def writer(content):
+        async with pg.sessions() as db:
+            contact = await db.get(Contact, pg.contact_id)
+            assert contact.preferences == {}                                # leitura inicial, antes de qualquer escrita
+            msg = Message(contact_id=pg.contact_id, direction=MessageDirection.INBOUND, media_type=MessageMediaType.TEXT, content=content,
+                          whatsapp_instance=STORE, created_at=NOW - timedelta(minutes=1))
+            db.add(msg)
+            await db.flush()
+            await asyncio.wait_for(barrier.wait(), 10)                      # as DUAS leituras já aconteceram
+            return await store_optout.handle_inbound(db, contact, msg)
+    # ordem forçada nas duas direções: o segundo a obter a trava é quem tem o objeto defasado
+    r = await asyncio.gather(writer("PARAR"), writer(texto))
+    assert store_optout.ACK_OPTOUT in r
+    async with pg.sessions() as db:
+        prefs = (await db.get(Contact, pg.contact_id)).preferences
+    assert prefs["store_contact_opt_out"] is True and prefs["store_followup_opt_out"] is True and "store_contact_opt_out_at" in prefs
+    # o acompanhamento posterior não chama o provedor
+    async with pg.sessions() as db:
+        await sf.run_due(db, now=NOW, apply=True)
+    for _ in range(4):
+        await JobWorker().run_once()
+    assert pg.text.calls == []
