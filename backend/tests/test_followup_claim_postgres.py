@@ -226,13 +226,16 @@ async def test_dois_acompanhamentos_do_mesmo_contato_em_paralelo_geram_no_maximo
     assert statuses == ["cancelled", "queued"], statuses
 
 
+@pytest.mark.parametrize("ordem", ["parar_primeiro", "outro_primeiro"])
 @pytest.mark.parametrize("texto", ["quero áudio", "só texto", "não tenho interesse"])
-async def test_duas_sessoes_com_barreira_apos_as_leituras_iniciais_preservam_o_opt_out(pg, texto):
-    """Revisão do commit a526602: duas sessões leem o contato (preferences={}), esperam uma pela outra e SÓ ENTÃO escrevem —
-    PARAR e outro escritor concorrentes. Qualquer ordem de execução termina com as flags permanentes verdadeiras."""
+async def test_duas_sessoes_com_barreira_apos_as_leituras_iniciais_nas_duas_ordens(pg, texto, ordem):
+    """Revisão do commit a526602: duas sessões leem o contato (preferences={}), esperam uma pela outra e SÓ ENTÃO escrevem. A ordem
+    é FORÇADA (não fica ao acaso): o segundo só começa depois que o primeiro confirmou. Nas duas ordens, as flags permanentes ficam
+    verdadeiras, a decisão do outro escritor também é gravada e o acompanhamento posterior não chama o provedor."""
     barrier = asyncio.Barrier(2)
+    first_done = asyncio.Event()
 
-    async def writer(content):
+    async def writer(content, goes_first):
         async with pg.sessions() as db:
             contact = await db.get(Contact, pg.contact_id)
             assert contact.preferences == {}                                # leitura inicial, antes de qualquer escrita
@@ -241,16 +244,128 @@ async def test_duas_sessoes_com_barreira_apos_as_leituras_iniciais_preservam_o_o
             db.add(msg)
             await db.flush()
             await asyncio.wait_for(barrier.wait(), 10)                      # as DUAS leituras já aconteceram
-            return await store_optout.handle_inbound(db, contact, msg)
-    # ordem forçada nas duas direções: o segundo a obter a trava é quem tem o objeto defasado
-    r = await asyncio.gather(writer("PARAR"), writer(texto))
+            if not goes_first:
+                await asyncio.wait_for(first_done.wait(), 15)               # o segundo escritor tem o objeto DEFASADO
+            reply = await store_optout.handle_inbound(db, contact, msg)
+            if goes_first:
+                first_done.set()
+            return reply
+    parar_first = ordem == "parar_primeiro"
+    r = await asyncio.gather(writer("PARAR", parar_first), writer(texto, not parar_first))
     assert store_optout.ACK_OPTOUT in r
     async with pg.sessions() as db:
         prefs = (await db.get(Contact, pg.contact_id)).preferences
     assert prefs["store_contact_opt_out"] is True and prefs["store_followup_opt_out"] is True and "store_contact_opt_out_at" in prefs
-    # o acompanhamento posterior não chama o provedor
+    if texto == "quero áudio":
+        assert prefs["reply_mode"] == "audio"
+    if texto == "só texto":
+        assert prefs["reply_mode"] == "texto" and prefs["voice_opt_out"] is True
+    if texto == "não tenho interesse":
+        assert "store_followup_paused_until" in prefs
     async with pg.sessions() as db:
         await sf.run_due(db, now=NOW, apply=True)
     for _ in range(4):
         await JobWorker().run_once()
     assert pg.text.calls == []
+
+
+# ------------------------------------------------------------------------------------------------ C11: API de contatos × PARAR
+@pytest_asyncio.fixture
+async def api(pg):
+    from httpx import ASGITransport, AsyncClient
+
+    from auth.dependencies import get_current_user
+    from database.session import get_db
+    from main import app
+
+    async def override_get_db():
+        async with pg.sessions() as session:
+            yield session
+
+    class _User:
+        id, is_active, role = 1, True, "admin"
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: _User()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+async def _parar(pg):
+    async with pg.sessions() as db:
+        contact = await db.get(Contact, pg.contact_id)
+        msg = Message(contact_id=pg.contact_id, direction=MessageDirection.INBOUND, media_type=MessageMediaType.TEXT, content="PARAR",
+                      whatsapp_instance=STORE, created_at=NOW - timedelta(minutes=1))
+        db.add(msg)
+        await db.flush()
+        return await store_optout.handle_inbound(db, contact, msg)
+
+
+@pytest.mark.parametrize("payload", [{"preferences": {}}, {"preferences": {"cor": "azul"}}, {"preferences": {"store_contact_opt_out": False}}])
+async def test_api_carregou_antes_do_parar_e_grava_depois_nao_apaga_o_opt_out(pg, api, monkeypatch, payload):
+    """Ordem 1 FORÇADA: a requisição da API já carregou o contato (preferences={}), o PARAR confirma, e só então a API grava."""
+    from repositories.contact import ContactRepository
+    gate = asyncio.Event()
+    real = ContactRepository.lock_fresh
+    holder = {"block_next": True}
+
+    async def gated(self, contact_id):
+        if holder["block_next"]:                                             # a PRIMEIRA releitura é a da API (o PARAR ainda não começou)
+            holder["block_next"] = False
+            await asyncio.wait_for(gate.wait(), 15)                          # a API espera, com o objeto antigo já carregado
+        return await real(self, contact_id)
+    monkeypatch.setattr(ContactRepository, "lock_fresh", gated)
+
+    async def do_patch():
+        return await api.patch(f"/api/contacts/{pg.contact_id}", json=payload)
+    task = asyncio.create_task(do_patch())
+    await asyncio.sleep(0.5)                                                 # a API está parada no portão
+    assert not task.done()
+    assert await _parar(pg) == store_optout.ACK_OPTOUT                       # PARAR confirmado primeiro
+    gate.set()
+    resp = await asyncio.wait_for(task, 15)
+    assert resp.status_code in (200, 422)                                    # 422 só para a tentativa de afrouxar
+    async with pg.sessions() as db:
+        prefs = (await db.get(Contact, pg.contact_id)).preferences
+    assert prefs["store_contact_opt_out"] is True and prefs["store_followup_opt_out"] is True
+    if payload["preferences"].get("cor"):
+        assert prefs["cor"] == "azul"
+    async with pg.sessions() as db:
+        await sf.run_due(db, now=NOW, apply=True)
+    for _ in range(4):
+        await JobWorker().run_once()
+    assert pg.text.calls == []
+
+
+async def test_api_confirma_antes_do_parar_com_objeto_antigo_e_o_parar_preserva_a_alteracao_da_api(pg, api, monkeypatch):
+    """Ordem 2 FORÇADA: o PARAR carregou o contato antes; a API confirma primeiro; o PARAR (objeto defasado) preserva a chave da API."""
+    async with pg.sessions() as db_parar:
+        stale = await db_parar.get(Contact, pg.contact_id)
+        assert stale.preferences == {}
+        msg = Message(contact_id=pg.contact_id, direction=MessageDirection.INBOUND, media_type=MessageMediaType.TEXT, content="PARAR",
+                      whatsapp_instance=STORE, created_at=NOW - timedelta(minutes=1))
+        db_parar.add(msg)
+        await db_parar.flush()
+        r = await api.patch(f"/api/contacts/{pg.contact_id}", json={"preferences": {"cor": "azul"}})        # a API confirma primeiro
+        assert r.status_code == 200
+        assert await store_optout.handle_inbound(db_parar, stale, msg) == store_optout.ACK_OPTOUT
+    async with pg.sessions() as db:
+        prefs = (await db.get(Contact, pg.contact_id)).preferences
+    assert prefs["cor"] == "azul" and prefs["store_contact_opt_out"] is True
+
+
+async def test_api_e_parar_realmente_concorrentes_nao_perdem_nada(pg, api):
+    barrier = asyncio.Barrier(2)
+
+    async def patch():
+        await asyncio.wait_for(barrier.wait(), 10)
+        return await api.patch(f"/api/contacts/{pg.contact_id}", json={"preferences": {"cor": "azul"}})
+
+    async def parar():
+        await asyncio.wait_for(barrier.wait(), 10)
+        return await _parar(pg)
+    r_api, r_parar = await asyncio.gather(patch(), parar())
+    assert r_api.status_code == 200 and r_parar == store_optout.ACK_OPTOUT
+    async with pg.sessions() as db:
+        prefs = (await db.get(Contact, pg.contact_id)).preferences
+    assert prefs["cor"] == "azul" and prefs["store_contact_opt_out"] is True and prefs["store_followup_opt_out"] is True

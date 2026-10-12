@@ -15,6 +15,7 @@ from repositories.church import ChurchMemberRepository
 from repositories.contact import ContactRepository
 from repositories.product import ProductRepository
 from services.cache import cache_service
+from services.contact_preferences import prepare_contact_update
 from models import (
     CalendarEvent,
     ChurchMember,
@@ -38,6 +39,7 @@ contacts_router = create_crud_router(
     update_schema=schemas.ContactUpdate,
     read_schema=schemas.ContactRead,
     repository_cls=ContactRepository,
+    prepare_update=prepare_contact_update,   # preferences: mescla sob trava e protege o opt-out (nunca substitui o dicionário)
 )
 
 tasks_router = create_crud_router(

@@ -115,6 +115,27 @@ async def _cancel_pending(db: AsyncSession, contact_id: int, reason: str, *, voi
     return count
 
 
+async def locked_preferences(db: AsyncSession, contact: Contact, instance: str) -> tuple[Contact, dict]:
+    """Ponto ÚNICO para quem vai gravar `preferences` de um contato: toma a trava da conversa (ordem em relação a um envio
+    proativo que confere e reserva sob a mesma trava) e RELÊ o contato do banco com trava de linha. O objeto recebido pode ter
+    sido carregado antes das travas; gravar o dicionário dele apagaria o que outro escritor confirmou nesse intervalo.
+    Devolve (contato atualizado, cópia do dicionário relido). Não faz commit."""
+    await conversation_control.lock_scope(db, contact.id, instance)
+    fresh = await ContactRepository(db).lock_fresh(contact.id)
+    contact = fresh if fresh is not None else contact
+    return contact, dict(contact.preferences or {})
+
+
+async def mark_opt_out(db: AsyncSession, contact: Contact, *, instance: str, message_id: int | None = None) -> Contact:
+    """Grava o opt-out permanente de contatos (mesmas chaves que a loja e o pós-venda de produção respeitam), com a releitura
+    travada. Destinado também ao `stop_followups` do pós-venda quando ele for integrado. Não faz commit."""
+    contact, prefs = await locked_preferences(db, contact, instance)
+    prefs.update(store_contact_opt_out=True, store_followup_opt_out=True, store_contact_opt_out_at=datetime.now(timezone.utc).isoformat(),
+                 store_contact_opt_out_message_id=message_id)
+    contact.preferences = prefs
+    return contact
+
+
 async def handle_inbound(db: AsyncSession, contact: Contact, message: Message) -> str | None:
     """Se a mensagem do cliente for opt-out/recusa/só texto, aplica o efeito, confirma ao cliente e devolve o texto de
     confirmação (o chamador envia e NÃO chama o agente). Caso contrário devolve None sem tocar em nada."""
@@ -123,15 +144,7 @@ async def handle_inbound(db: AsyncSession, contact: Contact, message: Message) -
         return None
     s = get_settings()
     now = datetime.now(timezone.utc)
-    # Toma a trava da conversa ANTES de gravar a preferência: um envio proativo que já passou da conferência (reserve_plain_send
-    # com guard) termina primeiro; um que ainda vai conferir enxerga a recusa gravada. Sem corrida entre os dois.
-    await conversation_control.lock_scope(db, contact.id, message.whatsapp_instance or s.evolution_instance)
-    # O objeto `contact` pode ter sido carregado ANTES das travas: relê do banco (com trava de linha) e só então mescla. Sem isso,
-    # gravar o dicionário antigo apagaria um opt-out confirmado por outra sessão nesse intervalo (perda de atualização do JSON).
-    fresh = await ContactRepository(db).lock_fresh(contact.id)
-    if fresh is not None:
-        contact = fresh
-    prefs = dict(contact.preferences or {})
+    contact, prefs = await locked_preferences(db, contact, message.whatsapp_instance or s.evolution_instance)
     if kind == AUDIO_REQUEST:
         prefs.update(reply_mode="audio", voice_opt_out=False)
         contact.preferences = prefs

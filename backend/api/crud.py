@@ -5,6 +5,7 @@ resource router consistent (auth required, pagination, 404 handling) without
 repeating the same handlers ten times.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -29,6 +30,7 @@ def create_crud_router(
     read_schema: type[BaseModel],
     user_scoped: bool = False,
     repository_cls: type[SQLAlchemyRepository] | None = None,
+    prepare_update: Callable[[AsyncSession, Any, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
 ) -> APIRouter:
     """Build a CRUD router. When user_scoped, rows belong to the current user.
 
@@ -36,6 +38,9 @@ def create_crud_router(
     `SQLAlchemyRepository` subclass -- lets a resource with a specialized
     repository (e.g. `ContactRepository.search_by_name`) keep using it
     through this shared factory rather than losing it to a generic one.
+
+    `prepare_update`, when given, receives (session, item, fields) just before a PATCH is written and returns the fields to
+    write -- the place for a resource to merge instead of replace (contacts' `preferences`) or to refuse a protected change.
     """
     router = APIRouter(prefix=prefix, tags=[tag])
 
@@ -127,7 +132,10 @@ def create_crud_router(
     ) -> Base:
         repository = Repository(db)
         item = await _get_or_404(repository, item_id, current_user.id)
-        return await repository.update(item, **payload.model_dump(exclude_unset=True))  # type: ignore[attr-defined]
+        data = payload.model_dump(exclude_unset=True)  # type: ignore[attr-defined]
+        if prepare_update is not None:
+            data = await prepare_update(db, item, data)
+        return await repository.update(item, **data)
 
     @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_item(
