@@ -6,6 +6,7 @@ Dados 100% fictícios.
 """
 import base64
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -70,6 +71,9 @@ class FakeSynth:
         self.data, self.error, self.calls, self.before = data, error, [], None
 
     async def __call__(self, text, request_id):
+        # Contrato REAL do serviço (voice-service/app/service.py): um request_id curto leva 422 em produção. Este simulador o
+        # reproduz para que o pipeline não possa passar com um id inválido (bug achado só na demonstração com o serviço real).
+        assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,63}$", request_id), request_id
         self.calls.append((text, request_id))
         if self.before:
             await self.before()
@@ -208,7 +212,7 @@ async def test_texto_primeiro_depois_voz_curta_pela_instancia_da_loja(env):
     (row,) = await rows(env)
     assert row.status == "sent" and row.receipt_id == "VOZ-1" and row.audio_sha256 == hashlib.sha256(AUDIO).hexdigest()
     assert row.script_text.startswith(store_voice.DISCLOSURE) and not any(ch.isdigit() for ch in row.script_text)
-    assert env.synth.calls[0][0] == row.script_text and env.synth.calls[0][1] == f"voice-{row.id}"
+    assert env.synth.calls[0][0] == row.script_text and env.synth.calls[0][1] == f"store-voice-{row.id}"
     assert [h["event"] for h in row.history] == ["queued", "generating", "sending", "sent"]
     async with env.sessions() as db:
         sent = (await db.scalars(select(Message).where(Message.direction == MessageDirection.OUTBOUND, Message.media_type == MessageMediaType.AUDIO))).all()

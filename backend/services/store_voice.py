@@ -284,7 +284,7 @@ async def deliver(db: AsyncSession, payload: dict) -> None:
     _note(row, "generating")
     await db.commit()
     try:
-        audio = await voice_client.synthesize(row.script_text, f"voice-{row.id}")
+        audio = await voice_client.synthesize(row.script_text, f"store-voice-{row.id}")
     except voice_client.VoiceError as exc:
         await _finish(db, row, "failed_before_send", f"serviço de voz: {exc.code}")
         return

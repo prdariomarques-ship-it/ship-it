@@ -34,7 +34,7 @@ Regra de leitura: **código existente ≠ teste executado ≠ implantação comp
 
 Executados por mim, neste ambiente (Python 3.11, 4 vCPU, 15 GiB RAM, **sem GPU**), dados sintéticos, SQLite isolado:
 
-- `backend/tests` no ramo-base **antes** de qualquer mudança: **1144 passaram** (3 min 53 s).
+- `backend/tests` no ramo-base **antes** de qualquer mudança: **1144 passaram** (3 min 53 s); **depois** das mudanças: **1331 passaram**.
 - `ruff check` e `mypy` (mesma configuração da CI): ruff limpo; mypy = **12 erros pré-existentes** (módulos de produção ausentes, `psutil` sem stubs) — **nenhum novo**.
 - Relatados por terceiros/entregas anteriores, **não reproduzidos agora**: 153 testes de `whatsapp_agents_fix/`; resultados da PR #63; CI do GitHub. Os 229 testes do FH4 foram reproduzidos **em rodada anterior desta sessão** (PostgreSQL descartável), não agora.
 

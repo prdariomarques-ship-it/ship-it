@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -36,8 +37,15 @@ class VoiceAudio:
     audio_id: str
 
 
+# Mesmo contrato de voice-service/app/service.py (_REQUEST_ID): descoberto numa demonstração com o serviço REAL, em que um
+# request_id curto ("voice-1") era recusado com 422 pelo esquema do serviço, embora os testes com transporte simulado passassem.
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,63}$")
+
+
 async def synthesize(text: str, request_id: str, *, client: httpx.AsyncClient | None = None) -> VoiceAudio:
     s = get_settings()
+    if not _REQUEST_ID.match(request_id or ""):
+        raise VoiceRejected("bad_request_id", "request_id fora do contrato do serviço de voz (8 a 64 caracteres [A-Za-z0-9_.:-])")
     if not s.store_voice_url or not s.store_voice_token:
         raise VoiceUnavailable("not_configured", "serviço de voz não configurado")
     if not s.store_voice_url.startswith(("http://", "https://")):
