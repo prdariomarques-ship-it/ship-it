@@ -16,7 +16,6 @@ from __future__ import annotations
 import re
 import statistics
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -30,7 +29,7 @@ from models.store_aftercare import StoreSupportCase
 from models.store_followup import StoreFollowup
 from providers.whatsapp.base import normalize_phone
 from repositories.product import ProductRepository
-from services import conversation_control, store_optout
+from services import conversation_control, store_hours, store_optout
 from utils.config import Settings, get_settings
 from utils.logging import get_logger
 
@@ -56,29 +55,17 @@ def _note(fu: StoreFollowup, event: str, detail: object = None) -> None:
 # ---------------------------------------------------------------------------------------------------------------------
 # Janela de horário (fuso da loja)
 # ---------------------------------------------------------------------------------------------------------------------
-def _allowed_days(s: Settings) -> set[int]:
-    return {int(x) for x in s.store_followup_days.split(",") if x.strip().isdigit()}
+def _margin(s: Settings) -> timedelta:
+    return timedelta(minutes=s.store_followup_close_margin_minutes)
 
 
 def in_window(moment: datetime, s: Settings) -> bool:
-    local = _aware(moment).astimezone(ZoneInfo(s.store_timezone))
-    return local.weekday() in _allowed_days(s) and s.store_followup_window_start_hour <= local.hour < s.store_followup_window_end_hour
+    """Contato proativo só com a loja aberta (store_hours) e fora dos últimos minutos antes de fechar."""
+    return store_hours.is_open(moment, s, close_margin=_margin(s))
 
 
 def next_window(moment: datetime, s: Settings) -> datetime:
-    """Primeiro instante >= moment dentro da janela (dias e horas permitidos, fuso da loja)."""
-    tz = ZoneInfo(s.store_timezone)
-    local = _aware(moment).astimezone(tz)
-    days = _allowed_days(s) or {0, 1, 2, 3, 4}
-    for offset in range(0, 15):
-        day = (local + timedelta(days=offset)).replace(hour=s.store_followup_window_start_hour, minute=0, second=0, microsecond=0)
-        if day.weekday() not in days:
-            continue
-        end = day.replace(hour=s.store_followup_window_end_hour)
-        candidate = max(local, day)
-        if candidate < end:
-            return candidate.astimezone(timezone.utc)
-    raise ValueError("janela de acompanhamento sem dias permitidos")
+    return store_hours.next_open(moment, s, close_margin=_margin(s))
 
 
 # ---------------------------------------------------------------------------------------------------------------------

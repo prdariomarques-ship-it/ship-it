@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from utils.version_file import read_version_file
@@ -360,8 +361,6 @@ class Settings(BaseSettings):
     # o scanner só roda quando um operador o aciona (scripts/store_followups.py), e começa em modo de simulação.
     store_followups_enabled: bool = False
     store_timezone: str = "America/Sao_Paulo"
-    store_followup_window_start_hour: int = 9
-    store_followup_window_end_hour: int = 18
     store_followup_quote_resume_delay_minutes: int = 120  # após o vencimento do orçamento
     store_followup_max_age_days: int = 7  # orçamentos mais antigos que isto não são retomados
     store_followup_max_attempts: int = 1
@@ -370,10 +369,40 @@ class Settings(BaseSettings):
     store_followup_restock_tolerance: float = 0.25  # fração do intervalo médio aceita antes de sugerir reposição
     store_followup_scan_limit: int = 50
     store_followup_refusal_cooldown_days: int = 30  # pausa após uma recusa (não é opt-out permanente)
-    store_followup_days: str = "0,1,2,3,4,5"  # dias da semana permitidos (segunda=0 ... domingo=6)
+    # Horário de atendimento da loja (informado pelo proprietário em 12/10/2026; A CONFIRMAR com a equipe). Domingo não informado
+    # => sem atendimento informado. Alimenta a resposta do agente sobre horário E a janela dos contatos proativos
+    # (services/store_hours.py). Configuração inválida é REJEITADA na carga, nunca corrigida em silêncio.
+    store_hours: str = '{"mon-fri": ["08:30", "17:30"], "sat": ["08:30", "12:30"], "holiday": ["08:30", "12:30"]}'
+    store_extra_holidays: str = ""  # datas AAAA-MM-DD separadas por vírgula (municipais/estaduais/Carnaval/Corpus Christi da loja)
+    store_excluded_holidays: str = ""  # datas dos feriados nacionais presumidos em que a loja NÃO segue o horário de feriado
+    store_followup_close_margin_minutes: int = 30  # contatos proativos não saem nos últimos N min antes de fechar
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
+
+    @field_validator("store_hours")
+    @classmethod
+    def _store_hours_valido(cls, valor: str) -> str:
+        """Horário de loja inválido derruba a carga com erro claro: prometer horário errado ao cliente é pior que não subir."""
+        from services.store_hours import StoreHoursError, parse_hours
+
+        try:
+            parse_hours(valor)
+        except StoreHoursError as exc:
+            raise ValueError(f"store_hours inválido: {exc}") from exc
+        return valor
+
+    @field_validator("store_extra_holidays", "store_excluded_holidays")
+    @classmethod
+    def _datas_de_feriado_validas(cls, valor: str, info) -> str:
+        from datetime import date
+
+        for parte in [p.strip() for p in valor.split(",") if p.strip()]:
+            try:
+                date.fromisoformat(parte)
+            except ValueError as exc:
+                raise ValueError(f"{info.field_name}: data inválida {parte!r} (use AAAA-MM-DD)") from exc
+        return valor
 
     @property
     def cors_origin_list(self) -> list[str]:

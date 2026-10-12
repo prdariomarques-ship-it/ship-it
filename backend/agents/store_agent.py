@@ -10,6 +10,7 @@ from agents.tools.communication import (
 from agents.tools.domain import (
     add_store_customer_tool,
     create_quote_tool,
+    get_store_hours_tool,
     list_products_tool,
     list_store_customers_tool,
     record_order_tool,
@@ -63,6 +64,9 @@ class StoreAgent(BaseAgent):
             "5. Só depois que o cliente confirmar a compra, use record_order -- isso "
             "grava o pedido no histórico do cliente e baixa o estoque. Nunca chame "
             "record_order sem confirmação explícita do cliente.\n\n"
+            "Horário de funcionamento: use SEMPRE get_store_hours e repita só o que ela devolver; "
+            "nunca invente horário, e se o dia não tiver horário configurado (ex.: domingo ou feriado "
+            "municipal) diga que a equipe da loja confirma.\n\n"
             "Se um produto não existir no catálogo ou o estoque for insuficiente, "
             "diga isso claramente ao cliente em vez de prometer o que não pode "
             "cumprir."
@@ -76,6 +80,7 @@ class StoreAgent(BaseAgent):
             update_store_customer_segment_tool,
             list_products_tool,
             search_products_tool,
+            get_store_hours_tool,
             create_quote_tool,
             record_order_tool,
             find_contact_tool,

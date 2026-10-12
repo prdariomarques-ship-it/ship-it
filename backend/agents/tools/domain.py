@@ -8,7 +8,9 @@ from models.store import StoreCustomer
 from repositories.base import SQLAlchemyRepository
 from repositories.church import ChurchMemberRepository
 from repositories.product import ProductRepository
+from services import store_hours
 from services.validation import validate_email, validate_phone_e164
+from utils.config import get_settings
 
 # Mantido em espelho com api/schemas.py::_STORE_SEGMENTS -- não importar
 # daqui para lá (API não deve depender da camada de agentes/tools).
@@ -312,6 +314,37 @@ search_products_tool = Tool(
         "type": "object",
         "properties": {"query": {"type": "string"}},
         "required": ["query"],
+    },
+)
+
+async def _get_store_hours(context: ToolContext, date: str | None = None) -> str:
+    """Horário de atendimento CONFIGURADO da loja (nunca presumido) e se está aberta agora ou numa data."""
+    settings = get_settings()
+    try:
+        when = datetime.now(timezone.utc)
+        if date:
+            from datetime import date as _date
+            from zoneinfo import ZoneInfo
+
+            d = _date.fromisoformat(date)
+            when = datetime(d.year, d.month, d.day, 12, 0, tzinfo=ZoneInfo(settings.store_timezone))
+        return ok(**store_hours.status_at(when, settings))
+    except (ValueError, store_hours.StoreHoursError):
+        return ok(erro="Informe a data como AAAA-MM-DD ou deixe em branco para consultar agora.")
+
+
+get_store_hours_tool = Tool(
+    name="get_store_hours",
+    description=(
+        "Informa o horário de atendimento da loja (dias úteis, sábado, feriados) e se a loja está aberta agora ou em uma data. "
+        "USE sempre que o cliente perguntar horário de funcionamento/abertura/fechamento; nunca invente horário. Domingo e "
+        "feriados municipais podem não estar configurados: nesse caso diga que a equipe confirma."
+    ),
+    handler=_get_store_hours,
+    parameters={
+        "type": "object",
+        "properties": {"date": {"type": "string", "description": "Data AAAA-MM-DD (opcional; padrão: agora)."}},
+        "required": [],
     },
 )
 

@@ -28,13 +28,14 @@ Regra de leitura: **código existente ≠ teste executado ≠ implantação comp
 | **Envio de mídia pelo Evolution** | Repositório: `EvolutionProvider.send_image/send_file/send_audio(url)` — `message/sendMedia`, `message/sendWhatsAppAudio` com corpo plano `{number, audio}`; coleta tem `download_media` (`chat/getBase64FromMediaMessage`) **que o repositório não tem** | existe (URL); base64 não | **Versão instalada do Evolution não confirmada** (só `docker/.env.example`). Reprodução como mensagem de voz **só se confirma no aparelho**. Nenhuma geração de voz existia: `grep` por TTS/ElevenLabs no repositório = só o nome do método `sendWhatsAppAudio`. |
 | **Fila, tentativas, deduplicação, pausa humana** | Repositório (PR #63): worker com CAS, `conversation_control` (pausa, `claim_send`, `reserve_plain_send` por job, recibos), `incident_dedup`. Coleta: worker original (sem essas reservas). FH: `effect_claims` | existe, **em linhas diferentes** | Três linhas não unificadas: coleta (produção), PR #63 (não mergeada), FH (não implantada). Lacuna registrada no tracking: pausa humana **não** barra envios já enfileirados de Loja/B2B/Azusa (envio comum só tem a reserva por job). |
 | **Twin (`darius_twin.py`)** | `c9351131…`: monta mensagens ao LLM no estilo do proprietário; **nenhuma geração de áudio** | existe (texto) | Não é o vendedor da loja; permanece separado (instância pessoal, `whatsapp_twin_mode_enabled`). |
+| **Horário de atendimento** | O agente respondeu em conversa real "não tenho confirmado o horário; a equipe confirma" (relato do proprietário, 12/10): nenhuma fonte de horário existia no código nem na configuração | **não existia** | Horário informado pelo proprietário (seg–sex 08:30–17:30; sáb e feriados 08:30–12:30; domingo **não informado**) agora é configuração (`STORE_HOURS`, `services/store_hours.py`, ferramenta `get_store_hours`). **A confirmar com a equipe**; feriados municipais/estaduais precisam ser cadastrados. O prompt do `store_agent.py` **de produção não foi coletado**: a mesma ferramenta/instrução precisa ser aplicada lá. |
 | **Voz sintética** | — | **não existia** | Criada nesta etapa (`voice-service/`). |
 
 ## 3. Testes: o que **eu executei** nesta etapa × o que só foi relatado
 
 Executados por mim, neste ambiente (Python 3.11, 4 vCPU, 15 GiB RAM, **sem GPU**), dados sintéticos, SQLite isolado:
 
-- `backend/tests` no ramo-base **antes** de qualquer mudança: **1144 passaram** (3 min 53 s); **depois** das mudanças: **1331 passaram**.
+- `backend/tests` no ramo-base **antes** de qualquer mudança: **1144 passaram** (3 min 53 s); **depois** das mudanças: **1374 passaram**.
 - `ruff check` e `mypy` (mesma configuração da CI): ruff limpo; mypy = **12 erros pré-existentes** (módulos de produção ausentes, `psutil` sem stubs) — **nenhum novo**.
 - Relatados por terceiros/entregas anteriores, **não reproduzidos agora**: 153 testes de `whatsapp_agents_fix/`; resultados da PR #63; CI do GitHub. Os 229 testes do FH4 foram reproduzidos **em rodada anterior desta sessão** (PostgreSQL descartável), não agora.
 

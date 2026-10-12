@@ -44,8 +44,9 @@ async def env(db_engine, monkeypatch):
     for k, v in dict(
         store_followups_enabled=True, store_whatsapp_enabled=True, auto_reply_enabled=True, evolution_instance=STORE,
         evolution_personal_instance="pessoal-teste", jobs_retry_backoff_seconds=0, store_voice_enabled=False,
-        store_timezone="America/Sao_Paulo", store_followup_window_start_hour=9, store_followup_window_end_hour=18,
-        store_followup_days="0,1,2,3,4,5", store_followup_quote_resume_delay_minutes=120, store_followup_max_age_days=7,
+        store_timezone="America/Sao_Paulo", store_followup_close_margin_minutes=30,
+        store_hours='{"mon-fri": ["08:30", "17:30"], "sat": ["08:30", "12:30"], "holiday": ["08:30", "12:30"]}',
+        store_extra_holidays="", store_excluded_holidays="", store_followup_quote_resume_delay_minutes=120, store_followup_max_age_days=7,
         store_followup_max_attempts=1, store_followup_min_gap_hours=72, store_followup_restock_min_orders=3,
         store_followup_restock_tolerance=0.25,
     ).items():
@@ -123,20 +124,26 @@ async def scenario(env, **cust):
 
 # ----------------------------------------------------------------------------------------------- janela
 @pytest.mark.parametrize("utc, dentro", [
-    (datetime(2026, 10, 6, 13, 0, tzinfo=timezone.utc), True),     # terça 10:00
-    (datetime(2026, 10, 6, 11, 59, tzinfo=timezone.utc), False),   # 08:59
-    (datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc), True),     # 09:00 exato
-    (datetime(2026, 10, 6, 20, 59, tzinfo=timezone.utc), True),    # 17:59
-    (datetime(2026, 10, 6, 21, 0, tzinfo=timezone.utc), False),    # 18:00 exato
-    (datetime(2026, 10, 11, 15, 0, tzinfo=timezone.utc), False),    # domingo 12:00
+    (datetime(2026, 10, 6, 13, 0, tzinfo=timezone.utc), True),      # terça 10:00
+    (datetime(2026, 10, 6, 11, 29, tzinfo=timezone.utc), False),    # terça 08:29 (antes de abrir 08:30)
+    (datetime(2026, 10, 6, 11, 30, tzinfo=timezone.utc), True),     # 08:30 exato
+    (datetime(2026, 10, 6, 19, 59, tzinfo=timezone.utc), True),     # 16:59 (fecha 17:30, margem de 30 min)
+    (datetime(2026, 10, 6, 20, 0, tzinfo=timezone.utc), False),     # 17:00: dentro da margem final
+    (datetime(2026, 10, 10, 14, 59, tzinfo=timezone.utc), True),    # sábado 11:59 (fecha 12:30, margem 30 min)
+    (datetime(2026, 10, 10, 15, 0, tzinfo=timezone.utc), False),    # sábado 12:00
+    (datetime(2026, 10, 10, 18, 0, tzinfo=timezone.utc), False),    # sábado à tarde
+    (datetime(2026, 10, 11, 15, 0, tzinfo=timezone.utc), False),    # domingo: sem atendimento informado
+    (datetime(2026, 10, 12, 13, 0, tzinfo=timezone.utc), True),     # segunda 12/10 = feriado (N. Sra. Aparecida): 10:00 dentro de 08:30–12:30
+    (datetime(2026, 10, 12, 16, 0, tzinfo=timezone.utc), False),    # feriado 13:00: fora (e dia útil estaria aberto)
 ])
 def test_janela_de_horario(env, utc, dentro):
     assert sf.in_window(utc, env.s) is dentro
 
 
-def test_proxima_janela_pula_noite_e_domingo(env):
-    assert sf.next_window(datetime(2026, 10, 6, 22, 0, tzinfo=timezone.utc), env.s) == datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)   # terça 19h -> quarta 9h
-    assert sf.next_window(datetime(2026, 10, 11, 15, 0, tzinfo=timezone.utc), env.s) == datetime(2026, 10, 12, 12, 0, tzinfo=timezone.utc)   # domingo -> segunda 9h
+def test_proxima_janela_pula_noite_domingo_e_respeita_feriado(env):
+    assert sf.next_window(datetime(2026, 10, 6, 22, 0, tzinfo=timezone.utc), env.s) == datetime(2026, 10, 7, 11, 30, tzinfo=timezone.utc)   # terça 19h -> quarta 08:30
+    assert sf.next_window(datetime(2026, 10, 11, 15, 0, tzinfo=timezone.utc), env.s) == datetime(2026, 10, 12, 11, 30, tzinfo=timezone.utc)  # domingo -> segunda (feriado) 08:30
+    assert sf.next_window(datetime(2026, 10, 10, 16, 0, tzinfo=timezone.utc), env.s) == datetime(2026, 10, 12, 11, 30, tzinfo=timezone.utc)  # sábado 13h -> segunda 08:30
     assert sf.next_window(NOW, env.s) == NOW
 
 
@@ -397,7 +404,7 @@ async def test_fora_da_janela_adia_sem_gastar_tentativa(env):
     (entry,) = await run(env, apply=True, now=night)
     assert entry["action"] == "defer"
     (fu,) = await all_followups(env)
-    assert fu.status == "scheduled" and fu.attempts == 0 and fu.due_at.replace(tzinfo=timezone.utc) == datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+    assert fu.status == "scheduled" and fu.attempts == 0 and fu.due_at.replace(tzinfo=timezone.utc) == datetime(2026, 10, 7, 11, 30, tzinfo=timezone.utc)
     assert fu.history[-1]["event"] == "deferred"
 
 
