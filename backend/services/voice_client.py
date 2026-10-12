@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 
@@ -42,6 +43,25 @@ class VoiceAudio:
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,63}$")
 
 
+_MAX_META_BYTES = 64 * 1024
+
+
+async def _read_bounded(response: httpx.Response, limit: int, what: str) -> bytes:
+    """Lê o corpo em fluxo e para ao ultrapassar `limit`, com ou sem Content-Length: um serviço defeituoso (ou comprometido) não
+    consegue fazer o backend alocar memória sem limite."""
+    declared = response.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise VoiceRejected("too_large", f"{what}: Content-Length {declared} acima do limite de {limit} bytes")
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > limit:
+            raise VoiceRejected("too_large", f"{what}: corpo acima do limite de {limit} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def synthesize(text: str, request_id: str, *, client: httpx.AsyncClient | None = None) -> VoiceAudio:
     s = get_settings()
     if not _REQUEST_ID.match(request_id or ""):
@@ -56,31 +76,38 @@ async def synthesize(text: str, request_id: str, *, client: httpx.AsyncClient | 
     http = client or httpx.AsyncClient(base_url=s.store_voice_url, timeout=timeout)
     try:
         try:
-            r = await http.post("/v1/synthesize", headers=headers, json={"request_id": request_id, "text": text, "language": "pt"})
+            async with http.stream("POST", "/v1/synthesize", headers=headers, json={"request_id": request_id, "text": text, "language": "pt"}) as r:
+                status, ctype = r.status_code, r.headers.get("content-type", "")
+                body = await _read_bounded(r, _MAX_META_BYTES, "resposta da síntese")
         except httpx.TimeoutException as exc:
             raise VoiceUnavailable("timeout", "tempo excedido no serviço de voz") from exc
         except httpx.HTTPError as exc:
             raise VoiceUnavailable("transport", f"{type(exc).__name__}") from exc
-        if r.status_code in (429, 503, 504, 502, 500):
-            code = (r.json().get("error", {}).get("code") if r.headers.get("content-type", "").startswith("application/json") else None) or f"http_{r.status_code}"
-            raise VoiceUnavailable(code, f"serviço de voz respondeu {r.status_code}")
-        if r.status_code != 200:
-            raise VoiceRejected(f"http_{r.status_code}", f"serviço de voz recusou o pedido ({r.status_code})")
+        if status in (429, 503, 504, 502, 500):
+            code = None
+            if ctype.startswith("application/json"):
+                try:
+                    code = json.loads(body).get("error", {}).get("code")
+                except (ValueError, AttributeError):
+                    code = None
+            raise VoiceUnavailable(code or f"http_{status}", f"serviço de voz respondeu {status}")
+        if status != 200:
+            raise VoiceRejected(f"http_{status}", f"serviço de voz recusou o pedido ({status})")
         try:
-            meta = r.json()
+            meta = json.loads(body)
             audio_id, expected = str(meta["audio_id"]), str(meta["sha256"])
             seconds = float(meta["duration_seconds"])
         except (ValueError, KeyError, TypeError) as exc:
             raise VoiceRejected("bad_metadata", "resposta do serviço de voz malformada") from exc
         try:
-            a = await http.get(f"/v1/audio/{audio_id}", headers=headers)
+            async with http.stream("GET", f"/v1/audio/{audio_id}", headers=headers) as a:
+                if a.status_code != 200:
+                    raise VoiceRejected(f"http_{a.status_code}", "áudio indisponível no serviço de voz")
+                data = await _read_bounded(a, s.store_voice_max_audio_bytes, "áudio")
         except httpx.TimeoutException as exc:
             raise VoiceUnavailable("timeout", "tempo excedido ao baixar o áudio") from exc
         except httpx.HTTPError as exc:
             raise VoiceUnavailable("transport", f"{type(exc).__name__}") from exc
-        if a.status_code != 200:
-            raise VoiceRejected(f"http_{a.status_code}", "áudio indisponível no serviço de voz")
-        data = a.content
         if hashlib.sha256(data).hexdigest() != expected:
             raise VoiceRejected("hash_mismatch", "o áudio recebido não confere com o SHA-256 informado")
         try:  # limpeza imediata no serviço; falha aqui não importa (há TTL)

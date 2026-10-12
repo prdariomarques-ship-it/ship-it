@@ -350,7 +350,9 @@ class Settings(BaseSettings):
     # "customer_preference": áudio só se o cliente pediu (preferences.reply_mode = "audio");
     # "mirror_audio": também quando o cliente mandou áudio. Preferência por texto SEMPRE vence.
     store_voice_policy: str = "mirror_audio"
-    store_voice_max_script_chars: int = 300
+    # Limite do roteiro FALADO FINAL (aviso de voz sintética + resumo + indicação do texto escrito). Fica abaixo do limite do
+    # serviço de voz (VOICE_MAX_TEXT_CHARS, 350 por padrão): o roteiro nunca é cortado nem recusado por tamanho.
+    store_voice_max_script_chars: int = 340
     store_voice_max_audio_seconds: float = 40.0
     store_voice_max_audio_bytes: int = 4_000_000
     store_voice_max_job_age_seconds: int = 600  # a resposta de voz de uma conversa que já andou é descartada
@@ -375,7 +377,10 @@ class Settings(BaseSettings):
     store_hours: str = '{"mon-fri": ["08:30", "17:30"], "sat": ["08:30", "12:30"], "holiday": ["08:30", "12:30"]}'
     store_extra_holidays: str = ""  # datas AAAA-MM-DD separadas por vírgula (municipais/estaduais/Carnaval/Corpus Christi da loja)
     store_excluded_holidays: str = ""  # datas dos feriados nacionais presumidos em que a loja NÃO segue o horário de feriado
-    store_followup_close_margin_minutes: int = 30  # contatos proativos não saem nos últimos N min antes de fechar
+    store_followup_close_margin_minutes: int = 30  # contatos proativos não saem nos últimos N min antes de fechar (0 a 240)
+    # Enquanto a equipe da loja não confirmar o horário acima, o agente o apresenta como NÃO confirmado e nenhum contato proativo
+    # é planejado nem enviado com base nele. Só passe a true depois de a equipe confirmar.
+    store_hours_confirmed: bool = False
 
     # CORS
     cors_origins: str = "http://localhost:3000,http://localhost"
@@ -390,6 +395,25 @@ class Settings(BaseSettings):
             parse_hours(valor)
         except StoreHoursError as exc:
             raise ValueError(f"store_hours inválido: {exc}") from exc
+        return valor
+
+    @field_validator("store_followup_close_margin_minutes")
+    @classmethod
+    def _margem_nao_negativa(cls, valor: int) -> int:
+        """Margem negativa estenderia o horário além do fechamento (17:45 aceito para uma loja que fecha 17:30)."""
+        if valor < 0 or valor > 240:
+            raise ValueError("store_followup_close_margin_minutes deve estar entre 0 e 240")
+        return valor
+
+    @field_validator("store_timezone")
+    @classmethod
+    def _fuso_valido(cls, valor: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(valor)
+        except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
+            raise ValueError(f"store_timezone desconhecido: {valor!r}") from exc
         return valor
 
     @field_validator("store_extra_holidays", "store_excluded_holidays")

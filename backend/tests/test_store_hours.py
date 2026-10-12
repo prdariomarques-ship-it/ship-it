@@ -24,6 +24,7 @@ def utc(y, m, d, hh, mm):          # hora local de São Paulo (UTC-3, sem horár
 
 
 def test_horario_informado_pelo_proprietario_e_o_padrao(s):
+    s = cfg(store_hours_confirmed=True)
     assert h.hours_on(date(2026, 10, 7), s) == (_time(8, 30), _time(17, 30))     # quarta
     assert h.hours_on(date(2026, 10, 10), s) == (_time(8, 30), _time(12, 30))    # sábado
     assert h.hours_on(date(2026, 10, 11), s) is None                               # domingo: NÃO informado
@@ -97,7 +98,7 @@ def test_data_de_feriado_invalida_derruba_a_carga():
 
 
 def test_configuracao_personalizada_e_descrita_como_configurada():
-    c = cfg(store_hours=json.dumps({"mon-fri": ["09:00", "18:00"], "sun": ["09:00", "12:00"]}))
+    c = cfg(store_hours=json.dumps({"mon-fri": ["09:00", "18:00"], "sun": ["09:00", "12:00"]}), store_hours_confirmed=True)
     assert h.describe(c) == "segunda a sexta: 09:00 às 18:00; domingo: 09:00 às 12:00."
     assert h.hours_on(date(2026, 10, 11), c) == (_time(9, 0), _time(12, 0))      # domingo só existe se a loja informar
 

@@ -17,7 +17,7 @@ import re
 import statistics
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +42,16 @@ STOP_HINT = "Para não receber mais contatos automáticos, responda PARAR."
 
 class FollowupsDisabled(RuntimeError):
     """Aplicar acompanhamentos exige STORE_FOLLOWUPS_ENABLED=true (desligado por padrão)."""
+
+
+def _now() -> datetime:
+    """Relógio da decisão de envio (um único ponto, para os testes poderem fixá-lo)."""
+    return datetime.now(timezone.utc)
+
+
+def send_intent_id(followup_id: int, attempt: int) -> str:
+    """Identidade ESTÁVEL do envio de um acompanhamento (por tentativa), independente do id do job da fila."""
+    return f"followup-send:{followup_id}:{attempt}"
 
 
 def _aware(value: datetime) -> datetime:
@@ -88,6 +98,8 @@ async def blockers(
     quiet_after_since: timedelta, kind: str,
 ) -> str | None:
     """Motivo para NÃO contactar agora, ou None. `since` = quando o assunto começou (orçamento criado / última compra)."""
+    if not s.store_hours_confirmed:
+        return "horário da loja ainda não confirmado pela equipe"
     reason = store_optout.is_blocked(contact, now)
     if reason:
         return reason
@@ -351,10 +363,36 @@ async def _prepare_text(db: AsyncSession, fu: StoreFollowup, customer: StoreCust
     return None, f"tipo de acompanhamento desconhecido: {fu.kind}"
 
 
+async def _revalidate(db: AsyncSession, fu: StoreFollowup, now: datetime, s: Settings) -> tuple[str | None, str | None]:
+    """(texto, motivo de cancelamento). Reconfere AGORA tudo o que autoriza este contato: identidade, instância da loja,
+    opt-out/recusa, atendimento humano, conversa, pausa, reclamação, orçamento/estoque. Usado ao enfileirar E de novo
+    imediatamente antes do transporte (send_guard)."""
+    customer = await db.get(StoreCustomer, fu.customer_id, populate_existing=True)
+    contact = await db.get(Contact, fu.contact_id, populate_existing=True)
+    if customer is None or contact is None:
+        return None, "cadastro ou contato inexistente"
+    if fu.instance != s.evolution_instance or (s.evolution_personal_instance and fu.instance == s.evolution_personal_instance):
+        return None, "instância não é a da loja"
+    since = _aware(fu.created_at)
+    if fu.kind == KIND_QUOTE:
+        quote = await db.get(StoreQuote, fu.origin_id)
+        since = _aware(quote.created_at) if quote is not None else since
+        quiet = timedelta(minutes=2)
+    else:
+        since = _parse_dt((fu.snapshot or {}).get("last_purchase")) or since
+        quiet = timedelta(hours=48)
+    reason = await blockers(db, fu_id=fu.id, contact=contact, customer=customer, since=since, now=now, s=s, quiet_after_since=quiet, kind=fu.kind)
+    if reason is not None:
+        return None, reason
+    return await _prepare_text(db, fu, customer)
+
+
 async def run_due(db: AsyncSession, *, now: datetime | None = None, apply: bool = False, limit: int | None = None) -> list[dict]:
     s, now = get_settings(), now or datetime.now(timezone.utc)
     if apply and not s.store_followups_enabled:
         raise FollowupsDisabled("STORE_FOLLOWUPS_ENABLED=false: acompanhamentos desligados (use a simulação)")
+    if apply and not s.store_hours_confirmed:
+        raise FollowupsDisabled("STORE_HOURS_CONFIRMED=false: o horário da loja ainda não foi confirmado pela equipe (use a simulação)")
     due = (await db.scalars(
         select(StoreFollowup).where(StoreFollowup.status == "scheduled", StoreFollowup.due_at <= now)
         .order_by(StoreFollowup.due_at, StoreFollowup.id).limit(limit or s.store_followup_scan_limit)
@@ -362,10 +400,7 @@ async def run_due(db: AsyncSession, *, now: datetime | None = None, apply: bool 
     report = []
     for fu in due:
         entry: dict = {"followup_id": fu.id, "kind": fu.kind, "action": None, "reason": None}
-        reason: str | None
         report.append(entry)
-        customer = await db.get(StoreCustomer, fu.customer_id, populate_existing=True)
-        contact = await db.get(Contact, fu.contact_id, populate_existing=True)
         if fu.attempts >= fu.max_attempts:
             if apply:
                 fu.status = "exhausted"
@@ -373,23 +408,7 @@ async def run_due(db: AsyncSession, *, now: datetime | None = None, apply: bool 
                 await db.commit()
             entry.update(action="exhausted")
             continue
-        if customer is None or contact is None:
-            reason = "cadastro ou contato inexistente"
-        elif fu.instance != s.evolution_instance or (s.evolution_personal_instance and fu.instance == s.evolution_personal_instance):
-            reason = "instância não é a da loja"
-        else:
-            since = _aware(fu.created_at)
-            if fu.kind == KIND_QUOTE:
-                quote = await db.get(StoreQuote, fu.origin_id)
-                since = _aware(quote.created_at) if quote is not None else since
-                quiet = timedelta(minutes=2)
-            else:
-                since = _parse_dt((fu.snapshot or {}).get("last_purchase")) or since
-                quiet = timedelta(hours=48)
-            reason = await blockers(db, fu_id=fu.id, contact=contact, customer=customer, since=since, now=now, s=s, quiet_after_since=quiet, kind=fu.kind)
-        content: str | None = None
-        if reason is None and customer is not None and contact is not None:
-            content, reason = await _prepare_text(db, fu, customer)
+        content, reason = await _revalidate(db, fu, now, s)
         if reason is not None:
             entry.update(action="cancel", reason=reason)
             if apply:
@@ -405,20 +424,74 @@ async def run_due(db: AsyncSession, *, now: datetime | None = None, apply: bool 
         if not apply:
             entry.update(action="dry_run", text=content)
             continue
-        if contact is None or content is None:  # impossível aqui (reason seria não nulo); satisfaz o verificador de tipos
+        if content is None:  # impossível aqui (reason seria não nulo); satisfaz o verificador de tipos
             continue
-        fu.status, fu.attempts = "queued", fu.attempts + 1
-        payload: dict = {"to": contact.phone, "content": content, "instance": fu.instance, "followup_id": fu.id}
+        contact = await db.get(Contact, fu.contact_id)
+        if contact is None:
+            continue
+        # Claim ATÔMICO: só um processador transforma 'scheduled' em 'queued' (compare-and-set no estado e na tentativa). O
+        # perdedor da corrida não cria job. A linha fica travada até o commit, que também grava o job: um único job por tentativa.
+        attempt = fu.attempts + 1
+        claim = await db.execute(
+            update(StoreFollowup).where(StoreFollowup.id == fu.id, StoreFollowup.status == "scheduled", StoreFollowup.attempts == fu.attempts)
+            .values(status="queued", attempts=attempt, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if (getattr(claim, "rowcount", 0) or 0) != 1:
+            await db.rollback()
+            entry.update(action="skip", reason="outro processador já assumiu este acompanhamento")
+            continue
+        payload: dict = {"to": contact.phone, "content": content, "instance": fu.instance, "followup_id": fu.id, "followup_attempt": attempt}
         if s.store_voice_enabled:
             payload["voice_companion"] = {"followup_id": fu.id}   # só vira áudio se o cliente PEDIU áudio (store_voice.decide)
         job = Job(name="whatsapp.send_text", payload=payload, max_attempts=s.jobs_default_max_attempts, scheduled_at=now)
         db.add(job)
         await db.flush()
-        fu.job_id = job.id
+        await db.execute(update(StoreFollowup).where(StoreFollowup.id == fu.id).values(job_id=job.id))
+        await db.refresh(fu)
         _note(fu, "queued", f"job {job.id}")
         await db.commit()
         entry.update(action="queued", job_id=job.id, text=content)
     return report
+
+
+async def send_guard(db: AsyncSession, payload: dict) -> str | None:
+    """Última decisão antes do transporte de um texto de acompanhamento. Roda DENTRO de `reserve_plain_send` (sob a trava da
+    conversa, antes de gravar a reserva): motivo para NÃO enviar agora, ou None. Não faz commit (o handler confirma).
+
+    Revalida com o relógio de agora, não com o de quando o job foi criado: opt-out/recusa, habilitação, horário confirmado,
+    janela de atendimento, identidade do job, origem e os mesmos bloqueios do planejamento. Cancela de forma persistente o que
+    não deve mais acontecer e adia (sem gastar tentativa) o que só está fora de hora ou desligado."""
+    s, now = get_settings(), _now()
+    fu = await db.get(StoreFollowup, int(payload["followup_id"]), populate_existing=True)
+    if fu is None:
+        return "acompanhamento inexistente"
+    job_id = payload.get("_job_id")
+    if fu.status != "queued" or fu.job_id is None or job_id is None or int(job_id) != fu.job_id:
+        return f"acompanhamento não está pendente neste job (estado {fu.status})"
+    if payload.get("followup_attempt") != fu.attempts:
+        return "tentativa do acompanhamento não confere"
+
+    async def release(reason: str, event: str) -> str:
+        fu.status, fu.job_id, fu.attempts = "scheduled", None, max(fu.attempts - 1, 0)
+        fu.due_at = next_window(now, s) if s.store_hours_confirmed else now + timedelta(hours=1)
+        _note(fu, event, reason)
+        return reason
+
+    if not s.store_followups_enabled:
+        return await release("acompanhamentos desligados", "deferred_disabled")
+    if not s.store_hours_confirmed:
+        return await release("horário da loja ainda não confirmado pela equipe", "deferred_hours_unconfirmed")
+    content, reason = await _revalidate(db, fu, now, s)
+    if reason is None and content != payload.get("content"):
+        reason = "texto desatualizado em relação aos fatos de agora"
+    if reason is not None:
+        fu.status, fu.cancel_reason = "cancelled", reason
+        _note(fu, "cancelled_before_send", reason)
+        return reason
+    if not in_window(now, s):
+        return await release("fora da janela de horário", "deferred_window")
+    return None
 
 
 async def reconcile(db: AsyncSession, *, stale_minutes: int = 15) -> dict[str, int]:
@@ -436,7 +509,7 @@ async def reconcile(db: AsyncSession, *, stale_minutes: int = 15) -> dict[str, i
         job = await db.get(Job, fu.job_id, populate_existing=True)
         if job is None or job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
             continue
-        intent = (await db.execute(text("SELECT status FROM conversation_send_intents WHERE id=:i"), {"i": f"send-job:{fu.job_id}"})).scalar()
+        intent = (await db.execute(text("SELECT status FROM conversation_send_intents WHERE id=:i"), {"i": send_intent_id(fu.id, fu.attempts)})).scalar()
         if job.status == JobStatus.SUCCEEDED and intent == "sent":
             fu.status, fu.sent_at = "sent", _aware(job.finished_at or now)
             _note(fu, "sent", f"job {fu.job_id}")

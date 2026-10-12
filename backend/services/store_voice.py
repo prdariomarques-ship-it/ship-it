@@ -126,18 +126,24 @@ def spoken_summary(reply: str, max_chars: int) -> tuple[str, bool]:
 
 
 def build_script(reply: str, *, disclose: bool, max_chars: int) -> str | None:
-    spoken, details = spoken_summary(reply, max_chars)
-    parts: list[str] = []
-    if disclose:
-        parts.append(DISCLOSURE)
-    if spoken:
-        parts.append(spoken)
+    """Roteiro falado FINAL (aviso de voz sintética + resumo + indicação do texto escrito) com no máximo `max_chars`.
+
+    O orçamento é do roteiro inteiro, não só do resumo: as partes obrigatórias (identificação do assistente e voz sintética,
+    ponteiro para o texto) têm espaço reservado e quem encolhe é o resumo falado. A identificação nunca é removida para caber.
+    Se nem as partes obrigatórias cabem, não há áudio (o texto escrito já foi entregue)."""
+    prefix = DISCLOSURE if disclose else ""
+    fixed = len(prefix) + (1 if prefix else 0)
+    # 1ª tentativa: sem ponteiro (resposta curta, sem detalhes só por escrito).
+    spoken, details = spoken_summary(reply, max(max_chars - fixed, 0))
+    if details or not spoken:
+        spoken, details = spoken_summary(reply, max(max_chars - fixed - len(POINTER) - 1, 0))
+    parts: list[str] = [p for p in (prefix, spoken) if p]
     if details or not spoken:
         parts.append(POINTER)
     script = " ".join(parts).strip()
     if not spoken and not details:
         return None  # resposta vazia: nada a falar
-    if not output_safe(script).safe:
+    if len(script) > max_chars or not output_safe(script).safe:
         return None
     return script
 
@@ -208,8 +214,17 @@ async def _gate(db: AsyncSession, row: StoreVoiceSend, contact: Contact | None, 
     prefs = contact.preferences or {}
     if prefs.get("voice_opt_out") or str(prefs.get("reply_mode", "")).strip().lower() in {"text", "texto"}:
         return "cliente prefere texto"
-    if row.kind == KIND_FOLLOWUP and (prefs.get("store_contact_opt_out") or prefs.get("store_followup_opt_out")):
-        return "cliente pediu para não receber contatos"
+    if row.kind == KIND_FOLLOWUP:
+        # A voz do acompanhamento obedece à mesma decisão do texto proativo: opt-out, recusa recente e horário da loja.
+        from services import store_followups, store_optout
+
+        blocked = store_optout.is_blocked(contact)
+        if blocked:
+            return blocked
+        if not (s.store_followups_enabled and s.store_hours_confirmed):
+            return "acompanhamentos desligados ou horário da loja não confirmado"
+        if not store_followups.in_window(store_followups._now(), s):
+            return "fora do horário de atendimento da loja"
     age = (datetime.now(timezone.utc) - _aware(row.created_at)).total_seconds()
     if age > s.store_voice_max_job_age_seconds:
         return "pedido de voz antigo demais"
@@ -310,12 +325,26 @@ async def deliver(db: AsyncSession, payload: dict) -> None:
         return
 
     intent = f"voice-send:{row.id}"
-    decision = await conversation_control.reserve_plain_send(db, row.contact_id, row.instance, intent)
+
+    async def final_gate() -> str | None:
+        # Mesma conferência, repetida DENTRO da reserva (sob a trava da conversa): uma resposta do cliente, um humano, uma
+        # pausa ou um opt-out confirmados até este instante bloqueiam o envio; não há intervalo entre conferir e reservar.
+        fresh_contact = await db.get(Contact, row.contact_id, populate_existing=True)
+        fresh_source = await db.get(Message, row.source_message_id, populate_existing=True) if row.source_message_id else None
+        return await _gate(db, row, fresh_contact, fresh_source, s)
+
+    decision = await conversation_control.reserve_plain_send(db, row.contact_id, row.instance, intent, guard=final_gate)
     if decision != "reserved":
+        row_id = row.id                                        # antes do rollback: depois dele os atributos expiram (carga preguiçosa falha em async)
         await db.rollback()
-        fresh = await db.get(StoreVoiceSend, row.id, populate_existing=True)
+        fresh = await db.get(StoreVoiceSend, row_id, populate_existing=True)
         if fresh is not None:
-            await _finish(db, fresh, "cancelled" if decision == "paused" else "needs_review", f"reserva de envio: {decision}")
+            if decision == "paused":
+                await _finish(db, fresh, "cancelled", "conversa pausada (na reserva)")
+            elif decision.startswith("blocked:"):
+                await _finish(db, fresh, "cancelled", f"{decision[len('blocked:'):]} (na reserva)")
+            else:
+                await _finish(db, fresh, "needs_review", f"reserva de envio: {decision}")
         return
     row.status = "sending"
     _note(row, "sending")

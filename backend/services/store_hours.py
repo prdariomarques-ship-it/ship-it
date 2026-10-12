@@ -146,7 +146,7 @@ def next_open(moment: datetime, s: Settings, *, close_margin: timedelta = timede
 
 
 def describe(s: Settings) -> str:
-    """Texto que o agente pode repetir ao cliente (somente o que está configurado)."""
+    """Texto que o agente pode repetir ao cliente (somente o que está configurado). Sem confirmação da equipe, vem qualificado."""
     hours = parse_hours(s.store_hours)
     fmt = lambda span: f"{span[0].strftime('%H:%M')} às {span[1].strftime('%H:%M')}"  # noqa: E731
     groups: list[str] = []
@@ -164,16 +164,38 @@ def describe(s: Settings) -> str:
     text = "; ".join(groups) if groups else "horário não configurado"
     if "sun" not in hours:
         text += ". Domingo: sem atendimento informado — confirme com a equipe"
-    return text + "."
+    text += "."
+    if not s.store_hours_confirmed:
+        text = f"Horário informado, ainda NÃO confirmado pela equipe da loja: {text}"
+    return text
+
+
+_UNCONFIRMED_NOTICE = (
+    "Este horário foi informado pelo proprietário e ainda NÃO foi confirmado pela equipe da loja: diga isso ao cliente e "
+    "sugira confirmar com a equipe antes de ir até a loja."
+)
+_HOLIDAY_NOTICE = "Feriados municipais/estaduais só valem se cadastrados pela loja; confirme com a equipe em caso de dúvida."
+
+
+def day_info(d: date, s: Settings) -> dict:
+    """Horário DO DIA. Não diz nada sobre 'agora': não há instante avaliado."""
+    span = hours_on(d, s)
+    out = {
+        "data": d.isoformat(), "dia_da_semana": _NAMES_PT[d.weekday()], "feriado": holiday_name(d, s),
+        "horario_do_dia": None if span is None else f"{span[0].strftime('%H:%M')}–{span[1].strftime('%H:%M')}",
+        "horarios": describe(s), "horario_confirmado_pela_equipe": bool(s.store_hours_confirmed), "observacao": _HOLIDAY_NOTICE,
+    }
+    if not s.store_hours_confirmed:
+        out["aviso_obrigatorio"] = _UNCONFIRMED_NOTICE
+    return out
 
 
 def status_at(moment: datetime, s: Settings) -> dict:
+    """Situação no instante `moment` (use o relógio real para 'agora'). Sem confirmação da equipe, `aberto_agora` não é afirmado."""
     local = _local(moment, s)
-    span = hours_on(local.date(), s)
-    holiday = holiday_name(local.date(), s)
-    return {
-        "data": local.date().isoformat(), "dia_da_semana": _NAMES_PT[local.weekday()], "feriado": holiday,
-        "horario_do_dia": None if span is None else f"{span[0].strftime('%H:%M')}–{span[1].strftime('%H:%M')}",
-        "aberto_agora": is_open(moment, s), "horarios": describe(s),
-        "observacao": "Feriados municipais/estaduais só valem se cadastrados pela loja; confirme com a equipe em caso de dúvida.",
-    }
+    out = day_info(local.date(), s)
+    out["instante_avaliado"] = local.isoformat(timespec="minutes")
+    out["aberto_agora"] = is_open(moment, s) if s.store_hours_confirmed else None
+    if not s.store_hours_confirmed:
+        out["aberto_agora_segundo_o_horario_informado"] = is_open(moment, s)
+    return out

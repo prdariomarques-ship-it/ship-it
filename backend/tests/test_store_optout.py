@@ -21,6 +21,9 @@ from utils.config import get_settings
     ("não tenho interesse", "refusal"), ("Sem interesse.", "refusal"), ("não quero", "refusal"), ("já comprei", "refusal"),
     ("desisti", "refusal"), ("Não, obrigado", "refusal"),
     ("só texto", "text_only"), ("prefiro texto", "text_only"), ("não quero áudio", "text_only"), ("sem áudios por favor", "text_only"),
+    ("não mande áudio", "text_only"), ("não me manda áudio", "text_only"), ("mande áudio não", "text_only"), ("quero áudio não", "text_only"),
+    ("quero áudio", "audio_request"), ("mande áudio", "audio_request"), ("me manda áudio", "audio_request"), ("pode mandar áudio", "audio_request"),
+    ("por favor, envie um áudio", "audio_request"), ("prefiro áudio", "audio_request"), ("manda mensagem de voz", "audio_request"),
     ("me mande só texto", None),   # frase fora do vocabulário fechado: não arrisca
 ])
 def test_classificacao_positiva(texto, esperado):
@@ -39,6 +42,10 @@ def test_classificacao_negativa_nunca_trata_frase_longa_ou_diferente_como_opt_ou
 
 @pytest_asyncio.fixture
 async def sess(db_engine):
+    from tests.test_whatsapp_send_queue_retry import _migrate_control_tables_sync
+
+    async with db_engine.begin() as conn:
+        await conn.run_sync(_migrate_control_tables_sync)
     return async_sessionmaker(db_engine, expire_on_commit=False)
 
 

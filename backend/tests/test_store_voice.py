@@ -74,6 +74,8 @@ class FakeSynth:
         # Contrato REAL do serviço (voice-service/app/service.py): um request_id curto leva 422 em produção. Este simulador o
         # reproduz para que o pipeline não possa passar com um id inválido (bug achado só na demonstração com o serviço real).
         assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,63}$", request_id), request_id
+        # Idem para o tamanho: o serviço real recusa (413) texto acima de VOICE_MAX_TEXT_CHARS (350 por padrão).
+        assert len(text) <= 350, f"serviço de voz recusaria com 413: {len(text)} caracteres"
         self.calls.append((text, request_id))
         if self.before:
             await self.before()

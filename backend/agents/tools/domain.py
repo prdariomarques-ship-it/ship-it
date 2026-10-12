@@ -318,17 +318,15 @@ search_products_tool = Tool(
 )
 
 async def _get_store_hours(context: ToolContext, date: str | None = None) -> str:
-    """Horário de atendimento CONFIGURADO da loja (nunca presumido) e se está aberta agora ou numa data."""
+    """Horário de atendimento CONFIGURADO da loja (nunca presumido). Sem data: situação AGORA (relógio real). Com data: só o
+    horário daquele dia, sem afirmar nada sobre 'agora'."""
     settings = get_settings()
     try:
-        when = datetime.now(timezone.utc)
         if date:
             from datetime import date as _date
-            from zoneinfo import ZoneInfo
 
-            d = _date.fromisoformat(date)
-            when = datetime(d.year, d.month, d.day, 12, 0, tzinfo=ZoneInfo(settings.store_timezone))
-        return ok(**store_hours.status_at(when, settings))
+            return ok(**store_hours.day_info(_date.fromisoformat(date), settings))
+        return ok(**store_hours.status_at(datetime.now(timezone.utc), settings))
     except (ValueError, store_hours.StoreHoursError):
         return ok(erro="Informe a data como AAAA-MM-DD ou deixe em branco para consultar agora.")
 

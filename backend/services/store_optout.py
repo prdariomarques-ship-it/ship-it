@@ -6,7 +6,15 @@ Só mensagens CURTAS e inequívocas são classificadas (frase inteira, não trec
 - opt-out    -> `store_contact_opt_out` + `store_followup_opt_out` (esta é a chave que o pós-venda de produção já respeita);
                 cancela acompanhamentos e áudios pendentes;
 - recusa     -> pausa os acompanhamentos por `store_followup_refusal_cooldown_days` (não é opt-out permanente);
-- só texto   -> `reply_mode = "texto"` e `voice_opt_out` (o cliente continua sendo atendido normalmente).
+- só texto   -> `reply_mode = "texto"` e `voice_opt_out` (o cliente continua sendo atendido normalmente);
+- pedir áudio-> PEDIDO AFIRMATIVO ("quero áudio", "mande áudio"): nunca é recusa. Vale como a preferência mais recente do
+                cliente para a VOZ: grava `reply_mode = "audio"` e limpa `voice_opt_out` (um "só texto" anterior é revertido,
+                porque o cliente mudou de ideia). Não reverte opt-out de contatos nem recusa (`store_contact_opt_out`,
+                `store_followup_opt_out`, pausa por recusa): isso só o próprio cliente muda, falando com a equipe.
+                O agente continua respondendo normalmente (não há interceptação nem mensagem de confirmação).
+
+Este módulo roda no fluxo da loja ANTES do agente, independentemente das chaves STORE_VOICE_ENABLED e STORE_FOLLOWUPS_ENABLED:
+com as duas desligadas, "PARAR"/"só texto" ainda são reconhecidos, gravados e confirmados ao cliente.
 """
 from __future__ import annotations
 
@@ -21,9 +29,8 @@ from models.contact import Contact
 from models.message import Message
 from models.store_followup import StoreFollowup
 from models.store_voice import StoreVoiceSend
+from services import conversation_control
 from utils.config import get_settings
-
-OPTOUT, REFUSAL, TEXT_ONLY = "optout", "refusal", "text_only"
 
 ACK_OPTOUT = "Pronto: não vou mais enviar contatos automáticos. Se precisar de algo, é só chamar por aqui."
 ACK_REFUSAL = "Tudo bem, obrigado por avisar. Se precisar de algo, é só chamar por aqui."
@@ -46,11 +53,21 @@ _REFUSAL = re.compile(
     r"nao preciso|nao preciso mais|nao obrigado|nao obrigada|ja comprei|ja resolvi|desisti|deixa pra la|nao vou comprar|nao vou querer)"
     r"( (obrigado|obrigada|obg|valeu|por favor))?$"
 )
+_POLITE = r"( (obrigado|obrigada|obg|valeu|por favor))?$"
+# NEGATIVO: o cliente NÃO quer áudio / quer só texto. A negação é obrigatória em todas as formas com "áudio".
 _TEXT_ONLY = re.compile(
-    r"^(so texto|somente texto|apenas texto|so por texto|so escrito|(por favor )?(nao )?(me )?(mande|envie|manda|envia|quero) (mais )?audios?( nao)?|"
-    r"nao quero (mais )?audios?|prefiro texto|prefiro escrito|prefiro mensagem escrita|pode ser so texto|texto por favor|sem audios?)"
-    r"( (obrigado|obrigada|obg|valeu|por favor))?$"
+    r"^(so texto|somente texto|apenas texto|so por texto|so escrito|prefiro texto|prefiro escrito|prefiro mensagem escrita|"
+    r"pode ser so texto|texto por favor|sem audios?|"
+    r"(por favor )?nao (me )?(mande|mandem|manda|envie|enviem|envia) (mais )?audios?|"
+    r"(por favor )?(me )?(mande|manda|envie|envia|quero) (mais )?audios? nao|"
+    r"nao quero (mais )?(receber )?audios?)" + _POLITE
 )
+# AFIRMATIVO: o cliente PEDE áudio. Sem nenhuma negação (a frase inteira é conferida: "quero áudio não" cai no negativo acima).
+_AUDIO_REQUEST = re.compile(
+    r"^(por favor )?(pode )?(me )?(mandar|enviar|mande|manda|envie|envia|quero|queria|prefiro|gostaria de receber|pode ser) "
+    r"(um |o |mais )?(audios?|mensage(m|ns) de voz|voz)" + _POLITE
+)
+OPTOUT, REFUSAL, TEXT_ONLY, AUDIO_REQUEST = "optout", "refusal", "text_only", "audio_request"
 
 
 def normalize(text: str) -> str:
@@ -63,9 +80,12 @@ def classify(text: str) -> str | None:
     norm = normalize(text)
     if not norm or len(norm) > _MAX_LEN:
         return None
-    # "não quero áudios" é preferência de formato, não recusa nem opt-out: confere antes dos demais.
+    # "não quero áudios" é preferência de formato, não recusa nem opt-out: confere antes dos demais. O pedido AFIRMATIVO de
+    # áudio vem depois do negativo e nunca é tratado como recusa.
     if _TEXT_ONLY.match(norm):
         return TEXT_ONLY
+    if _AUDIO_REQUEST.match(norm):
+        return AUDIO_REQUEST
     if _OPTOUT.match(norm):
         return OPTOUT
     if _REFUSAL.match(norm):
@@ -96,7 +116,15 @@ async def handle_inbound(db: AsyncSession, contact: Contact, message: Message) -
         return None
     s = get_settings()
     now = datetime.now(timezone.utc)
+    # Toma a trava da conversa ANTES de gravar a preferência: um envio proativo que já passou da conferência (reserve_plain_send
+    # com guard) termina primeiro; um que ainda vai conferir enxerga a recusa gravada. Sem corrida entre os dois.
+    await conversation_control.lock_scope(db, contact.id, message.whatsapp_instance or s.evolution_instance)
     prefs = dict(contact.preferences or {})
+    if kind == AUDIO_REQUEST:
+        prefs.update(reply_mode="audio", voice_opt_out=False)
+        contact.preferences = prefs
+        await db.commit()
+        return None  # nenhuma interceptação: o agente responde normalmente (e, havendo voz habilitada, também por áudio)
     if kind == OPTOUT:
         prefs.update(store_contact_opt_out=True, store_followup_opt_out=True, store_contact_opt_out_at=now.isoformat(),
                      store_contact_opt_out_message_id=message.id)

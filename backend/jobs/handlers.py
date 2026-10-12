@@ -1,5 +1,7 @@
 """Built-in job handlers."""
 
+import functools
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.session import async_session_factory
@@ -230,11 +232,31 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     plain_intent_id = None
     plain_scope_instance = instance or getattr(provider, 'default_instance', '') or ''
     job_id = payload.get('_job_id')
+    followup_id = payload.get('followup_id')
+    if followup_id is not None and send_intent_id is None and alert_contact_id is None and not (job_id is not None and plain_scope_instance):
+        # Acompanhamento proativo sem identidade de job ou instância: não há como reservar nem revalidar. Fail closed.
+        await record_log(
+            db, source='send_queue', level='warning',
+            message='Acompanhamento proativo não transmitido: sem identidade de job/instância para reservar',
+            payload={'to_last4': to[-4:], 'followup_id': followup_id},
+        )
+        await db.commit()
+        return
     if send_intent_id is None and alert_contact_id is None and job_id is not None and plain_scope_instance:
         plain_contact = await ContactRepository(db).get_or_create_by_phone(normalize_phone(to))
-        plain_intent_id = f"send-job:{job_id}"
+        guard = None
+        if followup_id is not None:
+            # Acompanhamento proativo: a reserva só sai se, AGORA e sob a trava da conversa, o acompanhamento continua
+            # autorizado (opt-out/recusa, habilitação, horário, bloqueios) e este job é o dono dele. Identidade estável por
+            # acompanhamento e tentativa, não pelo id do job.
+            from services import store_followups
+
+            plain_intent_id = store_followups.send_intent_id(int(followup_id), int(payload.get('followup_attempt') or 0))
+            guard = functools.partial(store_followups.send_guard, db, payload)
+        else:
+            plain_intent_id = f"send-job:{job_id}"
         decision = await conversation_control.reserve_plain_send(
-            db, plain_contact.id, plain_scope_instance, plain_intent_id,
+            db, plain_contact.id, plain_scope_instance, plain_intent_id, guard=guard,
         )
         await db.commit()
         if decision != 'reserved':

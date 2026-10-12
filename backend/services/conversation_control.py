@@ -258,8 +258,20 @@ async def close_unknown(db, contact_id, instance, kind, key, expected_revision, 
     return await inspect_delivery(db, contact_id, instance, kind, key)
 
 
-async def reserve_plain_send(db, contact_id, instance, intent_id):
+async def lock_scope(db, contact_id, instance):
+    """Public handle on the per-conversation scope lock (held until the caller commits/rolls back). Writers of state that a
+    `reserve_plain_send(..., guard=...)` guard reads (opt-out, newer inbound) take it first, so the guard's read and the
+    reservation are ordered against them instead of racing."""
+    await _lock(db, _scope(contact_id, instance))
+
+
+async def reserve_plain_send(db, contact_id, instance, intent_id, guard=None):
     """Idempotency and pause fence for a send that holds no conversation fence.
+
+    `guard`, when given, is an async callable run UNDER the scope lock, after the pause check and before the reservation row
+    is inserted. A non-empty string result blocks the send (returned as 'blocked:<reason>') and nothing is reserved. It is the
+    single point where a caller's own freshness rules (opt-out, newer inbound, opening hours) and the reservation are decided
+    together. It must not commit.
 
     The pause is checked under the scope lock, and the reservation row is
     inserted in the caller's transaction, which the caller commits before
@@ -276,6 +288,10 @@ async def reserve_plain_send(db, contact_id, instance, intent_id):
         WHERE contact_id=:contact_id AND instance=:instance''', params)
     if control is not None and bool(control['paused']):
         return 'paused'
+    if guard is not None:
+        blocked = await guard()
+        if blocked:
+            return 'blocked:' + str(blocked)
     inserted = await _one(db, '''INSERT INTO conversation_send_intents
         (id,contact_id,instance,revision,status) VALUES (:id,:contact_id,:instance,NULL,'needs_review')
         ON CONFLICT (id) DO NOTHING RETURNING id''', params)

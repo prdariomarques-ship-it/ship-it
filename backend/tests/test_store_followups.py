@@ -44,13 +44,14 @@ async def env(db_engine, monkeypatch):
     for k, v in dict(
         store_followups_enabled=True, store_whatsapp_enabled=True, auto_reply_enabled=True, evolution_instance=STORE,
         evolution_personal_instance="pessoal-teste", jobs_retry_backoff_seconds=0, store_voice_enabled=False,
-        store_timezone="America/Sao_Paulo", store_followup_close_margin_minutes=30,
+        store_timezone="America/Sao_Paulo", store_followup_close_margin_minutes=30, store_hours_confirmed=True,
         store_hours='{"mon-fri": ["08:30", "17:30"], "sat": ["08:30", "12:30"], "holiday": ["08:30", "12:30"]}',
         store_extra_holidays="", store_excluded_holidays="", store_followup_quote_resume_delay_minutes=120, store_followup_max_age_days=7,
         store_followup_max_attempts=1, store_followup_min_gap_hours=72, store_followup_restock_min_orders=3,
         store_followup_restock_tolerance=0.25,
     ).items():
         monkeypatch.setattr(s, k, v)
+    monkeypatch.setattr(sf, "_now", lambda: NOW)         # relógio da decisão de envio (o worker real roda com o relógio real)
     text_t, voice_t, synth = TextTransport(), VoiceTransport(), FakeSynth()
     monkeypatch.setattr("jobs.handlers.get_whatsapp_provider", lambda: text_t)
     monkeypatch.setattr("services.store_voice.get_whatsapp_provider", lambda: voice_t)
