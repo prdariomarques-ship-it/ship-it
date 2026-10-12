@@ -115,3 +115,46 @@ async def test_mark_opt_out_grava_as_chaves_permanentes(db_engine):
         await db_b.commit()
     prefs = await _stored(sessions, cid)
     assert prefs["cor"] == "azul" and prefs["store_contact_opt_out"] is True and prefs["store_contact_opt_out_message_id"] == 6
+
+
+@pytest.mark.parametrize("fake", [1, 1.0, "true", "True", [True], {"v": True}])
+async def test_valor_equivalente_mas_de_outro_tipo_nao_remove_o_bloqueio(client, auth_headers, db_engine, fake):
+    """Contato com APENAS store_followup_opt_out=true: enviar a flag como 1/1.0/"true" junto com uma preferência comum é recusado
+    (422), nada é gravado e o booleano original e o bloqueio efetivo permanecem."""
+    cid, sessions = await _contact(db_engine, {"store_followup_opt_out": True})
+    r = await client.patch(f"/api/contacts/{cid}", json={"name": "Outro", "preferences": {"store_followup_opt_out": fake, "cor": "azul"}}, headers=auth_headers)
+    assert r.status_code == 422 and "store_followup_opt_out" in r.json()["detail"]
+    prefs = await _stored(sessions, cid)
+    assert prefs == {"store_followup_opt_out": True} and prefs["store_followup_opt_out"] is True
+    assert store_optout.is_blocked(Contact(preferences=prefs)) == "cliente pediu para não receber contatos"
+    async with sessions() as db:
+        assert (await db.get(Contact, cid)).name == "Cliente"
+
+
+@pytest.mark.parametrize("fake", [1, 1.0, "true"])
+async def test_numero_como_flag_nova_em_contato_sem_opt_out_tambem_e_recusado(client, auth_headers, db_engine, fake):
+    cid, sessions = await _contact(db_engine, {"cor": "azul"})
+    r = await client.patch(f"/api/contacts/{cid}", json={"preferences": {"store_contact_opt_out": fake}}, headers=auth_headers)
+    assert r.status_code == 422
+    assert await _stored(sessions, cid) == {"cor": "azul"}                       # nem o número nem nada foi gravado
+
+
+async def test_reenvio_com_o_mesmo_booleano_preserva_o_booleano_e_aplica_a_outra_preferencia(client, auth_headers, db_engine):
+    cid, sessions = await _contact(db_engine, {"store_followup_opt_out": True})
+    r = await client.patch(f"/api/contacts/{cid}", json={"preferences": {"store_followup_opt_out": True, "cor": "azul"}}, headers=auth_headers)
+    assert r.status_code == 200
+    prefs = await _stored(sessions, cid)
+    assert prefs == {"store_followup_opt_out": True, "cor": "azul"} and prefs["store_followup_opt_out"] is True
+
+
+async def test_operador_registra_opt_out_somente_com_booleano_verdadeiro(client, auth_headers, db_engine):
+    cid, sessions = await _contact(db_engine, {})
+    assert (await client.patch(f"/api/contacts/{cid}", json={"preferences": {"store_contact_opt_out": 1}}, headers=auth_headers)).status_code == 422
+    assert (await client.patch(f"/api/contacts/{cid}", json={"preferences": {"store_contact_opt_out": True}}, headers=auth_headers)).status_code == 200
+    assert (await _stored(sessions, cid))["store_contact_opt_out"] is True
+
+
+async def test_metadado_numerico_de_tipo_diferente_tambem_e_recusado(client, auth_headers, db_engine):
+    cid, sessions = await _contact(db_engine, dict(OPTED_OUT))
+    r = await client.patch(f"/api/contacts/{cid}", json={"preferences": {"store_contact_opt_out_message_id": 7.0}}, headers=auth_headers)
+    assert r.status_code == 422 and await _stored(sessions, cid) == OPTED_OUT
