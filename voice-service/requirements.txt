@@ -1,0 +1,10 @@
+# Dependências do serviço (versões fixadas). NumPy fica nos arquivos de cada motor (cada um exige a sua faixa).
+fastapi==0.143.0
+starlette==1.7.0
+uvicorn==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.15.0
+pydantic_core==2.50.1
+anyio==4.15.1
+h11==0.16.0
+av==18.1.0

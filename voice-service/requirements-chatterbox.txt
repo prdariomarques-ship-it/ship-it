@@ -1,0 +1,7 @@
+# Motor Chatterbox Multilingual. Versões tiradas dos metadados do pacote chatterbox-tts 0.1.7 (Requires-Dist); a
+# instalação NÃO foi exercitada no ambiente de desenvolvimento (sem acesso ao host de pesos e sem GPU). Reconfirme em build.
+-r requirements.txt
+numpy==1.26.4
+chatterbox-tts==0.1.7
+# o pacote fixa: torch==2.6.0 torchaudio==2.6.0 transformers==5.2.0 diffusers==0.29.0 librosa==0.11.0 safetensors==0.5.3
+# conformer==0.3.2 pykakasi==2.3.0 gradio==6.8.0 (gradio não é usado pelo serviço; vem como dependência do pacote)

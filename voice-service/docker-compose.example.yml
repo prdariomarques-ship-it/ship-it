@@ -1,0 +1,26 @@
+# EXEMPLO (não executado aqui). Rede interna: o serviço NÃO publica porta no host nem passa pelo Caddy.
+# O backend alcança http://voice-service:8765 pela rede "voice_internal". Máquina/GPU: ver README (não é a VPS atual).
+services:
+  voice-service:
+    build:
+      context: .
+      args: { ENGINE: chatterbox }
+    environment:
+      VOICE_ENGINE: chatterbox
+      VOICE_DEVICE: cuda          # ou cpu (lento); ver medições no README
+      VOICE_MODEL_REVISION: ${VOICE_MODEL_REVISION:?commit dos pesos}
+      VOICE_TOKENS: ${VOICE_TOKENS:?loja=<token de 32+ caracteres>}
+      VOICE_MAX_CONCURRENCY: "1"
+    volumes:
+      - ${VOICE_MODELS_PATH:?}:/models:ro
+      - ${VOICE_PROFILES_PATH:?}:/var/lib/voice-service/profiles:ro
+    tmpfs:
+      - /var/lib/voice-service/tmp:size=256m,mode=0700,uid=10001
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [voice_internal]
+    restart: unless-stopped
+networks:
+  voice_internal:
+    internal: true

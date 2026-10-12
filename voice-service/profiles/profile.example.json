@@ -1,0 +1,13 @@
+{
+  "agent": "loja",
+  "display_name": "Voz autorizada do proprietário (assistente da loja)",
+  "language": "pt",
+  "reference_file": "reference.wav",
+  "reference_sha256": "<sha256 do reference.wav, calculado por scripts/prepare_reference.py>",
+  "reference_text": "<transcrição exata do trecho; obrigatória só para o motor qwen3tts>",
+  "consent": {
+    "authorized": true,
+    "voice_owner": "<nome do titular da voz>",
+    "scope": "<finalidade autorizada, ex.: assistente de vendas da Loja Marquescolor, com identificação de voz sintética>"
+  }
+}
