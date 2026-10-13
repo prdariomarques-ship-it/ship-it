@@ -149,3 +149,59 @@ async def test_pelo_handler_a_segunda_resposta_nao_se_reapresenta(flow, monkeypa
     await _run(flow, cid, mid_same, STORE)
     contents = [j.payload["content"] for j in await _jobs(flow) if j.payload["to"] == "5511999992001"]
     assert contents == [INTRO, "Temos a tinta, sim."]
+
+
+# ------------------------------------------------------------------------------------------------ revisão: instância, autoria, "quem é você?"
+async def _seed_outbound(flow, *, instance=STORE, human=False, hours_ago=1):
+    async with flow.sessions() as db:
+        c = Contact(name="C", phone="5511999992100", preferences={})
+        db.add(c)
+        await db.flush()
+        db.add(Message(contact_id=c.id, direction=MessageDirection.OUTBOUND, media_type=MessageMediaType.TEXT, content="oi",
+                       whatsapp_instance=instance, sent_by_human=human, created_at=datetime.now(timezone.utc) - timedelta(hours=hours_ago)))
+        await db.commit()
+        return c.id
+
+
+async def test_mensagem_de_humano_nao_conta_como_o_bot_ja_ter_falado(flow):
+    cid = await _seed_outbound(flow, human=True)
+    async with flow.sessions() as db:
+        assert await handlers._drop_repeated_intro(db, flow.s, cid, STORE, INTRO, "Tem tinta?") == INTRO
+
+
+@pytest.mark.parametrize("other", ["b2b-sales", "azusa-church", "pessoal-teste"])
+async def test_mensagem_de_outra_instancia_nao_conta(flow, other):
+    cid = await _seed_outbound(flow, instance=other)
+    async with flow.sessions() as db:
+        assert await handlers._drop_repeated_intro(db, flow.s, cid, STORE, INTRO, "Tem tinta?") == INTRO
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quem é você?", "quem e vc", "Com quem eu falo?", "Você é um robô?", "isso é um bot?", "vc é humano?", "Estou falando com uma pessoa?",
+    "Qual é o seu nome?", "é um robô?",
+])
+async def test_pergunta_de_identidade_mantem_a_apresentacao(flow, pergunta):
+    cid = await _seed_outbound(flow)
+    async with flow.sessions() as db:
+        assert await handlers._drop_repeated_intro(db, flow.s, cid, STORE, INTRO, pergunta) == INTRO
+
+
+@pytest.mark.parametrize("pergunta", ["Tem tinta branca?", "Quero 2 latas", "Quem entrega em Mauá?", "Você tem rolo de lã?"])
+async def test_pergunta_comum_continua_sem_apresentacao(flow, pergunta):
+    cid = await _seed_outbound(flow)
+    async with flow.sessions() as db:
+        assert await handlers._drop_repeated_intro(db, flow.s, cid, STORE, INTRO, pergunta) == "Temos a tinta, sim."
+
+
+async def test_pelo_handler_quem_e_voce_recebe_a_apresentacao_mesmo_com_bot_ja_tendo_falado(flow, monkeypatch):
+    from agents.executor import AgentResult
+
+    async def run(*a, **k):
+        return AgentResult(reply=INTRO, steps=[])
+    monkeypatch.setattr("orchestrator.service.ai_orchestrator.run", run)
+    cid, mid = await _msg(flow, "Quem é você?", age_seconds=5, instance=STORE, phone="5511999992200")
+    async with flow.sessions() as db:
+        db.add(Message(contact_id=cid, direction=MessageDirection.OUTBOUND, media_type=MessageMediaType.TEXT, content="oi", whatsapp_instance=STORE))
+        await db.commit()
+    await _run(flow, cid, mid, STORE)
+    assert [j.payload["content"] for j in await _jobs(flow) if j.payload["to"] == "5511999992200"] == [INTRO]

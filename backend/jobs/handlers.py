@@ -442,13 +442,32 @@ _SELF_INTRO = re.compile(
 )
 
 
-async def _drop_repeated_intro(db: AsyncSession, settings, contact_id: int, instance: str, reply: str) -> str:
-    """Tira a frase de apresentação ("Aqui é o assistente virtual…") do INÍCIO da resposta quando o bot já falou com este contato
-    nas últimas `store_intro_suppress_hours` horas. Só mexe nessa frase inicial e só se sobrar texto."""
+_ASKS_IDENTITY = re.compile(
+    r"\b(quem (e|eh) (voce|vc|ce|o senhor|a senhora)|quem esta (falando|ai|a)|com quem (eu )?(falo|estou falando|to falando)|"
+    r"(voce|vc|ce|isso|isto|esse|essa) (e|eh|seria) (um |uma )?(robo|bot|humano|humana|pessoa|assistente|ia|atendente|real|de verdade|maquina)|"
+    r"(falo|estou falando|to falando) com (um |uma )?(robo|bot|humano|humana|pessoa|ia|maquina)|"
+    r"qual (e )?(o )?seu nome|como (voce )?(se chama|chama)|e (um )?(robo|bot|humano|pessoa|ia))\b"
+)
+
+
+def _asks_identity(text: str | None) -> bool:
+    """O cliente perguntou QUEM está falando ("quem é você?", "é um robô?"): aí a apresentação é a resposta e nunca é removida."""
+    from services.store_optout import normalize
+
+    return bool(_ASKS_IDENTITY.search(normalize(text or "")))
+
+
+async def _drop_repeated_intro(
+    db: AsyncSession, settings, contact_id: int, instance: str, reply: str, inbound_text: str | None = None,
+) -> str:
+    """Tira a frase de apresentação ("Aqui é o assistente virtual…") do INÍCIO da resposta quando o BOT já falou com este contato
+    NESTA instância nas últimas `store_intro_suppress_hours` horas. Não conta mensagem de outra instância (Loja/B2B/Azusa/pessoal
+    são fluxos distintos) nem mensagem de humano; não remove se o cliente acabou de perguntar quem está falando. Só mexe nessa
+    frase inicial e só se sobrar texto."""
     from datetime import datetime, timedelta, timezone
 
     hours = int(getattr(settings, "store_intro_suppress_hours", 0) or 0)
-    if hours <= 0:
+    if hours <= 0 or not instance or _asks_identity(inbound_text):
         return reply
     match = _SELF_INTRO.match(reply or "")
     if not match or not reply[match.end():].strip():
@@ -460,7 +479,8 @@ async def _drop_repeated_intro(db: AsyncSession, settings, contact_id: int, inst
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     already = await db.scalar(
         select(Message.id).where(
-            Message.contact_id == contact_id, Message.direction == MessageDirection.OUTBOUND, Message.created_at >= since,
+            Message.contact_id == contact_id, Message.direction == MessageDirection.OUTBOUND,
+            Message.whatsapp_instance == instance, Message.sent_by_human.is_not(True), Message.created_at >= since,
         ).limit(1)
     )
     return reply[match.end():].lstrip() if already is not None else reply
@@ -675,7 +695,7 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
                 # Sem informação confiável: o agente registrou a lacuna (aba de logs do Dario OS) e NÃO responde ao cliente.
                 logger.info("Loja: agente sem informação confiável; resposta suprimida (contato %s)", contact_id)
                 return
-            reply = await _drop_repeated_intro(db, settings, contact_id, instance, reply)
+            reply = await _drop_repeated_intro(db, settings, contact_id, instance, reply, message.content)
     elif await _conversation_paused(db, contact_id, instance):
         logger.info("Pipeline: conversa em atendimento humano; agente não age (contato %s)", contact_id)
         return
