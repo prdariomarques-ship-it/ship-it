@@ -73,6 +73,24 @@ q "SELECT source, level, count(*) FROM logs WHERE created_at > now() - interval 
 } 2>&1 | tee banco_estado.txt
 ```
 
+## 6b. Complemento (13/10): cadeia histórica e colunas que a candidata passou a declarar
+Somente leitura. Serve para confrontar o que está **instalado** com as sete revisões históricas reconciliadas no repositório
+(`docs/vendedor-ativo/evidencias-20261013/historico-sha256.txt`) e confirmar `contacts.awaiting_reply_since` e `embeddings.external_id`.
+```bash
+# 1) cadeia completa que o Alembic instalado enxerga (não executa migração)
+docker exec "$BK" sh -c "cd $APP && alembic history --verbose" 2>&1 | tee alembic_history.txt
+# 2) hashes das sete revisões históricas instaladas, para comparar com historico-sha256.txt
+docker exec "$BK" sh -c "cd $APP/alembic/versions && sha256sum f4c18a2d9e10_*.py a6217b904c12_*.py b82f0194de63_*.py c91d5e7a3b20_*.py 51081d0451d4_*.py 7d31a9b4e2c1_*.py 9e2f1c6d7a80_*.py" 2>&1 | tee alembic_historico_sha256.txt
+# 3) colunas, índices e tabelas (SELECT em catálogo; nada é alterado)
+{
+q "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name='contacts' AND column_name='awaiting_reply_since';"
+q "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name='embeddings' ORDER BY ordinal_position;"
+q "SELECT indexname FROM pg_indexes WHERE tablename IN ('embeddings','messages') ORDER BY 1;"
+q "SELECT to_regclass('public.store_quotes') AS quotes, to_regclass('public.store_deliveries') AS entregas, to_regclass('public.store_support_cases') AS casos, to_regclass('public.store_loop_goals') AS metas, to_regclass('public.store_corrections') AS correcoes, to_regclass('public.store_pos_orders') AS pos, to_regclass('public._mig_e610080003_created_objects') AS marcador_e3;"
+} 2>&1 | tee banco_colunas_historico.txt
+```
+Inclua `alembic_history.txt`, `alembic_historico_sha256.txt` e `banco_colunas_historico.txt` no pacote do passo 8.
+
 ## 7. Incidente de autoria (Flávio/Micael) — evidência mínima, telefones mascarados
 ```bash
 {
