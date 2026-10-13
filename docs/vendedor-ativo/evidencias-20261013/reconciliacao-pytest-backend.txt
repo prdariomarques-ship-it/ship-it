@@ -1,0 +1,5 @@
+# python -m pytest -q -rs -p ci_require_postgres   (REQUIRE_POSTGRES_TESTS=1, PG 16 local com senha, porta 5432)
+794209c
+Tue Oct 13 13:56:17 UTC 2026
+1689 passed, 4 warnings in 352.73s (0:05:52)
+Tue Oct 13 14:02:23 UTC 2026

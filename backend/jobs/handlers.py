@@ -988,13 +988,9 @@ async def transcribe_owner_audio(db: AsyncSession, payload: dict) -> None:
     contact = await ContactRepository(db).get(message.contact_id)
     if contact is None or not contact.phone:
         return
-    # media_key here is the raw provider envelope used above to validate
-    # this is really the owner's own echoed audio (fromMe + matching id)
-    # -- InboundMessage.media_key is the plain string key providers
-    # actually look media up by (see provider.download_media's call
-    # shape), not that envelope; `['id']` is it, already confirmed
-    # non-empty and equal to message.external_id by the check above.
-    inbound = InboundMessage(phone=contact.phone, text='', external_id=message.external_id, media_type='audio', timestamp=message.provider_timestamp, instance=message.whatsapp_instance or '', media_key=media_key.get('id'), from_me=True)
+    # media_key is the complete provider key persisted by the webhook ({remoteJid, id, fromMe}); it was validated above (fromMe +
+    # id equal to the stored external id) and is passed WHOLE to download_media(), which needs more than the bare id.
+    inbound = InboundMessage(phone=contact.phone, text='', external_id=message.external_id, media_type='audio', timestamp=message.provider_timestamp, instance=message.whatsapp_instance or '', media_key=media_key, from_me=True)
     transcript = (await _transcribe_audio(db, get_whatsapp_provider(), inbound)).strip()
     if not transcript:
         raise STTProviderError('Audio do proprietario sem transcricao; verificar midia ou servico de voz')

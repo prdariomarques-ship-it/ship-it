@@ -1,0 +1,2 @@
+# python -m pytest -q -rs -p ci_require_postgres whatsapp_agents_fix/
+153 passed in 9.67s

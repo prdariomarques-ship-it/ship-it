@@ -54,8 +54,15 @@ class MemoryService:
         content: str,
         source: str,
         contact_id: int | None = None,
+        external_id: str | None = None,
     ) -> Embedding:
-        """Embed the content, upsert it into Qdrant and persist its metadata."""
+        """Embed the content, upsert it into Qdrant and persist its metadata.
+
+        `external_id` is an optional caller-owned key (e.g. a `Product.sku`)
+        that lets a later call replace or drop this exact vector via
+        `replace_by_external_id`/`delete_by_external_id` instead of the
+        caller having to track `Embedding.id` itself.
+        """
         await self._ensure_collection()
         vector = await get_embedding_provider().embed(content)
         vector_id = str(uuid.uuid4())
@@ -70,13 +77,18 @@ class MemoryService:
                         "content": content,
                         "source": source,
                         "contact_id": contact_id,
+                        "external_id": external_id,
                     },
                 )
             ],
         )
 
         record = Embedding(
-            contact_id=contact_id, source=source, content=content, vector_id=vector_id
+            contact_id=contact_id,
+            source=source,
+            content=content,
+            vector_id=vector_id,
+            external_id=external_id,
         )
         db.add(record)
         await db.commit()
@@ -107,6 +119,46 @@ class MemoryService:
         for row in rows:
             await db.delete(row)
         await db.commit()
+
+    async def delete_by_external_id(
+        self, db: AsyncSession, source: str, external_id: str
+    ) -> None:
+        """Remove every embedding tagged with this (source, external_id)
+        pair. Looks the ids up in Postgres (which carries `external_id`)
+        rather than a Qdrant payload filter, for the same reason `search()`
+        over-fetches instead of filtering server-side: the installed
+        qdrant-client has no combinator for this collection yet. Delegates
+        to `delete()`, so it shares its Qdrant-then-Postgres ordering."""
+        rows = (
+            (
+                await db.execute(
+                    select(Embedding.id).where(
+                        Embedding.source == source, Embedding.external_id == external_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        await self.delete(db, list(rows))
+
+    async def replace_by_external_id(
+        self,
+        db: AsyncSession,
+        content: str,
+        source: str,
+        external_id: str,
+        contact_id: int | None = None,
+    ) -> Embedding:
+        """Re-embed an external record (e.g. a product) under a stable key:
+        drops any previous vector(s) for this (source, external_id) first,
+        so re-indexing never accumulates duplicate/stale chunks -- same
+        intent as `delete()`'s docstring, specialized for the common case
+        of a single caller-owned external key."""
+        await self.delete_by_external_id(db, source, external_id)
+        return await self.store(
+            db, content, source, contact_id=contact_id, external_id=external_id
+        )
 
     async def search(
         self, query: str, limit: int = 5, contact_id: int | None = None

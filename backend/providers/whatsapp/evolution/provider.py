@@ -1,8 +1,11 @@
 """Evolution API provider — https://doc.evolution-api.com."""
 
+import base64
+
 from providers.whatsapp.base import (
     InboundMessage,
     WhatsAppProvider,
+    WhatsAppProviderError,
     extract_baileys_content,
     normalize_phone,
 )
@@ -18,6 +21,8 @@ class EvolutionProvider(WhatsAppProvider):
         self._api_key = settings.evolution_api_key
         self._instance = settings.evolution_instance
         self.default_instance = self._instance
+        # Optional second instance (the owner's personal WhatsApp) sharing this backend; empty when unconfigured.
+        self._personal_instance = settings.evolution_personal_instance
 
     def _headers(self) -> dict:
         return {"apikey": self._api_key} if self._api_key else {}
@@ -145,8 +150,37 @@ class EvolutionProvider(WhatsAppProvider):
             # answering from his own phone) -- this method's only job is
             # to report what the webhook actually said.
             from_me=bool(key.get("fromMe")),
-            # media_key is intentionally NOT populated: no extraction logic
-            # exists for it in this payload shape, and no download_media
-            # method exists on this provider to consume it either. Left as
-            # None (the InboundMessage default) rather than guessed.
+            # The complete message key ({remoteJid, id, fromMe, ...}) is the handle download_media() needs; it is kept
+            # whole (never reduced to the id) and only for media messages. Text messages carry no media_key.
+            media_key=dict(key) if media_type != "text" else None,
         )
+
+    async def download_media(
+        self, media_key: dict, *, instance: str | None = None
+    ) -> tuple[bytes, str] | None:
+        """Evolution decrypts and returns inbound media as base64 via getBase64FromMediaMessage -- this avoids
+        re-implementing WhatsApp/Baileys' own E2E media decryption. `media_key` is the complete message key as parsed from
+        the webhook. Returns None on any failure (unauthorized instance, transport/provider error, empty or invalid
+        base64); callers treat that exactly like "this provider doesn't support media download". Only the two configured
+        instances may be addressed. This is a read-style call, but it goes through the same single-attempt transport as the
+        sends: an ambiguous failure is reported as None and the durable job retry decides what to do next."""
+        if instance and instance not in {self._instance, self._personal_instance}:
+            return None
+        try:
+            result = await self._post(
+                "chat/getBase64FromMediaMessage",
+                {"message": {"key": media_key}, "convertToMp4": False},
+                instance=instance,
+            )
+        except WhatsAppProviderError:
+            return None
+        encoded = result.get("base64") if isinstance(result, dict) else None
+        mime_type = (result.get("mimetype") or result.get("mimeType") or "audio/ogg") if isinstance(result, dict) else "audio/ogg"
+        if not encoded or not isinstance(encoded, str):
+            return None
+        try:
+            if encoded.startswith("data:"):
+                encoded = encoded.split(",", 1)[1]
+            return base64.b64decode(encoded, validate=True), mime_type
+        except (ValueError, TypeError, IndexError):
+            return None

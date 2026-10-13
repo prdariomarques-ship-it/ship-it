@@ -12,6 +12,11 @@ not assumed), while still actually creating the columns for a fresh test
 database built from this migration chain (SQLite, as the review's own
 test harness does).
 
+Overlap with the historical chain (reconciled): the revisions c91d5e7a3b20 (sent_by_human, is_autopilot_reply) and 7d31a9b4e2c1
+(whatsapp_instance + its index) are now part of this repository's graph (see 9e2f1c6d7a80_store_pos.py and its ancestors), so on a
+database built from the chain this migration finds everything present and is a no-op that owns nothing. The guarded creation stays
+because a database that reached the baseline by another path may still lack them.
+
 Revision ID: e610080003
 Revises: e610080002
 """
@@ -214,8 +219,10 @@ def downgrade():
                 batch.drop_column(column_name)
 
     removed = set(columns_to_drop) | ({_INDEX_NAME} if drop_index_now else set())
-    if removed:
-        for name in removed:
-            bind.execute(sa.text(f'DELETE FROM "{_MARKER_TABLE}" WHERE object_name = :name'), {'name': name})
-        if bind.execute(sa.text(f'SELECT 1 FROM "{_MARKER_TABLE}" LIMIT 1')).first() is None:
-            op.drop_table(_MARKER_TABLE)
+    for name in removed:
+        bind.execute(sa.text(f'DELETE FROM "{_MARKER_TABLE}" WHERE object_name = :name'), {'name': name})
+    # The ownership table is this migration's own bookkeeping: once it records nothing still owned it is dropped -- also when
+    # upgrade() found every object already present (the historical revisions c91d5e7a3b20 / 7d31a9b4e2c1 now create them, as
+    # on production) and so removed nothing here. Dropping it never touches an object this migration did not create.
+    if bind.execute(sa.text(f'SELECT 1 FROM "{_MARKER_TABLE}" LIMIT 1')).first() is None:
+        op.drop_table(_MARKER_TABLE)

@@ -108,6 +108,12 @@ integração completa.
   do alembic em PostgreSQL isolado (`test_full_migration_chain_…`). Isso prova
   só que o grafo deste repositório é percorrível, não equivalência com
   produção.
+  **Atualização 13/10/2026:** os pacotes recebidos (`aftercare-review`) trouxeram as
+  sete revisões históricas (`f4c18a2d9e10` … `7d31a9b4e2c1` e o `store_pos` real
+  de `9e2f1c6d7a80`). Elas substituíram o marcador vazio, sem `stamp` e sem ID
+  novo; hashes em `docs/vendedor-ativo/evidencias-20261013/historico-sha256.txt`.
+  Isso fecha o grafo do repositório com conteúdo real, mas **não** comprova a
+  cadeia instalada na VPS (continua exigindo coleta somente leitura).
 - **3. Eco não pode impedir atendimento humano** ✅ corrigido. Prova de autoria
   agora é exclusivamente um recibo do provedor gravado no envio
   (`conversation_receipts`). Texto igual e recência não provam nada. Todo envio

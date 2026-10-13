@@ -1,0 +1,5 @@
+# alembic upgrade head / downgrade base em SQLite (passo 'Migrations apply and roll back' do CI)
+INFO  [alembic.runtime.migration] Running upgrade e610080003 -> c8f3a1d27b40, Vendedor ativo: registro de respostas por voz (store_voice_sends) e acompanhamentos comerciais (store_followups).
+INFO  [alembic.runtime.migration] Running downgrade 790826c45a84 -> , initial schema
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+rc final: 0

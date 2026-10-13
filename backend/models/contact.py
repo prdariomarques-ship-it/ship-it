@@ -31,6 +31,12 @@ class Contact(Base, TimestampMixin):
         DateTime(timezone=True)
     )
 
+    # Since when an inbound message has gone unanswered (neither by the owner
+    # nor by the twin). None = nothing pending. Only used with twin mode on.
+    awaiting_reply_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
     messages = relationship(
         "Message", back_populates="contact", cascade="all, delete-orphan"
     )

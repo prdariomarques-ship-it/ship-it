@@ -20,3 +20,6 @@ class Embedding(Base, TimestampMixin):
     vector_id: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False
     )  # Qdrant point id
+    external_id: Mapped[str | None] = mapped_column(
+        String(255), index=True
+    )  # caller-owned key (e.g. Product.sku) for replace/delete without a lookup

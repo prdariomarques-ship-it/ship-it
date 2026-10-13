@@ -1,0 +1,16 @@
+# SIMULACAO local dos passos do CI apos a reconciliacao (NAO e GitHub Actions); resultado do autor
+794209c
+Tue Oct 13 13:55:43 UTC 2026
+## ruff check .
+All checks passed!
+## mypy --ignore-missing-imports .   (exatamente como no CI)
+Success: no issues found in 384 source files
+## mypy . (sem a opcao; modulos inexistentes na arvore continuam aparecendo)
+observability/operational_metrics.py:7: error: Cannot find implementation or library stub for module named "opentelemetry.exporter.prometheus"  [import-not-found]
+admin/service.py:72: error: Library stubs not installed for "psutil"  [import-untyped]
+tests/test_admin.py:850: error: Library stubs not installed for "psutil"  [import-untyped]
+jobs/handlers.py:75: error: Cannot find implementation or library stub for module named "services.store_aftercare"  [import-not-found]
+jobs/handlers.py:677: error: Cannot find implementation or library stub for module named "services.store_sales"  [import-not-found]
+jobs/handlers.py:758: error: Cannot find implementation or library stub for module named "agents.darius_twin"  [import-not-found]
+jobs/handlers.py:1092: error: Cannot find implementation or library stub for module named "jobs.owner_audio_dependencies"  [import-not-found]
+Found 7 errors in 4 files (checked 384 source files)

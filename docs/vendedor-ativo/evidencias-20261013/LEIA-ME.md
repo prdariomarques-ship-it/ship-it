@@ -13,3 +13,18 @@ para estes commits e nada aqui foi executado na instalação do titular nem em p
 Mutantes Z01–Z06 são **seis**, todos mortos. A frase "6 dos 7" da mensagem anterior misturou o número de testes novos de worker (7)
 com o de mutantes: não existe sétimo mutante e nenhum dos seis sobreviveu. Z07 e Z08 foram acrescentados depois, a pedido do parecer
 (ver `mutantes.txt`).
+
+## Reconciliação dos cinco erros de mypy (13/10, depois do `794209c`)
+
+Resultados do autor, no mesmo tipo de PostgreSQL 16 descartável com senha na porta 5432 (simulação das variáveis do CI, **não** é
+GitHub Actions). Os logs `reconciliacao-*.txt` foram gerados sobre a árvore com os dois commits (reconciliação + guarda anti-skip, commit seguinte); o campo de
+SHA que eles imprimem mostra o HEAD de antes dos commits, porque a execução foi feita com a árvore ainda sem commit.
+
+| Arquivo | O que é |
+|---|---|
+| `historico-sha256.txt` | SHA-256 das sete revisões históricas copiadas byte a byte do pacote `aftercare-review` (conferido contra os arquivos do repositório) |
+| `reconciliacao-ruff-mypy.txt` | `ruff` limpo; `mypy --ignore-missing-imports .` (como no CI) sem erros; `mypy .` sem a opção ainda acusa 7 módulos/stubs ausentes (listados) |
+| `reconciliacao-pytest-backend.txt` | `python -m pytest -q -rs -p ci_require_postgres` com `REQUIRE_POSTGRES_TESTS=1`: 1689 passaram, nenhum pulado |
+| `reconciliacao-pytest-pacote.txt` | `whatsapp_agents_fix/` com a guarda ligada: 153 passaram |
+| `reconciliacao-alembic-sqlite.txt` | `alembic upgrade head` / `downgrade base` em SQLite (passo de migrações do CI) |
+| `mutantes-reconciliacao-R01-R17.txt` | 17 mutantes dos testes novos (áudio, catálogo, marcador, migrações), todos mortos |

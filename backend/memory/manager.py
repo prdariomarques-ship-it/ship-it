@@ -30,6 +30,7 @@ from repositories.contact import ContactRepository
 from repositories.message import MessageRepository
 
 KNOWLEDGE_SOURCE = "knowledge"
+PRODUCT_SOURCE = "product_catalog"
 
 
 class MemoryManager:
@@ -62,6 +63,23 @@ class MemoryManager:
         return [item for item in results if item.get("source") == KNOWLEDGE_SOURCE][
             :limit
         ]
+
+    async def index_product(self, db: AsyncSession, sku: str, content: str) -> None:
+        """(Re)embed a product for semantic search, keyed by its SKU
+        (`external_id`) so re-indexing (e.g. after a catalog re-import)
+        replaces the previous vector instead of duplicating it. Called by
+        the `catalog.index_product` job handler -- see
+        `jobs/handlers.py` -- off the CSV-import hot path."""
+        await memory_service.replace_by_external_id(
+            db, content=content, source=PRODUCT_SOURCE, external_id=sku
+        )
+
+    async def deindex_product(self, db: AsyncSession, sku: str) -> None:
+        """Drop a product's indexed vector(s) -- it was deactivated or
+        removed from the catalog since the indexing job was queued."""
+        await memory_service.delete_by_external_id(
+            db, source=PRODUCT_SOURCE, external_id=sku
+        )
 
     async def remember(
         self, db: AsyncSession, content: str, source: str, contact_id: int | None = None

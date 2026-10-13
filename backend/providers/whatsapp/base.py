@@ -86,16 +86,18 @@ class InboundMessage(BaseModel):
     # Review finding (new, 2026-10-09): webhooks/router.py and jobs/handlers.py
     # both read `inbound.instance` extensively (loop guards, pause scoping,
     # Message.whatsapp_instance) and router.py also reads `inbound.media_key`
-    # for owner-audio download -- but this model never declared either
-    # field, so every real webhook call would raise AttributeError the
-    # moment either was read. Added here with evidence from the Evolution
-    # webhook shape itself (`{event, instance, data: {...}}`, see
-    # evolution/provider.py's parse_webhook comment). `media_key` is left
-    # unpopulated by any provider for now -- see providers/whatsapp/evolution/
-    # provider.py's parse_webhook docstring for why extraction isn't
-    # implemented yet (no download_media method exists anywhere either).
+    # for audio download -- but this model never declared either field.
+    # `instance` comes from the Evolution webhook envelope (`{event, instance,
+    # data: {...}}`).
     instance: str = ""
-    media_key: str | None = None
+    # Provider-specific handle needed to fetch this message's raw media: for
+    # Evolution/Baileys the complete message key `{remoteJid, id, fromMe, ...}`
+    # exactly as the webhook carried it, passed verbatim to
+    # WhatsAppProvider.download_media() and persisted in the job payloads
+    # (whatsapp.transcribe_audio / whatsapp.transcribe_owner_audio). Never
+    # reduced to the bare id: the download needs the whole key. None for text
+    # messages and for providers without media download.
+    media_key: dict | None = None
     # Review finding (new, 2026-10-10): webhooks/router.py's whatsapp_webhook
     # reads `inbound.from_me` to decide between the real human-reply path
     # (_capture_human_reply) and the normal client-inbound path -- but this
@@ -171,6 +173,15 @@ class WhatsAppProvider(ABC):
     async def send_voice(self, to: str, audio_base64: str, instance: str | None = None) -> dict:
         """Mensagem de voz (OGG/Opus em base64). Só o Evolution implementa; os demais recusam sem enviar nada."""
         raise WhatsAppProviderError(f"{self.name}: envio de mensagem de voz não suportado")
+
+    async def download_media(
+        self, media_key: dict, *, instance: str | None = None
+    ) -> tuple[bytes, str] | None:
+        """Fetch an inbound media message's raw bytes, given the `InboundMessage.media_key` it was parsed with. Returns
+        (raw_bytes, mime_type), or None on any failure or when this provider cannot do it. Default: not supported by
+        this provider's transport -- media messages keep their pre-existing behaviour (empty text, no auto-reply).
+        Overridden by providers whose gateway exposes a media-download endpoint (currently only Evolution)."""
+        return None
 
     @abstractmethod
     async def send_location(
