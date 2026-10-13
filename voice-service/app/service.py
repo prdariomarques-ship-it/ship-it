@@ -41,8 +41,9 @@ class SynthService:
         self._engine_lock = threading.Lock()
         self._admitted = 0
         self._inflight: dict[tuple[str, str], asyncio.Future] = {}
-        self._done: dict[tuple[str, str], tuple[StoredAudio, float]] = {}
-        self._profiles: dict[str, tuple[VoiceProfile, float]] = {}
+        self._done: dict[tuple[str, str], tuple[StoredAudio, float, tuple[str, str]]] = {}
+        self._fingerprints: dict[tuple[str, str], tuple[str, str]] = {}   # (agente, request_id) -> (hash do texto, SHA-256 da referência)
+        self._profiles: dict[str, tuple[VoiceProfile, tuple]] = {}
         # Histórico curto para o painel (só metadados: nunca o texto nem o áudio). Mesmo serviço, mesma fila, mesma configuração.
         self.recent: deque[dict] = deque(maxlen=30)
 
@@ -66,20 +67,26 @@ class SynthService:
         return len(self._inflight)
 
     # ------------------------------------------------------------------ perfis
-    def profile_for(self, agent: str) -> VoiceProfile:
-        meta = self.s.profiles_dir / agent / "profile.json"
+    def _profile_stamp(self, agent: str) -> tuple:
+        """Impressão dos arquivos do perfil (nome, mtime, tamanho). Trocar a gravação de referência SEM mexer no profile.json também
+        muda a impressão: o perfil em cache nunca sobrevive a uma troca de arquivo."""
+        base = self.s.profiles_dir / agent
         try:
-            mtime = meta.stat().st_mtime
+            return tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in sorted(base.iterdir()) if f.is_file())
         except OSError:
-            mtime = -1.0
+            return ()
+
+    def profile_for(self, agent: str) -> VoiceProfile:
+        stamp = self._profile_stamp(agent)
         cached = self._profiles.get(agent)
-        if cached and cached[1] == mtime:
+        if cached and cached[1] == stamp:
             return cached[0]
+        self._profiles.pop(agent, None)
         try:
-            profile = load_profile(self.s.profiles_dir, agent)
+            profile = load_profile(self.s.profiles_dir, agent)  # reconfere consentimento e SHA-256 da referência
         except ProfileError as exc:
             raise SynthError(404, "profile_unavailable", str(exc)) from exc
-        self._profiles[agent] = (profile, mtime)
+        self._profiles[agent] = (profile, stamp)
         return profile
 
     # ------------------------------------------------------------------ validação
@@ -134,15 +141,22 @@ class SynthService:
             raise SynthError(503, "engine_not_ready", self.not_ready_reason or "motor indisponível")
         profile = self.profile_for(agent)
         key = (agent, request_id)
+        # Impressão do CONTEÚDO do pedido: mesmo request_id com texto ou voz diferentes é conflito, nunca o resultado antigo.
+        fingerprint = (hashlib.sha256(text.encode("utf-8")).hexdigest(), profile.reference_sha256)
 
         done = self._done.get(key)
         if done is not None:
-            audio, expires = done
+            audio, expires, done_fp = done
             if time.time() < expires and self.store.get(audio.audio_id, agent) is not None:
+                if done_fp != fingerprint:
+                    raise SynthError(409, "request_id_conflict", "este request_id já foi usado com outro texto ou outra voz")
                 return audio
             self._done.pop(key, None)
+            self._fingerprints.pop(key, None)
 
         fut = self._inflight.get(key)
+        if fut is not None and self._fingerprints.get(key) != fingerprint:
+            raise SynthError(409, "request_id_conflict", "este request_id já está em andamento com outro texto ou outra voz")
         if fut is None:
             if self._admitted >= self.s.max_concurrency + self.s.queue_max:
                 raise SynthError(429, "busy", "fila de síntese cheia; tente novamente depois")
@@ -150,15 +164,17 @@ class SynthService:
             self._admitted += 1
             fut = loop.run_in_executor(self._executor, self._run, text, profile)
             self._inflight[key] = fut
+            self._fingerprints[key] = fingerprint
 
             def _finished(f: asyncio.Future, key=key, agent=agent) -> None:
                 self._admitted -= 1
                 self._inflight.pop(key, None)
                 if f.cancelled() or f.exception() is not None:
+                    self._fingerprints.pop(key, None)
                     return
                 data, info = f.result()
                 stored = self.store.put(agent, data, hashlib.sha256(data).hexdigest(), info.duration_seconds)
-                self._done[key] = (stored, time.time() + self.s.result_ttl_seconds)
+                self._done[key] = (stored, time.time() + self.s.result_ttl_seconds, fingerprint)
 
             fut.add_done_callback(_finished)
         try:
@@ -182,6 +198,7 @@ class SynthService:
 
     def sweep(self) -> int:
         now = time.time()
-        for key in [k for k, (_, exp) in self._done.items() if now >= exp]:
+        for key in [k for k, (_, exp, _fp) in self._done.items() if now >= exp]:
             self._done.pop(key, None)
+            self._fingerprints.pop(key, None)
         return self.store.sweep(now)

@@ -177,8 +177,8 @@ async def test_ttl_remove_arquivo_e_resultado(client, settings):
     meta = (await client.post("/v1/synthesize", json=body("req-ttl-00001"), headers=auth())).json()
     assert list(settings.storage_dir.glob("*.ogg"))
     for key in list(service._done):
-        a, exp = service._done[key]
-        service._done[key] = (a, time.time() - 1)
+        a, exp, fp = service._done[key]
+        service._done[key] = (a, time.time() - 1, fp)
     for it in service.store._items.values():
         it.created = time.time() - 10_000
     assert service.sweep() == 1
