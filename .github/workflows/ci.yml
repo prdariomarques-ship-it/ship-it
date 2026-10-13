@@ -57,6 +57,18 @@ jobs:
         continue-on-error: true
       - name: Tests
         run: pytest -q -rs
+      # Guard: `-rs` above only LISTS what was skipped. A skipped real-PostgreSQL concurrency test proves nothing, so this
+      # isolated run fails on a test failure, on any skip, and on no tests being run at all. `shell: bash` is
+      # `bash -eo pipefail`; without it the default (`bash -e`) returns the status of `tee`, hiding a pytest failure.
+      - name: Real-PostgreSQL concurrency tests must run (not skip)
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q -rs tests/test_followup_claim_postgres.py tests/test_delivery_review_postgres.py | tee /tmp/pg-concurrency.out
+          if grep -qiE "skipped|no tests ran" /tmp/pg-concurrency.out; then
+            echo "::error::PostgreSQL concurrency tests were skipped or not collected (check TEST_POSTGRES_URL)"; exit 1
+          fi
+          grep -qE "[0-9]+ passed" /tmp/pg-concurrency.out
       # Separate invocation on purpose: whatsapp_agents_fix/ deliberately
       # loads real production modules under their real dotted names and
       # uses an app_stub/ tree that shadows the `providers` package -- both
