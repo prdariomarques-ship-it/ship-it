@@ -1,0 +1,2 @@
+# idem, pacote whatsapp_agents_fix (CI: pytest -q whatsapp_agents_fix/)
+153 passed in 10.08s

@@ -19,6 +19,10 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_PASSWORD: postgres
+          # Second database, used only by TEST_POSTGRES_URL below: those tests
+          # DROP SCHEMA public and recreate it on every test, so they must never
+          # point at the default `postgres` database.
+          POSTGRES_DB: shipit_test
         ports:
           - 5432:5432
         options: >-
@@ -28,6 +32,10 @@ jobs:
           --health-retries 10
     env:
       WHATSAPP_DEDUP_PG_ADMIN_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres
+      # Without this variable the real-PostgreSQL concurrency tests are SKIPPED, not run (test_followup_claim_postgres.py,
+      # test_delivery_review_postgres.py): forced lock orders for the follow-up claim and the administrative close of an
+      # uncertain delivery. CI-only ephemeral database from the service above, never a production credential.
+      TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/shipit_test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -48,7 +56,7 @@ jobs:
         run: pip install pip-audit && pip-audit -r requirements.txt || echo "::warning::pip-audit found known vulnerabilities"
         continue-on-error: true
       - name: Tests
-        run: pytest -q
+        run: pytest -q -rs
       # Separate invocation on purpose: whatsapp_agents_fix/ deliberately
       # loads real production modules under their real dotted names and
       # uses an app_stub/ tree that shadows the `providers` package -- both

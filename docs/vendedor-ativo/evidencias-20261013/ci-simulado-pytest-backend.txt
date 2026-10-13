@@ -1,0 +1,5 @@
+# SIMULACAO local das variaveis/servico do CI (.github/workflows/ci.yml), PostgreSQL 16 com senha, porta 5432. NAO e GitHub Actions; resultado do autor
+0443c8a
+Tue Oct 13 13:04:42 UTC 2026
+1634 passed, 4 warnings in 332.34s (0:05:32)
+Tue Oct 13 13:10:30 UTC 2026

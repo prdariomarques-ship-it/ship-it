@@ -1,0 +1,11 @@
+# mypy exatamente como no CI: mypy --ignore-missing-imports .  (NAO passa: 5 erros preexistentes, os mesmos da base 5372c27)
+webhooks/router.py:185: error: "WhatsAppProvider" has no attribute "download_media"  [attr-defined]
+jobs/handlers.py:112: error: "MemoryManager" has no attribute "deindex_product"  [attr-defined]
+jobs/handlers.py:115: error: "MemoryManager" has no attribute "index_product"  [attr-defined]
+jobs/handlers.py:780: error: "Contact" has no attribute "awaiting_reply_since"  [attr-defined]
+jobs/handlers.py:794: error: "Contact" has no attribute "awaiting_reply_since"  [attr-defined]
+Found 5 errors in 2 files (checked 372 source files)
+# sem --ignore-missing-imports (como rodei antes): 12 erros
+Found 12 errors in 5 files (checked 372 source files)
+# ruff
+All checks passed!
