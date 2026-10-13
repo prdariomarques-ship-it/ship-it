@@ -27,6 +27,10 @@ class VoiceSettings(BaseSettings):
     # Revisão (commit) dos pesos no Hugging Face. Vazio = recusa carregar: não se fixa "main".
     model_revision: str = ""
     model_dir: Path = Path("/models")  # pesos já baixados; o serviço roda com HF_HUB_OFFLINE=1
+    # Parâmetros do Chatterbox (valores padrão do upstream; ajuste por escuta/medição no hardware do titular):
+    # cfg_weight (0 a 1: aderência ao ritmo/estilo da referência) e exaggeration (0 a 2: expressividade).
+    chatterbox_cfg_weight: float = 0.5
+    chatterbox_exaggeration: float = 0.5
     chatterbox_pt_br_pack: bool = False  # usa o pacote de língua única pt-BR quando disponível no model_dir
 
     # --- limites --------------------------------------------------------------------------------------------
@@ -47,6 +51,20 @@ class VoiceSettings(BaseSettings):
     # --- saída -----------------------------------------------------------------------------------------------
     opus_bitrate: int = 28000
     target_peak_dbfs: float = -3.0  # só normaliza o pico do ÁUDIO GERADO (nunca a gravação de referência)
+
+    @field_validator("chatterbox_cfg_weight")
+    @classmethod
+    def _cfg(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("chatterbox_cfg_weight deve estar entre 0 e 1")
+        return v
+
+    @field_validator("chatterbox_exaggeration")
+    @classmethod
+    def _exg(cls, v: float) -> float:
+        if not 0.0 <= v <= 2.0:
+            raise ValueError("chatterbox_exaggeration deve estar entre 0 e 2")
+        return v
 
     @field_validator("max_concurrency")
     @classmethod

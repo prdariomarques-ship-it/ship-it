@@ -46,13 +46,15 @@ class ChatterboxEngine(Engine):
     def synthesize(self, text: str, language: str, reference: Path, reference_text: str | None) -> SynthesisResult:
         if self._model is None:
             raise EngineNotReady("modelo não carregado")
-        key = str(reference)
+        s = self._settings
+        cfg, exg = float(s.chatterbox_cfg_weight), float(s.chatterbox_exaggeration)
+        key = f"{reference}|{exg}"                                   # a conditional depende da referência E da expressividade
         try:
             if key not in self._conds:
-                self._model.prepare_conditionals(str(reference))
+                self._model.prepare_conditionals(str(reference), exaggeration=exg)
                 self._conds[key] = self._model.conds
             self._model.conds = self._conds[key]
-            wav = self._model.generate(text, language_id=language)
+            wav = self._model.generate(text, language_id=language, exaggeration=exg, cfg_weight=cfg)
         except Exception as exc:  # noqa: BLE001
             raise EngineError(f"{type(exc).__name__}: {exc}") from exc
         samples = wav.squeeze().detach().cpu().numpy()
