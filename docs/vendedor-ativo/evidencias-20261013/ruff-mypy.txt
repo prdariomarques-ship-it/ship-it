@@ -1,0 +1,18 @@
+# ruff
+All checks passed!
+# mypy (12 erros ja existentes antes desta branch)
+admin/service.py:72: note: (or run "mypy --install-types" to install all missing stub packages)
+admin/service.py:72: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+tests/test_gdrive_tools.py:736: note: By default the bodies of untyped functions are not checked, consider using --check-untyped-defs  [annotation-unchecked]
+tests/test_admin.py:850: error: Library stubs not installed for "psutil"  [import-untyped]
+jobs/handlers.py:75: error: Cannot find implementation or library stub for module named "services.store_aftercare"  [import-not-found]
+jobs/handlers.py:75: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+jobs/handlers.py:112: error: "MemoryManager" has no attribute "deindex_product"  [attr-defined]
+jobs/handlers.py:115: error: "MemoryManager" has no attribute "index_product"  [attr-defined]
+jobs/handlers.py:677: error: Cannot find implementation or library stub for module named "services.store_sales"  [import-not-found]
+jobs/handlers.py:758: error: Cannot find implementation or library stub for module named "agents.darius_twin"  [import-not-found]
+jobs/handlers.py:780: error: "Contact" has no attribute "awaiting_reply_since"  [attr-defined]
+jobs/handlers.py:794: error: "Contact" has no attribute "awaiting_reply_since"  [attr-defined]
+jobs/handlers.py:1096: error: Cannot find implementation or library stub for module named "jobs.owner_audio_dependencies"  [import-not-found]
+tests/test_whatsapp_send_queue_retry.py:57: note: By default the bodies of untyped functions are not checked, consider using --check-untyped-defs  [annotation-unchecked]
+Found 12 errors in 5 files (checked 371 source files)

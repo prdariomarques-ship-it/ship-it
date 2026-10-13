@@ -1,6 +1,10 @@
 # ruff: noqa: F811
 """Revisão de entregas incertas em PostgreSQL REAL: fechamento administrativo concorrente e fechamento × reserva concorrente.
 
+As corridas são DETERMINÍSTICAS: uma sessão "dona" executa sua operação e segura a trava da conversa sem confirmar; a outra
+operação é disparada e só se prossegue quando o `pg_stat_activity` mostra que ela está BLOQUEADA esperando a trava; então a dona
+confirma e o resultado da segunda é verificado. Sem `sleep` para decidir a ordem e sem aceitar dois resultados possíveis.
+
 Só roda com TEST_POSTGRES_URL (banco descartável, recriado a cada teste). Sem ela, é pulado."""
 import asyncio
 import os
@@ -96,7 +100,63 @@ async def test_envio_comum_sem_recibo_e_fechado_em_postgres(pg, api):
     assert len(pg.provider.calls) == 1
 
 
-async def test_dois_fechamentos_concorrentes_um_vence_e_a_auditoria_e_unica(pg, api):
+async def _wait_blocked(pg, expected=1, timeout=15.0):
+    """Espera (consultando o servidor) até haver `expected` sessões presas em trava de linha/transação. Prova que a segunda operação
+    chegou ao ponto de espera ANTES de a dona confirmar; falha por tempo se a operação não bloquear (isto é, se não houver trava)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        async with pg.sessions() as db:                     # sessão nova a cada consulta: pg_stat_activity é congelada dentro de uma transação
+            n = (await db.execute(text("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
+                                       "AND wait_event_type='Lock' AND pid<>pg_backend_pid()"))).scalar()
+        if n >= expected:
+            return n
+        assert loop.time() < deadline, f"nenhuma operação bloqueou na trava da conversa (bloqueadas: {n})"
+        await asyncio.sleep(0.01)                           # só intervalo de consulta; não decide a ordem
+
+
+async def _hold_close(pg, rev):
+    """Sessão dona: fecha administrativamente pelo serviço e NÃO confirma (segura a trava da conversa)."""
+    db = pg.sessions()
+    session = await db.__aenter__()
+    await conversation_control.close_unknown(session, pg.contact_id, INSTANCE, "send", f"send-job:{pg.job_id}", rev, pg.admin_id, REASON)
+    return db, session
+
+
+async def _hold_claim(pg, rev, intent):
+    db = pg.sessions()
+    session = await db.__aenter__()
+    assert await conversation_control.claim_send(session, pg.contact_id, INSTANCE, rev, intent) == "claimed"
+    return db, session
+
+
+async def _release(db, session):
+    await session.commit()
+    await db.__aexit__(None, None, None)
+
+
+async def _audit_count(pg):
+    async with pg.sessions() as db:
+        return (await db.execute(text("SELECT count(*) FROM conversation_control_audit WHERE action='close_unknown'"))).scalar()
+
+
+async def test_fechamento_forcado_dois_fechamentos_o_segundo_espera_e_e_recusado(pg, api):
+    rev = await _revision(pg)
+    holder = await _hold_close(pg, rev)                       # o primeiro fechamento está feito, mas não confirmado
+    second = asyncio.create_task(api.post("/api/whatsapp/deliveries/close-unknown", json=_body(pg, rev)))
+    await _wait_blocked(pg)                                    # o segundo está preso na trava (provado no servidor)
+    assert not second.done()
+    await _release(*holder)
+    r = await asyncio.wait_for(second, 15)
+    assert r.status_code == 409                                # viu o primeiro já confirmado: já fechado/revisão mudou
+    async with pg.sessions() as db:
+        ctl = await conversation_control.snapshot(db, pg.contact_id, INSTANCE)
+    assert await _audit_count(pg) == 1 and ctl["revision"] == rev + 1 and ctl["paused"] is True
+    assert len(pg.provider.calls) == 1                         # nenhum reenvio
+
+
+async def test_dois_fechamentos_livres_um_vence_e_a_auditoria_e_unica(pg, api):
+    """Sem ordem forçada (as duas chamadas largam juntas): qualquer vencedor serve, mas o resultado é sempre exatamente 200 + 409."""
     rev = await _revision(pg)
     barrier = asyncio.Barrier(2)
 
@@ -106,39 +166,52 @@ async def test_dois_fechamentos_concorrentes_um_vence_e_a_auditoria_e_unica(pg, 
     r1, r2 = await asyncio.gather(close(), close())
     assert sorted([r1.status_code, r2.status_code]) == [200, 409]
     async with pg.sessions() as db:
-        n = (await db.execute(text("SELECT count(*) FROM conversation_control_audit WHERE action='close_unknown'"))).scalar()
         ctl = await conversation_control.snapshot(db, pg.contact_id, INSTANCE)
-    assert n == 1 and ctl["revision"] == rev + 1 and ctl["paused"] is True
+    assert await _audit_count(pg) == 1 and ctl["revision"] == rev + 1 and ctl["paused"] is True
 
 
-@pytest.mark.parametrize("close_first", [True, False])
-async def test_fechamento_e_reserva_com_cerca_concorrentes_nunca_perdem_a_cerca_do_outro(pg, api, close_first):
-    """O fechamento (comum) e um claim_send de OUTRO envio disputam a conversa. Em qualquer ordem: se o claim venceu, a cerca dele
-    sobrevive ao fechamento; se o fechamento venceu (pausou), o claim é recusado. Nunca fica uma cerca apagada de um envio ativo."""
+async def test_reserva_cercada_vence_o_fechamento_espera_preserva_a_cerca_e_a_pausa_permanece_apos_concluir_o_envio(pg, api):
+    """Ordem forçada 1: o claim (envio rival) já tem a trava; o fechamento espera, depois fecha SEM apagar a cerca do rival.
+    O envio rival é concluído (com recibo) e a pausa colocada pelo fechamento continua."""
     rev = await _revision(pg)
-    barrier = asyncio.Barrier(2)
+    holder = await _hold_claim(pg, rev, "twin-send:rival-1")
+    closing = asyncio.create_task(api.post("/api/whatsapp/deliveries/close-unknown", json=_body(pg, rev)))
+    await _wait_blocked(pg)
+    assert not closing.done()
+    await _release(*holder)
+    r = await asyncio.wait_for(closing, 15)
+    assert r.status_code == 200 and r.json()["intent"]["status"] == "closed_unknown"
+    async with pg.sessions() as db:
+        ctl = await conversation_control.snapshot(db, pg.contact_id, INSTANCE)
+    assert ctl["paused"] is True and ctl["revision"] == rev + 1
+    assert ctl["inflight"] == "twin-send:rival-1"              # a cerca do rival ativo sobreviveu ao fechamento
+    async with pg.sessions() as db:                            # o rival termina o envio dele (recibo): só ele libera a própria cerca
+        assert await conversation_control.finish_send(db, "twin-send:rival-1", "wamid-rival") == "sent"
+        await db.commit()
+    async with pg.sessions() as db:
+        ctl = await conversation_control.snapshot(db, pg.contact_id, INSTANCE)
+        statuses = dict((await db.execute(text("SELECT id, status FROM conversation_send_intents"))).all())
+    assert ctl["inflight"] is None and ctl["paused"] is True   # a pausa permanece depois de o envio concorrente concluir
+    assert statuses[f"send-job:{pg.job_id}"] == "closed_unknown" and statuses["twin-send:rival-1"] == "sent"
+    assert len(pg.provider.calls) == 1                         # o fechamento não enviou nada
 
-    async def close():
-        await asyncio.wait_for(barrier.wait(), 10)
-        if not close_first:
-            await asyncio.sleep(0.05)
-        return await api.post("/api/whatsapp/deliveries/close-unknown", json=_body(pg, rev))
+
+async def test_fechamento_vence_a_reserva_cercada_espera_e_e_recusada_sem_cerca(pg, api):
+    """Ordem forçada 2: o fechamento já tem a trava (e pausou/subiu a revisão); o claim rival espera e é recusado."""
+    rev = await _revision(pg)
+    holder = await _hold_close(pg, rev)
 
     async def claim():
         async with pg.sessions() as db:
-            await asyncio.wait_for(barrier.wait(), 10)
-            if close_first:
-                await asyncio.sleep(0.05)
-            result = await conversation_control.claim_send(db, pg.contact_id, INSTANCE, rev, "twin-send:rival-1")
+            result = await conversation_control.claim_send(db, pg.contact_id, INSTANCE, rev, "twin-send:rival-2")
             await db.commit()
             return result
-    r_close, claimed = await asyncio.gather(close(), claim())
+    claiming = asyncio.create_task(claim())
+    await _wait_blocked(pg)
+    assert not claiming.done()
+    await _release(*holder)
+    assert await asyncio.wait_for(claiming, 15) == "suppressed"
     async with pg.sessions() as db:
         ctl = await conversation_control.snapshot(db, pg.contact_id, INSTANCE)
-    if claimed == "claimed":
-        assert ctl["inflight"] == "twin-send:rival-1"                      # o rival ativo mantém a cerca
-        assert r_close.status_code in (200, 409)
-        if r_close.status_code == 200:
-            assert ctl["paused"] is True
-    else:
-        assert r_close.status_code == 200 and ctl["paused"] is True and ctl["inflight"] is None
+    assert ctl["paused"] is True and ctl["inflight"] is None and ctl["revision"] == rev + 1
+    assert await _audit_count(pg) == 1

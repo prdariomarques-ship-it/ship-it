@@ -1,0 +1,15 @@
+# Mutantes Z01-Z06 (reserva comum), suites SQLite do parecer + revisao de entregas; resultado do autor
+Z01_exige_cerca_tambem_na_reserva_comum: rc=1 KILLED ['1 failed, 163 passed, 1 warning in 40.83s']
+Z02_limpa_a_cerca_de_qualquer_um: rc=1 KILLED ['1 failed, 168 passed, 1 warning in 42.60s']
+Z03_erro_ambiguo_nao_marca_finalizado: rc=1 KILLED ['1 failed, 166 passed, 1 warning in 39.01s']
+Z04_aceita_transporte_nao_finalizado: rc=1 KILLED ['1 failed, 160 passed, 1 warning in 38.74s']
+Z05_reserva_comum_vira_cercada: rc=1 KILLED ['1 failed, 163 passed, 1 warning in 37.37s']
+Z06_fechamento_nao_pausa: rc=1 KILLED ['1 failed, 136 passed, 1 warning in 28.31s']
+
+# Mutantes contra os testes PostgreSQL deterministicos (Z02,Z05,Z06,Z07) e Z08 contra os testes SQLite
+Z02_limpa_a_cerca_de_qualquer_um: rc=1 KILLED ['1 failed, 3 passed, 1 warning in 3.21s']
+Z05_reserva_comum_vira_cercada: rc=1 KILLED ['1 failed, 1 warning in 1.42s']
+Z06_fechamento_nao_pausa: rc=1 KILLED ['1 failed, 1 passed, 1 warning in 1.87s']
+Z07_fechamento_sem_trava_da_conversa: rc=1 KILLED ['1 failed, 1 passed, 1 warning in 1.69s']
+Z08_fechamento_ignora_revisao: rc=0 SURVIVED ['5 passed, 1 warning in 3.34s']
+Z08_fechamento_ignora_revisao: rc=1 KILLED ['1 failed, 32 passed in 12.40s']
