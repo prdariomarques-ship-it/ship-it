@@ -36,6 +36,9 @@ jobs:
       # test_delivery_review_postgres.py): forced lock orders for the follow-up claim and the administrative close of an
       # uncertain delivery. CI-only ephemeral database from the service above, never a production credential.
       TEST_POSTGRES_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/shipit_test
+      # Anti-skip guard (backend/ci_require_postgres.py): with this flag a PostgreSQL-dependent test that gets SKIPPED (because one of
+      # the two variables above went missing) fails the run instead of silently turning the concurrency proof green.
+      REQUIRE_POSTGRES_TESTS: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -56,8 +59,9 @@ jobs:
         run: pip install pip-audit && pip-audit -r requirements.txt || echo "::warning::pip-audit found known vulnerabilities"
         continue-on-error: true
       - name: Tests
-        run: pytest -q -rs
-      # Guard: `-rs` above only LISTS what was skipped. A skipped real-PostgreSQL concurrency test proves nothing, so this
+        run: python -m pytest -q -rs -p ci_require_postgres
+      # Second, narrower guard (kept alongside backend/ci_require_postgres.py, which already fails ANY skipped PostgreSQL test
+      # in both pytest invocations): `-rs` above only LISTS what was skipped. A skipped real-PostgreSQL concurrency test proves nothing, so this
       # isolated run fails on a test failure, on any skip, and on no tests being run at all. `shell: bash` is
       # `bash -eo pipefail`; without it the default (`bash -e`) returns the status of `tee`, hiding a pytest failure.
       - name: Real-PostgreSQL concurrency tests must run (not skip)
@@ -75,7 +79,7 @@ jobs:
       # suites in one pytest process collide in sys.modules at collection
       # time (see whatsapp_agents_fix/conftest.py's docstring).
       - name: Review regression tests (whatsapp_agents_fix, real PostgreSQL)
-        run: pytest -q whatsapp_agents_fix/
+        run: python -m pytest -q -rs -p ci_require_postgres whatsapp_agents_fix/
       - name: Migrations apply and roll back
         env:
           DATABASE_URL: sqlite+aiosqlite:///./ci-migrations.db

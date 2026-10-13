@@ -1,0 +1,5 @@
+G01_guarda_nao_derruba: rc=1 KILLED ['1 failed in 0.66s']
+G02_so_uma_variavel: rc=1 KILLED ['1 failed, 1 passed in 0.95s']
+G03_flag_ignorada: rc=1 KILLED ['1 failed, 2 passed in 1.36s']
+G04_qualquer_skip_falha: rc=1 KILLED ['1 failed, 3 passed in 2.74s']
+G05_ci_sem_a_flag: rc=1 KILLED ['1 failed, 6 passed in 3.31s']  (reexecutado apos corrigir o caminho do arquivo na receita)
