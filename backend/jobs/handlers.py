@@ -246,6 +246,9 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     if send_intent_id is None and alert_contact_id is None and job_id is not None and plain_scope_instance:
         plain_contact = await ContactRepository(db).get_or_create_by_phone(normalize_phone(to))
         guard = None
+        expected_revision = payload.get('control_revision')
+        if followup_id is None and type(expected_revision) is int:
+            guard = functools.partial(_revision_changed, db, plain_contact.id, plain_scope_instance, expected_revision)
         if followup_id is not None:
             # Acompanhamento proativo: a reserva só sai se, AGORA e sob a trava da conversa, o acompanhamento continua
             # autorizado (opt-out/recusa, habilitação, horário, bloqueios) e este job é o dono dele. Identidade estável por
@@ -414,6 +417,24 @@ async def _conversation_paused(db: AsyncSession, contact_id: int, instance: str)
     return bool((await conversation_control.snapshot(db, contact_id, instance))["paused"])
 
 
+async def _revision_changed(db: AsyncSession, contact_id: int, instance: str, expected: int) -> str | None:
+    """Guard de reserva: motivo para barrar se a revisão do controle da conversa mudou desde a geração da resposta."""
+    from services import conversation_control
+
+    current = int((await conversation_control.snapshot(db, contact_id, instance))["revision"])
+    return "pausa e retomada depois da geração (resposta antiga não é liberada)" if current != expected else None
+
+
+async def _control_revision(db: AsyncSession, contact_id: int, instance: str) -> int | None:
+    """Revisão do controle da conversa (muda a cada pausa e a cada retomada) no INÍCIO do processamento da mensagem. A resposta
+    gerada carrega este número: se, até o envio, houve pausa e retomada, o envio é barrado (ver send_whatsapp_text)."""
+    if not instance:
+        return None
+    from services import conversation_control
+
+    return int((await conversation_control.snapshot(db, contact_id, instance))["revision"])
+
+
 _SELF_INTRO = re.compile(
     r"^\s*(?:(?:ol[aá]|oi|bom dia|boa tarde|boa noite)[!,.]?\s*)?(?:aqui\s+[ée]|eu\s+sou|sou)\s+(?:o|a|um|uma)?\s*"
     r"(?:assistente|atendente|rob[oô]|bot)\b[^.!?\n]*[.!?]\s*",
@@ -558,6 +579,7 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
 
     settings = get_settings()
     instance = str(payload.get("instance") or "")
+    control_revision = await _control_revision(db, contact_id, instance)
     extra_agents = {"b2b-sales": "b2b", "azusa-church": "azusa_intake"}
     if instance in extra_agents:
         if not settings.auto_reply_enabled:
@@ -583,10 +605,10 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
             memories=[], history=[],
         )
         if result.reply and result.reply.strip():
-            await JobService(db).enqueue(
-                "whatsapp.send_text",
-                {"to": contact.phone, "content": result.reply, "instance": instance},
-            )
+            extra_payload: dict = {"to": contact.phone, "content": result.reply, "instance": instance}
+            if control_revision is not None:
+                extra_payload["control_revision"] = control_revision
+            await JobService(db).enqueue("whatsapp.send_text", extra_payload)
         return
     personal_instance = settings.evolution_personal_instance
     # Safety fallback mirroring webhooks/router.py's own instance gate: even if
@@ -670,6 +692,8 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
 
     if reply.strip():
         send_payload: dict = {"to": reply_phone, "content": reply, "instance": instance}
+        if control_revision is not None:
+            send_payload["control_revision"] = control_revision      # barra o envio se houve pausa E retomada depois deste ponto
         if settings.store_voice_enabled and settings.store_whatsapp_enabled and not is_personal_instance:
             # Só a resposta comercial da LOJA pode ganhar voz (nunca Twin, B2B ou Azusa): o job de envio de texto
             # pede o áudio depois de entregar o texto, e todas as checagens são refeitas na hora da voz.
