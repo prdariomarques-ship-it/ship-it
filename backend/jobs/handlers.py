@@ -280,6 +280,15 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
         if plain_intent_id is not None and provably_not_sent(exc):
             await conversation_control.release_unsent_plain_send(db, plain_intent_id)
             await db.commit()
+        elif plain_intent_id is not None:
+            # A chamada ao transporte TERMINOU com erro e o resultado é incerto (ex.: timeout de leitura): marca como finalizada,
+            # sem recibo e sem alterar o estado `needs_review`. Continua sem reenvio automático; só isto permite ao administrador
+            # aceitar a incerteza depois (close_unknown recusa chamadas não finalizadas, que podem ser um processo morto no meio).
+            try:
+                await conversation_control.finish_send(db, plain_intent_id, None)
+                await db.commit()
+            except Exception:  # noqa: BLE001 - a marcação é auxiliar; o erro original do transporte é o que importa
+                await db.rollback()
         raise
     # Review fix (C): capture whatever receipt id the provider actually
     # returned instead of always discarding it as None. extract_receipt_id

@@ -207,12 +207,18 @@ def _delivery_scope(contact_id, instance, kind, key):
 async def _delivery_intent(db, params, kind):
     # Identifiers come only from the validated kind, never caller SQL.
     table, key_column = ('conversation_send_intents', 'id') if kind == 'send' else ('conversation_alert_intents', 'dedup_key')
-    row = await _one(db, f"""SELECT status, receipt_id, transport_finished FROM {table}
+    extra = ', revision' if kind == 'send' else ''
+    row = await _one(db, f"""SELECT status, receipt_id, transport_finished{extra} FROM {table}
         WHERE contact_id=:contact_id AND instance=:instance AND {key_column}=:key""", params)
     if row is None:
         return None
-    return {'kind': kind, 'key': params['key'], 'status': row['status'],
-            'receipt_id': row['receipt_id'], 'transport_finished': bool(row['transport_finished'])}
+    intent = {'kind': kind, 'key': params['key'], 'status': row['status'],
+              'receipt_id': row['receipt_id'], 'transport_finished': bool(row['transport_finished'])}
+    if kind == 'send':
+        # 'fenced' = reserva por claim_send (guarda a marca `inflight` da conversa); 'plain' = reserve_plain_send, que NUNCA grava
+        # `inflight` (para uma reserva comum sem desfecho não congelar as demais mensagens da conversa) e tem revisão nula.
+        intent['reservation'] = 'plain' if row['revision'] is None else 'fenced'
+    return intent
 
 
 async def inspect_delivery(db, contact_id, instance, kind, key):
@@ -240,14 +246,17 @@ async def close_unknown(db, contact_id, instance, kind, key, expected_revision, 
     await _lock(db, params)
     intent = await _delivery_intent(db, params, kind)
     control = await snapshot(db, contact_id, instance)
+    # Reserva por claim_send: a conversa tem de ainda estar cercada por ESTA reserva. Reserva comum (reserve_plain_send) não grava
+    # a cerca, então não a exige — mas também nunca limpa a cerca de OUTRA reserva (ver o UPDATE abaixo).
+    fence_lost = kind == 'send' and intent is not None and intent['reservation'] == 'fenced' and control['inflight'] != key
     if (intent is None or intent['status'] != 'needs_review' or not intent['transport_finished']
-            or control['revision'] != expected_revision
-            or (kind == 'send' and control['inflight'] != key)):
+            or control['revision'] != expected_revision or fence_lost):
         raise ControlConflict('Intent is unfinished, already resolved, or control revision/fence changed')
     table, key_column = ('conversation_send_intents', 'id') if kind == 'send' else ('conversation_alert_intents', 'dedup_key')
     await db.execute(text(f"""UPDATE {table} SET status='closed_unknown'
         WHERE contact_id=:contact_id AND instance=:instance AND {key_column}=:key"""), params)
-    clear = ', inflight=NULL' if kind == 'send' else ''
+    # A cerca só é limpa se for DESTA reserva: uma reserva concorrente (inflight de outro envio) é preservada.
+    clear = ', inflight=CASE WHEN inflight=:key THEN NULL ELSE inflight END' if kind == 'send' else ''
     await db.execute(text(f"""UPDATE conversation_controls SET revision=revision+1, paused=true{clear}
         WHERE contact_id=:contact_id AND instance=:instance"""), params)
     params.update(id=str(uuid4()), prior_revision=expected_revision, revision=expected_revision + 1,
