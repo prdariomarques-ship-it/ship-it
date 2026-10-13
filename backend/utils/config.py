@@ -170,6 +170,12 @@ class Settings(BaseSettings):
     # as opposed to a dedicated commercial/store instance. Empty means
     # single-instance deployments keep their old, global behavior.
     evolution_personal_instance: str = ""
+    # Envio de VOZ (POST /message/sendWhatsAppAudio). `encoding`: None = não envia o campo (o Evolution v2 converte o áudio com ffmpeg
+    # para OGG/Opus mono 48 kHz e envia como nota de voz: caminho padrão e mais testado); False = envia os bytes como estão
+    # (nosso OGG/Opus já validado); só mude depois de testar no aparelho. `delay` em milissegundos (o Evolution mostra
+    # "gravando áudio…" durante o atraso); 0 = sem atraso. Atrasos longos aumentam o tempo da requisição HTTP.
+    evolution_voice_encoding: bool | None = None
+    evolution_voice_delay_ms: int = 0
     # Loop/automation guard specific to the Twin flow (distinct from the
     # generic auto_reply_max_per_contact_per_minute throttle above) --
     # mirrors that generic throttle's shape (6 replies / 60s window) as a

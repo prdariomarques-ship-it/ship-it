@@ -80,15 +80,23 @@ class EvolutionProvider(WhatsAppProvider):
     async def send_voice(self, to: str, audio_base64: str, instance: str | None = None) -> dict:
         """Mensagem de VOZ (PTT) a partir de OGG/Opus já validado pelo chamador, enviada como base64.
 
-        Contrato assumido (Evolution API v2, o mesmo estilo de corpo plano já usado por send_text): POST
-        /message/sendWhatsAppAudio/{instance} com {"number": ..., "audio": <url ou base64>}. A VERSÃO instalada do Evolution não
-        foi confirmada neste repositório: a reprodução como mensagem de voz precisa ser conferida no aparelho antes de ligar o
-        recurso. Um único POST (como os demais envios deste provedor): resultado ambíguo nunca é repetido aqui."""
+        Contrato (código-fonte do Evolution API v2, `sendWhatsAppAudio`): POST /message/sendWhatsAppAudio/{instance} com
+        {"number", "audio", opcionais "delay" (ms) e "encoding"}. `audio` aceita URL ou base64 **puro** (sem prefixo `data:`; o
+        validador do Evolution recusa o prefixo). Com `encoding` ausente/true o servidor converte com ffmpeg para OGG/Opus mono
+        48 kHz e envia como nota de voz (ptt) com presença "gravando"; com false envia os bytes como estão. A resposta traz
+        `key.id` (recibo). A VERSÃO instalada não foi confirmada aqui, e a reprodução como nota de voz precisa ser conferida no
+        aparelho antes de ligar o recurso. Um único POST: resultado ambíguo nunca é repetido por este provedor."""
         if not audio_base64 or not isinstance(audio_base64, str):
             raise ValueError("audio_base64 vazio")
-        return await self._post(
-            "message/sendWhatsAppAudio", {"number": normalize_phone(to), "audio": audio_base64}, instance=instance,
-        )
+        if audio_base64.startswith("data:"):
+            raise ValueError("audio_base64 deve ser base64 puro, sem prefixo 'data:' (o Evolution recusa o prefixo)")
+        s = get_settings()
+        body: dict = {"number": normalize_phone(to), "audio": audio_base64}
+        if s.evolution_voice_encoding is not None:
+            body["encoding"] = bool(s.evolution_voice_encoding)
+        if s.evolution_voice_delay_ms and s.evolution_voice_delay_ms > 0:
+            body["delay"] = int(s.evolution_voice_delay_ms)
+        return await self._post("message/sendWhatsAppAudio", body, instance=instance)
 
     async def send_location(
         self, to: str, latitude: float, longitude: float, caption: str = "", instance: str | None = None

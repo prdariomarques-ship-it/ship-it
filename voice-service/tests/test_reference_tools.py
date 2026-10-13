@@ -86,3 +86,18 @@ def test_le_ogg_opus_como_o_do_whatsapp(tmp_path):
     assert abs(len(got) / got_sr - 15) < 0.2
     rep = ar.analyze(got, got_sr)
     assert rep["duration_seconds"] == pytest.approx(15, abs=0.2) and rep["suggested_window"] is not None
+
+
+def test_download_weights_monta_os_argumentos_sem_rede():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("download_weights", Path(__file__).resolve().parents[1] / "scripts" / "download_weights.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    args = mod.build_args("D:/models", "abc123")
+    assert args["repo_id"] == "ResembleAI/chatterbox" and args["revision"] == "abc123" and args["local_dir"] == "D:/models"
+    assert set(mod.FILES) >= {"ve.pt", "t3_mtl23ls_v2.safetensors", "s3gen.pt", "grapheme_mtl_merged_expanded_v1.json"}
+    from app.engines.chatterbox_engine import _REQUIRED_FILES
+    assert set(_REQUIRED_FILES) <= set(mod.FILES)                  # o que o motor exige é o que o script baixa
+    assert "revision" not in mod.build_args("D:/models", None)

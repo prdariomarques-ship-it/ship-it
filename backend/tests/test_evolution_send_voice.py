@@ -99,3 +99,38 @@ async def test_outros_provedores_recusam_voz_sem_enviar():
     from providers.whatsapp.baileys.provider import BaileysProvider
     with pytest.raises(WhatsAppProviderError, match="não suportado"):
         await BaileysProvider().send_voice("5511999990000", "QUJD")
+
+
+async def test_corpo_padrao_nao_envia_encoding_nem_delay(provider, monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "evolution_voice_encoding", None)
+    monkeypatch.setattr(s, "evolution_voice_delay_ms", 0)
+    client = _Client([_resp()])
+    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=client):
+        await provider.send_voice("5511999990000", "QUJD")
+    assert client.requests[0][2] == {"number": "5511999990000", "audio": "QUJD"}      # o servidor converte (caminho padrão do Evolution v2)
+
+
+@pytest.mark.parametrize("configured, expected", [(False, False), (True, True)])
+async def test_encoding_configurado_e_enviado_como_booleano(provider, monkeypatch, configured, expected):
+    monkeypatch.setattr(get_settings(), "evolution_voice_encoding", configured)
+    client = _Client([_resp()])
+    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=client):
+        await provider.send_voice("5511999990000", "QUJD")
+    assert client.requests[0][2]["encoding"] is expected
+
+
+async def test_delay_configurado_vai_em_milissegundos_inteiros(provider, monkeypatch):
+    monkeypatch.setattr(get_settings(), "evolution_voice_delay_ms", 1500)
+    client = _Client([_resp()])
+    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=client):
+        await provider.send_voice("5511999990000", "QUJD")
+    assert client.requests[0][2]["delay"] == 1500 and isinstance(client.requests[0][2]["delay"], int)
+
+
+async def test_prefixo_data_uri_e_recusado_antes_da_rede(provider):
+    client = _Client([_resp()])
+    with patch("providers.whatsapp.base.httpx.AsyncClient", return_value=client):
+        with pytest.raises(ValueError):
+            await provider.send_voice("5511999990000", "data:audio/ogg;base64,QUJD")      # o Evolution recusa o prefixo (400)
+    assert client.requests == []
