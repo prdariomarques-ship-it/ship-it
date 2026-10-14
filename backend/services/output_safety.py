@@ -147,6 +147,37 @@ def output_safe(reply: str) -> OutputSafetyResult:
     return OutputSafetyResult(safe=True)
 
 
+_EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_LINK_PATTERN = re.compile(r"(?:https?://|www\.)[^\s<>\"]+", re.IGNORECASE)
+_NUMBER_PATTERN = re.compile(r"\+?\d(?:[\s().-]*\d){9,}")  # 10+ digitos: telefone, CPF, CNPJ, chave PIX numerica
+
+
+def _digits(text: str) -> str:
+    return re.sub(r"\D", "", text)
+
+
+def unverified_contact_data(reply: str, allowed_texts: list[str]) -> str | None:
+    """Categoria ("email", "link" ou "telefone_ou_documento") do primeiro dado de contato da `reply` que NAO aparece em
+    `allowed_texts` (a ficha do dono e a propria conversa), ou None.
+
+    Caso real: o Twin mandou `dariomarques@outlook.com` (11267) quando o e-mail do dono e outro. Um dado de contato escrito pelo modelo que
+    nao veio da ficha nem da conversa e invencao: a resposta deve ser descartada, nao enviada. Nunca devolve nem registra o valor achado."""
+    allowed = "\n".join(allowed_texts)
+    allowed_lower = allowed.lower()
+    for match in _EMAIL_PATTERN.finditer(reply):
+        if match.group(0).lower() not in allowed_lower:
+            return "email"
+    for match in _LINK_PATTERN.finditer(reply):
+        if match.group(0).lower().rstrip(".,;:!?)") not in allowed_lower:
+            return "link"
+    allowed_numbers = [_digits(m.group(0)) for m in _NUMBER_PATTERN.finditer(allowed)]
+    for match in _NUMBER_PATTERN.finditer(reply):
+        number = _digits(match.group(0))
+        if not any(number.endswith(known) or known.endswith(number) for known in allowed_numbers):
+            return "telefone_ou_documento"
+    return None
+
+
 # --- Integration note (not executed here; no app/DB available in this
 # sandbox -- see the delivery message for what was reviewed-but-not-run) ---
 #

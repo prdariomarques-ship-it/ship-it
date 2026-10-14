@@ -284,6 +284,10 @@ class Settings(BaseSettings):
     style_examples_limit: int = 3
     style_min_score: float = 0.0  # calibrar com dados reais antes de subir
 
+    # Ficha do dono para o Twin (services/twin_ficha.py): arquivo JSON FORA do Git, com fatos autorizados e quem e cada contato.
+    # Vazio = desligado (o Twin responde como antes).
+    twin_ficha_path: str = ""
+
     # Mail (Gmail) — a domain independent of WhatsApp/Loja/Igreja/Investimentos/Agenda.
     # Optional: unset means the Gmail integration simply isn't available (no boot
     # failure) — only /api/mail/connect requires all three to be configured.
