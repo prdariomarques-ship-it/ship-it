@@ -1,6 +1,6 @@
 #!/bin/bash
 # Mudança 4: contatos silenciosos do Twin. Aplicação segura no container do backend. Uso:  bash aplicar_na_vps_m4.sh
-# Pasta com: handlers.py.orig (cópia do container, já com a 2A), handlers.py.novo, lista_silenciosos.txt e rollback_na_vps_m4.sh.
+# Pasta com: aplicar_m4.py, lista_silenciosos.txt e rollback_na_vps_m4.sh. O script copia o handlers.py do container (handlers.py.orig), gera o handlers.py.novo e confere os hashes.
 # Nada é gravado no código em uso até o arquivo novo estar conferido DENTRO do container; qualquer falha reverte sozinha.
 set -euo pipefail
 BK=darioos-evolution-backend-1
@@ -31,10 +31,13 @@ back_out() {
 
 echo "== 1. pré-condições (nada é alterado)"
 [ "$(health)" = healthy ] || die "o container não está healthy"
-for f in handlers.py.orig handlers.py.novo lista_silenciosos.txt rollback_na_vps_m4.sh; do [ -s "$f" ] || die "falta o arquivo $f"; done
-expect "handlers.py.orig" "$(sha_file handlers.py.orig)" "$H_ORIG"
-expect "handlers.py.novo" "$(sha_file handlers.py.novo)" "$H_NEW"
+for f in aplicar_m4.py lista_silenciosos.txt rollback_na_vps_m4.sh; do [ -s "$f" ] || die "falta o arquivo $f"; done
+docker cp "$BK:$HP" handlers.py.orig
 expect "handlers.py no container" "$(sha_live $HP)" "$H_ORIG"
+expect "handlers.py.orig (cópia fiel)" "$(sha_file handlers.py.orig)" "$H_ORIG"
+cp handlers.py.orig handlers.py.novo
+python3 aplicar_m4.py || die "o aplicar_m4.py recusou (nada foi gravado no container)"
+expect "handlers.py.novo" "$(sha_file handlers.py.novo)" "$H_NEW"
 if docker exec "$BK" test -e "$LP"; then die "já existe $LP no container; confira antes de sobrescrever (nada foi alterado)"; fi
 echo "OK"
 

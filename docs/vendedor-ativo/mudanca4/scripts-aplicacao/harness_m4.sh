@@ -7,7 +7,7 @@ W="$(mktemp -d)"; cp "$PROD/handlers.py" "$W/handlers.py.novo"; cp "$PROD/messag
 new_case() {
   T=$(mktemp -d); mkdir -p $T/bin $T/fake/root/app/jobs $T/dir
   cp fakedocker.sh $T/bin/docker; cp $W/handlers_2a.py $T/fake/root/app/jobs/handlers.py
-  cp $W/handlers_2a.py $T/dir/handlers.py.orig; cp $W/handlers.py.novo $T/dir/handlers.py.novo
+  cp ../aplicar_m4.py $T/dir/
   printf '# familia\n14  # Elaine\n' > $T/dir/lista_silenciosos.txt
   cp aplicar_na_vps_m4.sh rollback_na_vps_m4.sh $T/dir/
   sed -i 's/seq 1 30/seq 1 2/; s/sleep 5/sleep 0/' $T/dir/*.sh
