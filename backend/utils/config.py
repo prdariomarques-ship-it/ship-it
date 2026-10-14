@@ -270,6 +270,20 @@ class Settings(BaseSettings):
     observation_interval_seconds: float = 300.0  # re-observe even with no triggering event
     observation_context_limit: int = 5  # items per dimension; matches orchestrator.context._OWNER_CONTEXT_LIMIT
 
+    # Aprendizado do estilo do dono (`darius.distill_style`; ver services/style_distill.py).
+    # Desligado por padrao: aprender (distill) e usar (examples) sao chaves separadas.
+    style_distill_enabled: bool = False
+    style_examples_enabled: bool = False
+    style_distill_interval_seconds: float = 3600.0
+    style_distill_batch_size: int = 200
+    style_distill_lookback_days: int = 30
+    style_audio_min_words: int = 8  # transcricao curta de audio e suspeita (alucinacao do STT)
+    style_include_financial: bool = False  # classify_text "financeiro" fica fora do corpus
+    style_instances: str = ""  # instancias a aprender, separadas por virgula (vazio = a pessoal)
+    style_excluded_texts: str = ""  # textos automaticos (separados por "|") que nao sao o dono
+    style_examples_limit: int = 3
+    style_min_score: float = 0.0  # calibrar com dados reais antes de subir
+
     # Mail (Gmail) — a domain independent of WhatsApp/Loja/Igreja/Investimentos/Agenda.
     # Optional: unset means the Gmail integration simply isn't available (no boot
     # failure) — only /api/mail/connect requires all three to be configured.

@@ -13,7 +13,8 @@ import time
 from pathlib import Path
 
 from providers.llm.base import STUB_REPLY, ChatMessage
-from providers.llm.factory import chat_with_fallback
+# `chat_with_fallback` (Qwen -> DeepSeek) existe na fabrica de LLM de PRODUCAO; a candidata ainda nao a tem (ver quadro, G02/E01).
+from providers.llm.factory import chat_with_fallback  # type: ignore[attr-defined]
 from utils.config import get_settings
 from utils.logging import get_logger
 
@@ -44,7 +45,11 @@ def load_persona_prompt() -> str:
 
 
 async def generate_darius_reply(
-    history: list[ChatMessage], message: str, *, contact_name: str = ""
+    history: list[ChatMessage],
+    message: str,
+    *,
+    contact_name: str = "",
+    extra_system: list[str] | None = None,
 ) -> str:
     """`history` is the conversation BEFORE `message` (user = the contact,
     assistant = the owner/twin); `message` is the pending inbound text.
@@ -52,7 +57,11 @@ async def generate_darius_reply(
     prompt has always had "[nome]" placeholders in its example replies (see
     "Identificação do contato" / examples like "Bom dia, [nome]") but nothing
     ever told the model who it was actually talking to until this parameter
-    was added (2026-09-21 review)."""
+    was added (2026-09-21 review).
+
+    `extra_system` (optional) are additional system blocks built by the caller
+    (e.g. style examples retrieved for this message -- see
+    `agents/darius_twin_context.py`). They are context, never facts."""
     messages = [ChatMessage(role="system", content=load_persona_prompt())]
     if contact_name:
         messages.append(
@@ -61,6 +70,8 @@ async def generate_darius_reply(
                 content=f"Você está respondendo, pelo WhatsApp, para: {contact_name}.",
             )
         )
+    for block in extra_system or []:
+        messages.append(ChatMessage(role="system", content=block))
     messages.extend(history)
     messages.append(ChatMessage(role="user", content=message))
     started = time.monotonic()

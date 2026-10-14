@@ -31,6 +31,7 @@ from repositories.message import MessageRepository
 
 KNOWLEDGE_SOURCE = "knowledge"
 PRODUCT_SOURCE = "product_catalog"
+STYLE_SOURCE_PREFIX = "style_example"
 
 
 class MemoryManager:
@@ -79,6 +80,29 @@ class MemoryManager:
         removed from the catalog since the indexing job was queued."""
         await memory_service.delete_by_external_id(
             db, source=PRODUCT_SOURCE, external_id=sku
+        )
+
+    @staticmethod
+    def style_source(instance: str) -> str:
+        """Tag of the style examples learned from one WhatsApp instance."""
+        return f"{STYLE_SOURCE_PREFIX}:{instance}"
+
+    async def index_style_example(
+        self, db: AsyncSession, instance: str, message_id: int, content: str
+    ) -> None:
+        """(Re)embed one style example keyed by the owner's message id, so a
+        repeated distillation pass replaces it instead of duplicating it."""
+        await memory_service.replace_by_external_id(
+            db,
+            content=content,
+            source=self.style_source(instance),
+            external_id=f"style:{message_id}",
+        )
+
+    async def style_search(self, query: str, instance: str, limit: int = 3) -> list[dict]:
+        """Nearest style examples for an incoming message (one instance only)."""
+        return await memory_service.search(
+            query=query, limit=limit, source=self.style_source(instance)
         )
 
     async def remember(

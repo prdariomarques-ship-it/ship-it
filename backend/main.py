@@ -7,11 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import jobs.handlers  # noqa: F401 - register the built-in job handlers
+import jobs.style_job  # noqa: F401 - register the darius.distill_style job handler
 import observation.scheduler  # noqa: F401 - register the observation.tick job handler
 from admin.router import router as admin_router
 from agents.router import router as agents_router
 from database.session import async_session_factory
 from jobs.handlers import register_event_subscribers
+from jobs.style_job import start as start_style_distill
 from observation.events import (
     register_event_subscribers as register_observation_event_subscribers,
 )
@@ -118,6 +120,9 @@ async def lifespan(app: FastAPI):
         if settings.observation_enabled:
             async with async_session_factory() as session:
                 await start_observation_scheduler(session)
+        if settings.style_distill_enabled:
+            async with async_session_factory() as session:
+                await start_style_distill(session)
     logger.info(
         "%s v%s started (%s)",
         settings.app_name,

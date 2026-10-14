@@ -831,7 +831,10 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
     if not is_risky:
         chat_history = [ChatMessage(role='user' if m.direction == MessageDirection.INBOUND else 'assistant', content=_owner_audio_history_content(m)) for m in history if _owner_audio_history_content(m) and m.id != message_id]
         try:
-            reply = await generate_darius_reply(chat_history, message.content, contact_name=contact.name)
+            from agents.darius_twin_context import build_twin_extra_system
+            extra_system = await build_twin_extra_system(message.content, instance)
+            style_kwargs = {'extra_system': extra_system} if extra_system else {}
+            reply = await generate_darius_reply(chat_history, message.content, contact_name=contact.name, **style_kwargs)
         except TwinReplyUnavailable:
             is_risky = True
             reason = 'resposta do LLM indisponível'

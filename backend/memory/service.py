@@ -161,19 +161,27 @@ class MemoryService:
         )
 
     async def search(
-        self, query: str, limit: int = 5, contact_id: int | None = None
+        self,
+        query: str,
+        limit: int = 5,
+        contact_id: int | None = None,
+        source: str | None = None,
     ) -> list[dict]:
-        """Semantic search over the memory. Returns content + score, best first."""
+        """Semantic search over the memory. Returns content + score, best first.
+        `source` (optional) restricts the search to one `source` tag, so a
+        small curated set (e.g. style examples) is not drowned out by the
+        much larger interaction history."""
         await self._ensure_collection()
         vector = await get_embedding_provider().embed(query)
 
-        query_filter = None
+        conditions = []
         if contact_id is not None:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(key="contact_id", match=MatchValue(value=contact_id))
-                ]
+            conditions.append(
+                FieldCondition(key="contact_id", match=MatchValue(value=contact_id))
             )
+        if source is not None:
+            conditions.append(FieldCondition(key="source", match=MatchValue(value=source)))
+        query_filter = Filter(must=conditions) if conditions else None
 
         response = await self.client.query_points(
             collection_name=self._settings.qdrant_collection,
