@@ -357,3 +357,44 @@ def test_detectores_puros():
     assert handlers._unverified_contact_data("Liga 11 91234-5678", []) == "telefone_ou_documento"
     assert handlers._unverified_contact_data("Fala no (11) 98258-9350", ["meu zap 11982589350"]) is None
     assert handlers._unverified_contact_data("Veja https://loja.exemplo.com/x.", ["https://loja.exemplo.com/x"]) is None
+
+
+# ---------------------------------------------------------------- parecer de 14/10 (ponto 1): comparar INTEIRO, nao trecho
+@pytest.mark.parametrize("resposta, esperado", [
+    ("Meu e-mail é sobrenome@exemplo.test", "email"),                 # so o final do permitido: invencao
+    ("Meu e-mail é nome.sobrenome@exemplo.test", None),               # o permitido, inteiro
+    ("Meu e-mail é NOME.SOBRENOME@EXEMPLO.TEST.", None),              # maiusculas e ponto final da frase
+    ("Meu e-mail é outro@exemplo.test", "email"),
+    ("Meu e-mail é xnome.sobrenome@exemplo.test", "email"),           # com letra a mais no comeco
+    ("Meu e-mail é nome.sobrenome@exemplo.test.br", "email"),         # dominio maior
+])
+def test_email_e_comparado_inteiro(monkeypatch, resposta, esperado):
+    monkeypatch.setenv("TWIN_ALLOWED_CONTACT_DATA", "nome.sobrenome@exemplo.test")
+    assert handlers._unverified_contact_data(resposta, []) == esperado
+
+
+def test_link_e_numero_tambem_sao_comparados_inteiros():
+    f = handlers._unverified_contact_data
+    assert f("veja https://loja.exemplo.com/a", ["https://loja.exemplo.com/a/b/c"]) == "link"      # prefixo de um permitido
+    assert f("veja https://loja.exemplo.com/a/b/c/", ["https://loja.exemplo.com/a/b/c"]) is None   # barra final
+    assert f("liga 1982589350 agora", ["meu zap 11982589350"]) == "telefone_ou_documento"        # sufixo de um permitido
+    assert f("liga 11982589350", ["meu zap 11982589351"]) == "telefone_ou_documento"              # um digito diferente
+    assert f("liga +55 (11) 98258-9350", ["meu zap 11982589350"]) is None                         # DDI + formatacao
+    assert f("liga 11982589350", ["meu zap +5511982589350"]) is None
+
+
+async def test_chave_zero_desliga_tambem_o_descarte_no_envio(w, monkeypatch, tmp_path):
+    cid = await _contact(w, "5511900000030")
+    await _msg(w, cid, OUT, "já vejo", instance=STORE, human=True, minutes_ago=1)
+    payload = {"to": "5511900000030", "content": "Tem sim.", "instance": STORE, "_guard_contact_id": cid,
+               "_guard_started_at": (NOW - timedelta(minutes=2)).isoformat()}
+    arquivo = tmp_path / "pausa.txt"
+    monkeypatch.setenv("HUMAN_PAUSE_FILE", str(arquivo))
+    arquivo.write_text("0")
+    async with w.sessions() as db:
+        await handlers.send_whatsapp_text(db, payload)
+    assert len(w.sent) == 1                                                                         # com 0 o envio segue
+    arquivo.write_text("30")
+    async with w.sessions() as db:
+        await handlers.send_whatsapp_text(db, {**payload, "content": "Outra"})
+    assert len(w.sent) == 1                                                                         # com 30 o descarte volta

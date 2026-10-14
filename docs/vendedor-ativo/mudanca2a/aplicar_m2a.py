@@ -9,10 +9,13 @@ import pathlib
 import sys
 
 EXPECTED_ORIG = {
-    "handlers.py.novo": "f7b077199defc5c9",
-    "messaging.py.novo": "5b72aae2fcf268a3",
+    "handlers.py.novo": "f7b077199defc5c969aa7f142c9e64b73775bdb730d74b1c38333b1618eaf0a8",
+    "messaging.py.novo": "5b72aae2fcf268a39ba8c013ae60eb4329713c6d8d752198625e97401a31f1a0",
 }
-EXPECTED_NEW = {"handlers.py.novo": "38561a2e587105e2", "messaging.py.novo": "42397ce3f0bd22d0"}  # os arquivos exatos que passaram nos testes
+EXPECTED_NEW = {  # os arquivos exatos que passaram nos testes (SHA-256 completo)
+    "handlers.py.novo": "bf3ff6b771721ace8bde9cc3e525f80593f4511f2c88c47de4c92fdd438fc117",
+    "messaging.py.novo": "42397ce3f0bd22d0a87966fd6ac1bf7f85f15eeb33f42889d3ed8ec20d53f4ca",
+}
 
 HANDLERS = []
 MESSAGING = []
@@ -105,7 +108,9 @@ async def _human_active_recently(db, contact_id: int, instance: str) -> bool:
 
 
 async def _human_took_over_before_send(db, payload: dict) -> bool:
-    """True se uma pessoa escreveu na conversa depois que o agente comecou a gerar esta resposta."""
+    """True se uma pessoa escreveu na conversa depois que o agente comecou a gerar esta resposta. A chave de pausa (0) desliga esta guarda tambem."""
+    if _human_pause_minutes() <= 0:
+        return False
     started, contact_id = payload.get("_guard_started_at"), payload.get("_guard_contact_id")
     if not started or contact_id is None:
         return False
@@ -126,24 +131,35 @@ def _sent_message_id(response):
 
 
 def _unverified_contact_data(reply: str, allowed_texts: list) -> str | None:
-    """Categoria do primeiro e-mail, link ou telefone/documento da resposta que NAO aparece na conversa nem na lista permitida, ou None.
+    """Categoria do primeiro e-mail, link ou telefone/documento da resposta que NAO aparece, INTEIRO, na conversa nem na lista permitida.
+    Compara enderecos, links e numeros completos (nao trechos): um e-mail que seja so o final do permitido tambem e invencao.
     Caso real: o Twin mandou um e-mail inventado (mensagem 11267). Nunca devolve nem registra o valor achado."""
     import os
     import re
 
     allowed = "\\n".join([*allowed_texts, os.environ.get("TWIN_ALLOWED_CONTACT_DATA", "dariomneto@hotmail.com")])
-    allowed_lower = allowed.lower()
-    for match in re.finditer(r"[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+", reply):
-        if match.group(0).lower() not in allowed_lower:
+    email_re = re.compile(r"[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+")
+    link_re = re.compile(r"(?:https?://|www\\.)[^\\s<>\\"]+", re.IGNORECASE)
+    number_re = re.compile(r"\\+?\\d(?:[\\s().-]*\\d){9,}")
+
+    def clean_link(value: str) -> str:
+        return value.lower().rstrip(".,;:!?)").rstrip("/")
+
+    def number_key(value: str) -> str:
+        digits = re.sub(r"\\D", "", value)
+        return digits[2:] if digits.startswith("55") and len(digits) >= 12 else digits
+
+    allowed_emails = {m.group(0).lower() for m in email_re.finditer(allowed)}
+    allowed_links = {clean_link(m.group(0)) for m in link_re.finditer(allowed)}
+    allowed_numbers = {number_key(m.group(0)) for m in number_re.finditer(allowed)}
+    for match in email_re.finditer(reply):
+        if match.group(0).lower() not in allowed_emails:
             return "email"
-    for match in re.finditer(r"(?:https?://|www\\.)[^\\s<>\\"]+", reply, re.IGNORECASE):
-        if match.group(0).lower().rstrip(".,;:!?)") not in allowed_lower:
+    for match in link_re.finditer(reply):
+        if clean_link(match.group(0)) not in allowed_links:
             return "link"
-    number = re.compile(r"\\+?\\d(?:[\\s().-]*\\d){9,}")
-    known = [re.sub(r"\\D", "", m.group(0)) for m in number.finditer(allowed)]
-    for match in number.finditer(reply):
-        digits = re.sub(r"\\D", "", match.group(0))
-        if not any(digits.endswith(k) or k.endswith(digits) for k in known):
+    for match in number_re.finditer(reply):
+        if number_key(match.group(0)) not in allowed_numbers:
             return "telefone_ou_documento"
     return None
 
@@ -400,18 +416,18 @@ def main() -> None:
     for name, pairs in plans.items():
         path = pathlib.Path(name)
         original = path.read_bytes()
-        digest = hashlib.sha256(original).hexdigest()[:16]
+        digest = hashlib.sha256(original).hexdigest()
         if digest != EXPECTED_ORIG[name]:
             sys.exit(f"ABORTAR: {name} tem hash {digest}, esperado {EXPECTED_ORIG[name]} (o container mudou); nada foi gravado")
         results[name] = apply(original.decode("utf-8"), pairs)
     for name, text in results.items():
-        new_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        new_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
         want = EXPECTED_NEW[name]
         if want is not None and new_digest != want:
             sys.exit(f"ABORTAR: resultado de {name} tem hash {new_digest}, esperado {want}; nada foi gravado")
     for name, text in results.items():
         pathlib.Path(name).write_text(text, encoding="utf-8")
-        print(name, "OK", hashlib.sha256(text.encode("utf-8")).hexdigest()[:16])
+        print(name, "OK", hashlib.sha256(text.encode("utf-8")).hexdigest())
 
 
 if __name__ == "__main__":

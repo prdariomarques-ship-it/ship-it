@@ -60,6 +60,12 @@ jobs:
         continue-on-error: true
       - name: Tests
         run: python -m pytest -q -rs -p ci_require_postgres
+      # Mudança 2A (patch sobre a produção): roda os testes sobre as bases REAIS de produção versionadas em
+      # docs/vendedor-ativo/mudanca2a/bases-producao (SHA-256 conferido), numa cópia do backend. Fica fora de `tests/` de propósito:
+      # só faz sentido com os arquivos de produção por cima.
+      - name: Mudança 2A sobre os arquivos de produção
+        working-directory: .
+        run: bash docs/vendedor-ativo/mudanca2a/rodar_testes_sobre_producao.sh
       # Second, narrower guard (kept alongside backend/ci_require_postgres.py, which already fails ANY skipped PostgreSQL test
       # in both pytest invocations): `-rs` above only LISTS what was skipped. A skipped real-PostgreSQL concurrency test proves nothing, so this
       # isolated run fails on a test failure, on any skip, and on no tests being run at all. `shell: bash` is
