@@ -13,10 +13,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-import agents.darius_twin_context as twin_context
 import jobs.style_job as style_job
 import memory.service as memory_service_module
 import providers.llm.factory as llm_factory
+from agents.planner import Planner
+from services import style_context
 from memory.service import memory_service
 from models.contact import Contact
 from models.embedding import Embedding
@@ -273,20 +274,41 @@ async def test_busca_usa_so_a_origem_da_instancia_e_respeita_o_limiar(world, mon
     assert await style_distill.retrieve_style_examples("chegou?", "") == []
 
 
-async def test_bloco_do_twin_so_existe_com_a_chave_ligada(world, monkeypatch):
+async def test_bloco_so_existe_com_a_chave_ligada_e_diz_que_sao_exemplos_nao_fatos(world, monkeypatch):
     _qdrant_points(world, ("Pergunta: Chegou?\nResposta: Ainda não.", 0.9))
     monkeypatch.setattr(get_settings(), "style_examples_enabled", False)
-    assert await twin_context.build_twin_extra_system("chegou?", "pessoal") == []
+    assert await style_context.build_style_blocks("chegou?", "pessoal") == []
     monkeypatch.setattr(get_settings(), "style_examples_enabled", True)
-    (block,) = await twin_context.build_twin_extra_system("chegou?", "pessoal")
-    assert block.startswith(twin_context.STYLE_HEADER) and "Exemplo 1:\nPergunta: Chegou?\nResposta: Ainda não." in block
-    assert "não são fatos" in block or "não fatos" in block or "São exemplos, não fatos" in block
+    (block,) = await style_context.build_style_blocks("chegou?", "pessoal")
+    assert block.startswith("Exemplos reais de como o Dário respondeu")
+    assert "Exemplo 1:\nPergunta: Chegou?\nResposta: Ainda não." in block
+    assert "São exemplos, não fatos" in block and "SOMENTE das ferramentas" in block
 
 
-async def test_falha_na_busca_de_estilo_nao_impede_o_twin(world, monkeypatch):
+async def test_instancia_fora_da_lista_nao_consulta_nem_recebe_exemplos(world, monkeypatch):
+    monkeypatch.setattr(get_settings(), "style_examples_enabled", True)
+    _qdrant_points(world, ("Pergunta: a\nResposta: b", 0.9))
+    assert await style_context.build_style_blocks("oi", "azusa-church") == []  # nao listada: fica isolada e sem estilo
+    world.client.query_points.assert_not_awaited()
+    monkeypatch.setattr(get_settings(), "style_instances", "pessoal,MARQUESCOLOR")
+    (block,) = await style_context.build_style_blocks("oi", "MARQUESCOLOR")
+    assert block.startswith("Exemplos reais de como a equipe desta conta respondeu")
+    assert world.client.query_points.await_args.kwargs["query_filter"].must[0].match.value == "style_example:MARQUESCOLOR"
+
+
+async def test_falha_na_busca_de_estilo_nao_impede_o_agente(world, monkeypatch):
     monkeypatch.setattr(get_settings(), "style_examples_enabled", True)
     world.client.query_points = AsyncMock(side_effect=RuntimeError("qdrant fora"))
-    assert await twin_context.build_twin_extra_system("chegou?", "pessoal") == []
+    assert await style_context.build_style_blocks("chegou?", "pessoal") == []
+
+
+def test_planner_anexa_o_bloco_ao_prompt_do_sistema_e_sem_bloco_nada_muda():
+    base = Planner().build_messages("SISTEMA", "oi", [])
+    assert Planner().build_messages("SISTEMA", "oi", [], extra_system=None) == base
+    assert Planner().build_messages("SISTEMA", "oi", [], extra_system=[]) == base
+    extra = Planner().build_messages("SISTEMA", "oi", [], extra_system=["BLOCO A", "BLOCO B"])
+    assert len(extra) == len(base) and extra[0].content.startswith("SISTEMA\n\nBLOCO A\n\nBLOCO B")
+    assert extra[-1].content == "oi"
 
 
 async def test_twin_recebe_os_blocos_extras_como_mensagens_de_sistema(monkeypatch):

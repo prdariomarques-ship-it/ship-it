@@ -14,8 +14,11 @@ class Planner:
         message: str,
         memories: list[dict] | None = None,
         history: list[ChatMessage] | None = None,
+        extra_system: list[str] | None = None,
     ) -> list[ChatMessage]:
         prompt = system_prompt
+        if extra_system:
+            prompt += "\n\n" + "\n\n".join(extra_system)
         if memories:
             lines = [
                 f"- ({memory.get('source', '?')}) {memory.get('content', '')}"

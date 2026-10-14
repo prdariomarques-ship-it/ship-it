@@ -628,10 +628,13 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
         if await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
             return
         from orchestrator.service import ai_orchestrator
+        from services.style_context import build_style_blocks
+        extra_system = await build_style_blocks(message.content, instance)
+        style_kwargs: dict = {'extra_system': extra_system} if extra_system else {}
         result = await ai_orchestrator.run(
             db=db, user=owner, message=message.content,
             agent_name=extra_agents[instance], contact_id=None,
-            memories=[], history=[],
+            memories=[], history=[], **style_kwargs,
         )
         if result.reply and result.reply.strip():
             extra_payload: dict = {"to": contact.phone, "content": result.reply, "instance": instance}
@@ -692,12 +695,16 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
         elif await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
             return
         else:
+            from services.style_context import build_style_blocks
+            extra_system = await build_style_blocks(message.content, instance)
+            style_kwargs = {"extra_system": extra_system} if extra_system else {}
             result = await ai_orchestrator.run(
                 db=db,
                 user=owner,
                 message=message.content,
                 contact_id=contact_id,
                 agent_name="store",
+                **style_kwargs,
             )
             reply = result.reply
             if any(step.tool == "report_unknown" and step.status == "ok" for step in result.steps):
@@ -831,9 +838,9 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
     if not is_risky:
         chat_history = [ChatMessage(role='user' if m.direction == MessageDirection.INBOUND else 'assistant', content=_owner_audio_history_content(m)) for m in history if _owner_audio_history_content(m) and m.id != message_id]
         try:
-            from agents.darius_twin_context import build_twin_extra_system
-            extra_system = await build_twin_extra_system(message.content, instance)
-            style_kwargs = {'extra_system': extra_system} if extra_system else {}
+            from services.style_context import build_style_blocks
+            extra_system = await build_style_blocks(message.content, instance)
+            style_kwargs: dict = {'extra_system': extra_system} if extra_system else {}
             reply = await generate_darius_reply(chat_history, message.content, contact_name=contact.name, **style_kwargs)
         except TwinReplyUnavailable:
             is_risky = True

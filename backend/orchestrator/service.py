@@ -58,6 +58,7 @@ class AIOrchestrator:
         contact_id: int | None = None,
         memories: list[dict] | None = None,
         history: list[ChatMessage] | None = None,
+        extra_system: list[str] | None = None,
     ) -> AgentResult:
         """Select the agent (raises UnknownAgentError if the name is invalid),
         run it under a timeout, and publish lifecycle events + metrics.
@@ -86,6 +87,8 @@ class AIOrchestrator:
                     contact_id=contact_id,
                     memories=memories,
                     history=history,
+                    # So viaja quando ha exemplos: um agente que sobrescreve `run` com a assinatura antiga continua funcionando.
+                    **({"extra_system": extra_system} if extra_system else {}),
                 ),
                 timeout=timeout,
             )

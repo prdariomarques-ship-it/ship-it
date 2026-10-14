@@ -54,6 +54,7 @@ class BaseAgent(ABC):
         contact_id: int | None = None,
         memories: list[dict] | None = None,
         history: list[ChatMessage] | None = None,
+        extra_system: list[str] | None = None,
     ) -> AgentResult:
         if memories is None:
             try:
@@ -68,7 +69,7 @@ class BaseAgent(ABC):
                 memories = []
 
         messages = self.planner.build_messages(
-            self.system_prompt, message, memories, history=history
+            self.system_prompt, message, memories, history=history, extra_system=extra_system
         )
         executor = AgentExecutor(get_llm_provider(), self.tools)
         result = await executor.run(
