@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.measure import SAMPLES
+from scripts.samples import SAMPLES
 
 DEFAULT_VARIANTS = ("cfg=0.5,exg=0.5", "cfg=0,exg=0.5", "cfg=0.3,exg=0.7")
 

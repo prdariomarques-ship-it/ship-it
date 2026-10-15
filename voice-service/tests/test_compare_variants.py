@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from scripts import compare_variants as cv
-from scripts.measure import SAMPLES
+from scripts.samples import SAMPLES
 
 
 class _Tensor:
