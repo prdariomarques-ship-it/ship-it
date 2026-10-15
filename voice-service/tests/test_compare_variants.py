@@ -32,15 +32,17 @@ class _FakeModel:
     def __init__(self):
         self.calls = []
 
-    def generate(self, text, language_id, audio_prompt_path, exaggeration, cfg_weight):
-        self.calls.append((text, language_id, audio_prompt_path, exaggeration, cfg_weight))
+    def generate(self, text, language_id, audio_prompt_path, exaggeration, cfg_weight, temperature=0.8,
+                 repetition_penalty=1.2, min_p=0.05, top_p=1.0):
+        self.calls.append((text, language_id, audio_prompt_path, exaggeration, cfg_weight, temperature, repetition_penalty))
         return _Tensor(np.sin(np.linspace(0, 440, 2400, dtype=np.float32))[None, :])
 
 
 def test_parse_variant_defaults_and_errors():
-    assert cv.parse_variant("cfg=0") == {"cfg": 0.0, "exg": 0.5}
-    assert cv.parse_variant("cfg=0.3,exg=0.7") == {"cfg": 0.3, "exg": 0.7}
-    for bad in ("cfg=2", "exg=3", "x=1", "cfg=", "lixo"):
+    assert cv.parse_variant("cfg=0")["cfg"] == 0.0 and cv.parse_variant("cfg=0")["temp"] == 0.8
+    parsed = cv.parse_variant("cfg=0.3,exg=0.7,temp=0.6,rep=1.4")
+    assert (parsed["cfg"], parsed["exg"], parsed["temp"], parsed["rep"]) == (0.3, 0.7, 0.6, 1.4)
+    for bad in ("cfg=2", "exg=3", "temp=0", "rep=0.5", "x=1", "cfg=", "lixo"):
         with pytest.raises(ValueError):
             cv.parse_variant(bad)
 
@@ -73,3 +75,38 @@ def test_missing_reference_stops_before_loading_model(tmp_path):
     called = []
     rc = cv.main(["--reference", str(tmp_path / "nao.wav"), "--out", str(tmp_path / "o"), "--device", "cpu"], model_factory=lambda d, dev: called.append(1))
     assert rc == 2 and called == []
+
+
+def _write_pcm(path, seconds, rate=8000):
+    import wave as w
+    samples = (np.arange(int(seconds * rate)) % 100).astype("<i2")
+    with w.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(samples.tobytes())
+    return samples
+
+
+def test_trim_wav_copies_the_exact_samples_without_changing_them(tmp_path):
+    source = tmp_path / "ref.wav"
+    samples = _write_pcm(source, 10)
+    out = cv.trim_wav(source, tmp_path / "corte.wav", 2.0, 5.0)
+    with wave.open(str(out)) as handle:
+        assert handle.getframerate() == 8000 and handle.getnframes() == 3 * 8000
+        data = np.frombuffer(handle.readframes(handle.getnframes()), dtype="<i2")
+    assert list(data) == list(samples[2 * 8000:5 * 8000])
+    with pytest.raises(ValueError):
+        cv.trim_wav(source, tmp_path / "curto.wav", 1.0, 1.5)
+
+
+def test_run_with_start_end_uses_the_trimmed_reference_and_extra_params(tmp_path):
+    ref = tmp_path / "ref.wav"
+    _write_pcm(ref, 20)
+    out = tmp_path / "saida"
+    fake = _FakeModel()
+    rc = cv.main(["--reference", str(ref), "--out", str(out), "--device", "cpu", "--seed", "1", "--start", "7", "--end", "19",
+                  "--variant", "cfg=0,temp=0.6,rep=1.4"], model_factory=lambda d, dev: fake)
+    assert rc == 0 and (out / "referencia_recortada.wav").is_file()
+    assert all(c[2].endswith("referencia_recortada.wav") and c[4] == 0.0 and c[5] == 0.6 and c[6] == 1.4 for c in fake.calls)
+    assert cv.main(["--reference", str(ref), "--out", str(out), "--start", "1"], model_factory=lambda d, dev: fake) == 2

@@ -7,7 +7,8 @@ Nada é enviado a ninguém; a gravação de referência não sai do PC.
 Uso (PowerShell, dentro de voice-service, com o ambiente do Chatterbox ativo):
   python -m scripts.compare_variants --reference "C:\\caminho\\gravacao.wav" --out C:\\voz\\teste_cego
   # pesos locais (opcional; sem isso baixa/usa o cache do Hugging Face):  --model-dir C:\\models\\chatterbox
-  # variações próprias:  --variant cfg=0.5,exg=0.5 --variant cfg=0,exg=0.5
+  # variações próprias:  --variant cfg=0.5,exg=0.5 --variant cfg=0,exg=0.5,temp=0.6,rep=1.4
+  # só um trecho da referência (WAV, sem filtro):  --start 7 --end 19
 Referência: .wav mono, ~10-15 s limpos, em PORTUGUÊS (o idioma da referência deve ser o do texto, senão o sotaque vaza).
 """
 from __future__ import annotations
@@ -26,18 +27,48 @@ from scripts.samples import SAMPLES
 DEFAULT_VARIANTS = ("cfg=0.5,exg=0.5", "cfg=0,exg=0.5", "cfg=0.3,exg=0.7")
 
 
+# chave -> (parametro do generate(), padrao do Chatterbox, minimo, maximo)
+_PARAMS = {
+    "cfg": ("cfg_weight", 0.5, 0.0, 1.0),
+    "exg": ("exaggeration", 0.5, 0.0, 2.0),
+    "temp": ("temperature", 0.8, 0.05, 5.0),
+    "rep": ("repetition_penalty", 1.2, 1.0, 3.0),
+    "minp": ("min_p", 0.05, 0.0, 1.0),
+    "topp": ("top_p", 1.0, 0.0, 1.0),
+}
+
+
 def parse_variant(spec: str) -> dict[str, float]:
-    values = {"cfg": 0.5, "exg": 0.5}
+    """`cfg=0,exg=0.5,temp=0.6`: so as chaves informadas mudam; as demais ficam no padrao do Chatterbox."""
+    values = {key: default for key, (_, default, _, _) in _PARAMS.items()}
     for part in spec.split(","):
         key, _, raw = part.strip().partition("=")
         if key not in values or not raw:
-            raise ValueError(f"variação inválida {spec!r}: use cfg=<0..1>,exg=<0..2>")
+            raise ValueError(f"variação inválida {spec!r}: chaves aceitas: {', '.join(_PARAMS)}")
         values[key] = float(raw)
-    if not 0.0 <= values["cfg"] <= 1.0:
-        raise ValueError("cfg deve estar entre 0 e 1")
-    if not 0.0 <= values["exg"] <= 2.0:
-        raise ValueError("exg deve estar entre 0 e 2")
+    for key, (_, _, low, high) in _PARAMS.items():
+        if not low <= values[key] <= high:
+            raise ValueError(f"{key} deve estar entre {low} e {high}")
     return values
+
+
+def trim_wav(source: Path, destination: Path, start: float, end: float) -> Path:
+    """Recorta [start, end] s de um WAV PCM, SEM filtro, ganho ou normalizacao (so copia as amostras do trecho)."""
+    with wave.open(str(source), "rb") as reader:
+        rate, width, channels = reader.getframerate(), reader.getsampwidth(), reader.getnchannels()
+        total = reader.getnframes()
+        first = max(0, min(total, int(start * rate)))
+        last = max(first, min(total, int(end * rate)))
+        reader.setpos(first)
+        frames = reader.readframes(last - first)
+    if last - first < rate:
+        raise ValueError("o trecho recortado tem menos de 1 segundo")
+    with wave.open(str(destination), "wb") as writer:
+        writer.setnchannels(channels)
+        writer.setsampwidth(width)
+        writer.setframerate(rate)
+        writer.writeframes(frames)
+    return destination
 
 
 def write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
@@ -66,11 +97,17 @@ def main(argv: list[str] | None = None, model_factory=load_model) -> int:
     ap.add_argument("--language", default="pt")
     ap.add_argument("--variant", action="append", default=None)
     ap.add_argument("--seed", type=int, default=None, help="semente do sorteio das letras (padrão: aleatória)")
+    ap.add_argument("--start", type=float, default=None, help="início (s) do trecho da referência a usar (só WAV; sem filtro)")
+    ap.add_argument("--end", type=float, default=None, help="fim (s) do trecho da referência a usar")
     args = ap.parse_args(argv)
     if not args.reference.is_file():
         print(f"gravação de referência não encontrada: {args.reference}")
         return 2
     variants = [parse_variant(v) for v in (args.variant or DEFAULT_VARIANTS)]
+    reference = args.reference
+    if (args.start is None) != (args.end is None):
+        print("use --start e --end juntos")
+        return 2
     device = args.device
     if device is None:
         import torch  # type: ignore
@@ -81,6 +118,9 @@ def main(argv: list[str] | None = None, model_factory=load_model) -> int:
         os.chmod(args.out, 0o700)
     except OSError:
         pass
+    if args.start is not None:
+        reference = trim_wav(args.reference, args.out / "referencia_recortada.wav", args.start, args.end)
+        print(f"referência recortada: {args.start:.1f}–{args.end:.1f} s -> {reference}")
     model = model_factory(args.model_dir, device)
     letters = [chr(ord("A") + i) for i in range(len(variants))]
     order = list(range(len(variants)))
@@ -90,7 +130,10 @@ def main(argv: list[str] | None = None, model_factory=load_model) -> int:
         var = variants[index]
         key[letter] = var
         for name, text in SAMPLES.items():
-            wav = model.generate(text, language_id=args.language, audio_prompt_path=str(args.reference), exaggeration=var["exg"], cfg_weight=var["cfg"])
+            wav = model.generate(
+                text, language_id=args.language, audio_prompt_path=str(reference),
+                **{param: var[key] for key, (param, _, _, _) in _PARAMS.items()},
+            )
             samples = wav.squeeze().detach().cpu().numpy()
             write_wav(args.out / f"{letter}_{name}.wav", samples, int(model.sr))
             print(f"gerado {letter}_{name}.wav")
