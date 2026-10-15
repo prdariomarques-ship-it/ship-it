@@ -1,0 +1,559 @@
+diff --git a/backend/api/integrations_flowcore.py b/backend/api/integrations_flowcore.py
+index 64ee114..df446a4 100644
+--- a/backend/api/integrations_flowcore.py
++++ b/backend/api/integrations_flowcore.py
+@@ -11,6 +11,7 @@ from typing import Annotated
+ from fastapi import APIRouter, Depends, Header, HTTPException
+ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
+ from sqlalchemy import func, select
++from sqlalchemy.dialects import postgresql as pg_dialect, sqlite as sqlite_dialect
+ from sqlalchemy.exc import IntegrityError
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+@@ -134,38 +135,65 @@ def _payload_hash(payload: dict) -> str:
+     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+ 
+ 
++async def _insert_receipt_do_nothing(db: AsyncSession, values: dict) -> int | None:
++    """INSERT ... ON CONFLICT DO NOTHING RETURNING id, sem SAVEPOINT. Devolve None se a chave ja existe.
++
++    No PostgreSQL, uma insercao concorrente ainda nao confirmada faz este INSERT ESPERAR a outra transacao terminar: se ela
++    confirmou, o conflito e reconhecido (None); se ela desfez, o INSERT procede. O recibo fica na MESMA transacao do pedido,
++    entao um rollback o desfaz junto com contato, cliente e orcamento criados depois."""
++    dialect = db.get_bind().dialect.name
++    if dialect == "postgresql":
++        insert = pg_dialect.insert
++    elif dialect == "sqlite":
++        insert = sqlite_dialect.insert
++    else:  # outros bancos: caminho antigo, com SAVEPOINT
++        receipt = IntegrationIdempotency(**values)
++        try:
++            async with db.begin_nested():
++                db.add(receipt)
++                await db.flush()
++            return receipt.id
++        except IntegrityError:
++            return None
++    statement = (
++        insert(IntegrationIdempotency)
++        .values(**values)
++        .on_conflict_do_nothing(index_elements=["integration", "operation", "idempotency_key"])
++        .returning(IntegrationIdempotency.id)
++    )
++    return await db.scalar(statement)
++
++
+ async def _claim_key(
+     db: AsyncSession, operation: str, key: str, payload_hash: str
+ ) -> tuple[IntegrationIdempotency, bool]:
+-    receipt = IntegrationIdempotency(
+-        integration=_SOURCE, operation=operation, idempotency_key=key,
+-        payload_hash=payload_hash,
++    claimed_id = await _insert_receipt_do_nothing(
++        db,
++        dict(integration=_SOURCE, operation=operation, idempotency_key=key, payload_hash=payload_hash),
+     )
+-    try:
+-        async with db.begin_nested():
+-            db.add(receipt)
+-            await db.flush()
++    if claimed_id is not None:
++        receipt = await db.get(IntegrationIdempotency, claimed_id)
+         return receipt, True
+-    except IntegrityError:
+-        receipt = await db.scalar(
+-            select(IntegrationIdempotency)
+-            .where(
+-                IntegrationIdempotency.integration == _SOURCE,
+-                IntegrationIdempotency.operation == operation,
+-                IntegrationIdempotency.idempotency_key == key,
+-            )
+-            .with_for_update()
++    receipt = await db.scalar(
++        select(IntegrationIdempotency)
++        .where(
++            IntegrationIdempotency.integration == _SOURCE,
++            IntegrationIdempotency.operation == operation,
++            IntegrationIdempotency.idempotency_key == key,
+         )
+-        if receipt is None:
+-            raise
+-        if receipt.payload_hash != payload_hash:
+-            raise HTTPException(
+-                status_code=409,
+-                detail={"code": "idempotency_key_reused_with_different_payload"},
+-            )
+-        if receipt.response_json is None:
+-            raise HTTPException(status_code=409, detail={"code": "request_in_progress"})
+-        return receipt, False
++        .with_for_update()
++        .execution_options(populate_existing=True)
++    )
++    if receipt is None:  # conflito sem linha visivel: nao deve ocorrer; nao esconder
++        raise RuntimeError("idempotency receipt conflict without a visible row")
++    if receipt.payload_hash != payload_hash:
++        raise HTTPException(
++            status_code=409,
++            detail={"code": "idempotency_key_reused_with_different_payload"},
++        )
++    if receipt.response_json is None:
++        raise HTTPException(status_code=409, detail={"code": "request_in_progress"})
++    return receipt, False
+ 
+ 
+ def _phone_digits_sql(column):
+diff --git a/backend/tests/flowcore_postgres_harness.py b/backend/tests/flowcore_postgres_harness.py
+index d5ea9f0..50e0f3d 100644
+--- a/backend/tests/flowcore_postgres_harness.py
++++ b/backend/tests/flowcore_postgres_harness.py
+@@ -615,3 +615,120 @@ async def test_flowcore_postgres_multisku_failure_rolls_back_prior_debit(
+     assert quote.confirmed_at is not None
+     assert quote.order_result["order"]["id"] == quote_id
+     assert len(customer.orders) == 1
++
++
++async def _pg_count(session_factory, model, *where):
++    async with session_factory() as db:
++        return await db.scalar(select(func.count()).select_from(model).where(*where))
++
++
++@pytest.mark.asyncio
++async def test_flowcore_postgres_failure_after_contact_and_quote_rolls_back_receipt_contact_customer_and_quote_together(
++    flowcore_postgres_client, monkeypatch,
++):
++    client, session_factory = flowcore_postgres_client
++    headers = {"X-FlowCore-Secret": "flowcore-pg-test"}
++    sku, phone, key = "FLOW-PG-ALLORNOTHING", "5511999990021", "pg-all-or-nothing"
++    async with session_factory() as db:
++        db.add(Product(sku=sku, name="Produto tudo-ou-nada", unit="un", unit_price=10, stock_quantity=5, active=True))
++        await db.commit()
++    body = {
++        "idempotency_key": key,
++        "customer": {"phone": "+" + phone, "name": "Rita"},
++        "items": [{"sku": sku, "quantity": 1}],
++        "quoted_prices": [{"sku": sku, "unit_price": "10.00"}],
++    }
++    real_save_quote = flowcore_api.save_quote
++
++    async def save_then_fail(*args, **kwargs):
++        await real_save_quote(*args, **kwargs)
++        raise RuntimeError("falha injetada depois de contato, cliente e orcamento")
++
++    monkeypatch.setattr(flowcore_api, "save_quote", save_then_fail)
++    try:
++        response = await client.post("/api/integrations/flowcore/quotes", headers=headers, json=body)
++        assert response.status_code == 500
++    except RuntimeError:
++        pass
++    assert await _pg_count(session_factory, IntegrationIdempotency, IntegrationIdempotency.idempotency_key == key) == 0
++    assert await _pg_count(session_factory, Contact, Contact.phone == phone) == 0
++    assert await _pg_count(session_factory, StoreCustomer, StoreCustomer.phone == phone) == 0
++    assert await _pg_count(session_factory, StoreQuote) == 0
++    async with session_factory() as db:
++        assert await db.scalar(select(Product.stock_quantity).where(Product.sku == sku)) == 5
++
++    monkeypatch.setattr(flowcore_api, "save_quote", real_save_quote)
++    retry = await client.post("/api/integrations/flowcore/quotes", headers=headers, json=body)
++    assert retry.status_code == 200 and not retry.json().get("duplicate")
++    assert await _pg_count(session_factory, IntegrationIdempotency, IntegrationIdempotency.idempotency_key == key) == 1
++    assert await _pg_count(session_factory, Contact, Contact.phone == phone) == 1
++    assert await _pg_count(session_factory, StoreCustomer, StoreCustomer.phone == phone) == 1
++    assert await _pg_count(session_factory, StoreQuote) == 1
++
++
++@pytest.mark.asyncio
++async def test_flowcore_postgres_lost_response_retry_returns_same_result_without_duplicate_effects(
++    flowcore_postgres_client,
++):
++    """Resposta perdida: o chamador repete a MESMA chave e recebe o MESMO resultado, sem novo orcamento nem nova baixa."""
++    client, session_factory = flowcore_postgres_client
++    headers = {"X-FlowCore-Secret": "flowcore-pg-test"}
++    sku, key = "FLOW-PG-LOST", "pg-lost-create"
++    async with session_factory() as db:
++        db.add(Product(sku=sku, name="Produto resposta perdida", unit="un", unit_price=10, stock_quantity=5, active=True))
++        await db.commit()
++    body = {
++        "idempotency_key": key,
++        "customer": {"phone": "+5511999990022", "name": "Paulo"},
++        "items": [{"sku": sku, "quantity": 1}],
++        "quoted_prices": [{"sku": sku, "unit_price": "10.00"}],
++    }
++    first = await client.post("/api/integrations/flowcore/quotes", headers=headers, json=body)
++    assert first.status_code == 200 and not first.json().get("duplicate")
++    quote_id = first.json()["quote_id"]
++    # a resposta acima "se perdeu": o chamador repete a mesma requisicao
++    again = await client.post("/api/integrations/flowcore/quotes", headers=headers, json=body)
++    assert again.status_code == 200 and again.json()["duplicate"] is True and again.json()["quote_id"] == quote_id
++    assert await _pg_count(session_factory, StoreQuote) == 1
++    assert await _pg_count(session_factory, IntegrationIdempotency, IntegrationIdempotency.idempotency_key == key) == 1
++
++    confirm_url = f"/api/integrations/flowcore/quotes/{quote_id}/confirm"
++    confirmed = await client.post(confirm_url, headers=headers, json={"idempotency_key": "pg-lost-confirm"})
++    assert confirmed.status_code == 200 and not confirmed.json()["duplicate"]
++    order_id = confirmed.json()["order_id"]
++    async with session_factory() as db:
++        assert await db.scalar(select(Product.stock_quantity).where(Product.sku == sku)) == 4
++    lost = await client.post(confirm_url, headers=headers, json={"idempotency_key": "pg-lost-confirm"})
++    assert lost.status_code == 200 and lost.json()["duplicate"] is True and lost.json()["order_id"] == order_id
++    other_key = await client.post(confirm_url, headers=headers, json={"idempotency_key": "pg-lost-confirm-outra-chave"})
++    assert other_key.status_code == 200 and other_key.json()["duplicate"] is True and other_key.json()["order_id"] == order_id
++    async with session_factory() as db:
++        assert await db.scalar(select(Product.stock_quantity).where(Product.sku == sku)) == 4  # baixou UMA vez
++
++
++@pytest.mark.asyncio
++async def test_flowcore_postgres_same_key_with_different_payload_is_409_and_creates_nothing(
++    flowcore_postgres_client,
++):
++    client, session_factory = flowcore_postgres_client
++    headers = {"X-FlowCore-Secret": "flowcore-pg-test"}
++    sku, key = "FLOW-PG-REUSE", "pg-reused-key"
++    async with session_factory() as db:
++        db.add(Product(sku=sku, name="Produto chave reutilizada", unit="un", unit_price=10, stock_quantity=5, active=True))
++        await db.commit()
++
++    def body(quantity):
++        return {
++            "idempotency_key": key,
++            "customer": {"phone": "+5511999990023", "name": "Marta"},
++            "items": [{"sku": sku, "quantity": quantity}],
++            "quoted_prices": [{"sku": sku, "unit_price": "10.00"}],
++        }
++
++    first = await client.post("/api/integrations/flowcore/quotes", headers=headers, json=body(1))
++    assert first.status_code == 200
++    reused = await client.post("/api/integrations/flowcore/quotes", headers=headers, json=body(2))
++    assert reused.status_code == 409
++    assert reused.json()["detail"]["code"] == "idempotency_key_reused_with_different_payload"
++    assert await _pg_count(session_factory, StoreQuote) == 1
++    assert await _pg_count(session_factory, IntegrationIdempotency, IntegrationIdempotency.idempotency_key == key) == 1
+diff --git a/backend/tests/flowcore_postgres_migration_harness.py b/backend/tests/flowcore_postgres_migration_harness.py
+new file mode 100644
+index 0000000..284ed52
+--- /dev/null
++++ b/backend/tests/flowcore_postgres_migration_harness.py
+@@ -0,0 +1,177 @@
++"""Opt-in: cadeia COMPLETA de migrations em PostgreSQL (alembic upgrade head) e preservacao de dados no upgrade/downgrade.
++
++Executar explicitamente:
++    FLOWCORE_TEST_DATABASE_URL=postgresql+asyncpg://...@127.0.0.1/flowcore_test pytest -q tests/flowcore_postgres_migration_harness.py
++
++Cria UM banco novo `flowcore_test_mig_<hex>` no servidor local indicado e o remove ao final. Mesmas travas do outro harness:
++so loopback, so postgresql+asyncpg, banco-base `flowcore_test` ou `flowcore_test_*`. Nenhuma migration antiga e alterada."""
++
++import asyncio
++import os
++import uuid
++from datetime import datetime, timedelta, timezone
++from decimal import Decimal
++from pathlib import Path
++
++import pytest
++import pytest_asyncio
++from alembic import command
++from alembic.config import Config
++from alembic.script import ScriptDirectory
++from sqlalchemy import insert, inspect, select, text
++from sqlalchemy.engine import make_url
++from sqlalchemy.ext.asyncio import create_async_engine
++
++from models.contact import Contact
++from models.integration_idempotency import IntegrationIdempotency
++from models.store import StoreCustomer, StoreQuote
++
++BACKEND = Path(__file__).parents[1]
++PRE_FLOWCORE_HEAD = "9e2f1c6d7a80"
++FLOWCORE_REVISION = "a84d20b1c6f3"
++HISTORICAL_STORE_QUOTE_COLUMNS = {
++    "id", "contact_id", "customer_id", "items", "total", "expires_at", "confirmed_at", "order_result",
++    "created_at", "updated_at",
++}
++
++
++def _safe_url():
++    raw = os.environ.get("FLOWCORE_TEST_DATABASE_URL")
++    if not raw:
++        pytest.fail("Defina FLOWCORE_TEST_DATABASE_URL (PostgreSQL local, banco flowcore_test*).", pytrace=False)
++    url = make_url(raw)
++    if url.drivername != "postgresql+asyncpg":
++        pytest.fail("FLOWCORE_TEST_DATABASE_URL deve usar postgresql+asyncpg.", pytrace=False)
++    if (url.host or "").lower() not in {"localhost", "127.0.0.1", "::1"}:
++        pytest.fail("Somente servidor em loopback.", pytrace=False)
++    name = url.database or ""
++    if not (name == "flowcore_test" or name.startswith("flowcore_test_")):
++        pytest.fail("O banco deve ser flowcore_test ou comecar com flowcore_test_.", pytrace=False)
++    return url
++
++
++@pytest_asyncio.fixture
++async def migration_db():
++    base_url = _safe_url()
++    name = "flowcore_test_mig_" + uuid.uuid4().hex[:12]
++    admin = create_async_engine(base_url, isolation_level="AUTOCOMMIT")
++    async with admin.connect() as conn:
++        await conn.execute(text(f'CREATE DATABASE "{name}"'))
++    url = base_url.set(database=name)
++    engine = create_async_engine(url)
++    try:
++        yield url.render_as_string(hide_password=False), engine
++    finally:
++        await engine.dispose()
++        async with admin.connect() as conn:
++            await conn.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
++        await admin.dispose()
++
++
++def _config(url: str) -> Config:
++    cfg = Config(str(BACKEND / "alembic.ini"))
++    cfg.set_main_option("script_location", str(BACKEND / "alembic"))
++    cfg.set_main_option("sqlalchemy.url", url)
++    return cfg
++
++
++async def _upgrade(url, revision):
++    await asyncio.to_thread(command.upgrade, _config(url), revision)
++
++
++async def _downgrade(url, revision):
++    await asyncio.to_thread(command.downgrade, _config(url), revision)
++
++
++async def _current(engine) -> str | None:
++    async with engine.connect() as conn:
++        return await conn.scalar(text("select version_num from alembic_version"))
++
++
++async def _columns(engine, table):
++    async with engine.connect() as conn:
++        return await conn.run_sync(lambda c: {col["name"] for col in inspect(c).get_columns(table)})
++
++
++async def _tables(engine):
++    async with engine.connect() as conn:
++        return await conn.run_sync(lambda c: set(inspect(c).get_table_names()))
++
++
++async def _indexes(engine, table):
++    async with engine.connect() as conn:
++        return await conn.run_sync(lambda c: {i["name"] for i in inspect(c).get_indexes(table)})
++
++
++def test_the_chain_has_a_single_head_and_the_flowcore_migration_hangs_from_the_previous_head():
++    script = ScriptDirectory(str(BACKEND / "alembic"))
++    assert script.get_heads() == [FLOWCORE_REVISION]
++    assert script.get_revision(FLOWCORE_REVISION).down_revision == PRE_FLOWCORE_HEAD
++
++
++@pytest.mark.asyncio
++async def test_full_chain_upgrade_head_preserves_existing_rows_and_downgrade_keeps_them(migration_db):
++    url, engine = migration_db
++
++    # 1) cadeia completa ATE a cabeca anterior ao FlowCore, a partir de um banco vazio
++    await _upgrade(url, PRE_FLOWCORE_HEAD)
++    assert await _current(engine) == PRE_FLOWCORE_HEAD
++    # esquema historico escrito a mao, independente do modelo atual
++    assert await _columns(engine, "store_quotes") == HISTORICAL_STORE_QUOTE_COLUMNS
++    assert "integration_idempotency" not in await _tables(engine)
++
++    # 2) dados existentes (contato, cliente, orcamento aberto e outro confirmado), gravados SEM a coluna nova
++    now = datetime.now(timezone.utc)
++    async with engine.begin() as conn:
++        contact_id = (await conn.execute(insert(Contact.__table__).values(name="Ana", phone="5511999990100").returning(Contact.__table__.c.id))).scalar_one()
++        customer_id = (await conn.execute(insert(StoreCustomer.__table__).values(name="Ana", phone="5511999990100").returning(StoreCustomer.__table__.c.id))).scalar_one()
++        for quote_id, confirmed in (("QSEEDABERTO1", None), ("QSEEDCONFIRM", now)):
++            await conn.execute(insert(StoreQuote.__table__).values(
++                id=quote_id, contact_id=contact_id, customer_id=customer_id,
++                items=[{"sku": "S1", "quantity": 2}], total=Decimal("12.34"),
++                expires_at=now + timedelta(minutes=30), confirmed_at=confirmed,
++                order_result=None if confirmed is None else {"order": {"id": quote_id}},
++            ))
++
++    async def snapshot():
++        async with engine.connect() as conn:
++            rows = (await conn.execute(text(
++                "select id, contact_id, customer_id, items::text, total, expires_at, confirmed_at, order_result::text "
++                "from store_quotes order by id"
++            ))).all()
++        return [tuple(r) for r in rows]
++
++    before = await snapshot()
++    assert len(before) == 2
++
++    # 3) upgrade ate a cabeca (a84d20b1c6f3): linhas intactas, coluna nova NULA, tabela de recibos criada
++    await _upgrade(url, "head")
++    assert await _current(engine) == FLOWCORE_REVISION
++    assert await snapshot() == before
++    assert await _columns(engine, "store_quotes") == HISTORICAL_STORE_QUOTE_COLUMNS | {"integration_source"}
++    assert await _columns(engine, "store_quotes") == set(StoreQuote.__table__.columns.keys())
++    assert "ix_store_quotes_integration_source" in await _indexes(engine, "store_quotes")
++    assert await _columns(engine, "integration_idempotency") == set(IntegrationIdempotency.__table__.columns.keys())
++    async with engine.connect() as conn:
++        assert await conn.scalar(text("select count(*) from store_quotes where integration_source is not null")) == 0
++
++    # 4) um orcamento e um recibo do FlowCore; depois downgrade de UMA revisao
++    async with engine.begin() as conn:
++        await conn.execute(text("update store_quotes set integration_source='flowcore' where id='QSEEDABERTO1'"))
++        await conn.execute(insert(IntegrationIdempotency.__table__).values(
++            integration="flowcore", operation="create_quote", idempotency_key="k1", payload_hash="h" * 64,
++            created_at=now, updated_at=now,
++        ))
++    await _downgrade(url, PRE_FLOWCORE_HEAD)
++    assert await _current(engine) == PRE_FLOWCORE_HEAD
++    assert await snapshot() == before                      # as duas linhas permanecem, valores iguais
++    assert await _columns(engine, "store_quotes") == HISTORICAL_STORE_QUOTE_COLUMNS
++    assert "integration_idempotency" not in await _tables(engine)
++    async with engine.connect() as conn:
++        assert await conn.scalar(select(text("count(*)")).select_from(Contact.__table__)) == 1
++        assert await conn.scalar(select(text("count(*)")).select_from(StoreCustomer.__table__)) == 1
++
++    # 5) novo upgrade: idempotente, dados ainda intactos
++    await _upgrade(url, "head")
++    assert await snapshot() == before
++    assert await _current(engine) == FLOWCORE_REVISION
+diff --git a/backend/tests/test_flowcore_integration.py b/backend/tests/test_flowcore_integration.py
+index cf224ce..99f3c41 100644
+--- a/backend/tests/test_flowcore_integration.py
++++ b/backend/tests/test_flowcore_integration.py
+@@ -162,16 +162,72 @@ async def test_savepoint_failure_does_not_leave_receipt(
+ 
+ 
+ @pytest.mark.asyncio
+-@pytest.mark.xfail(
+-    strict=True,
+-    reason="Limitacao CONHECIDA do pysqlite em modo antigo (conftest sem BEGIN explicito): o SAVEPOINT e liberado fora de "
+-    "transacao e o recibo fica gravado apos o rollback. Nao ocorre no PostgreSQL (harness flowcore_postgres_harness.py). "
+-    "xfail estrito: se o comportamento mudar, este teste acusa.",
+-)
+-async def test_sqlite_legacy_savepoint_failure_leaves_receipt_documented_limitation(
++async def test_legacy_sqlite_rejection_before_contact_does_not_leave_receipt(
+     client, db_engine, flowcore_secret
+ ):
+-    await _failed_quote_leaves_no_receipt(client, db_engine, flowcore_secret, "q-legacy-savepoint")
++    """Modo antigo do pysqlite (conftest sem BEGIN explicito): o recibo agora nasce por INSERT ... ON CONFLICT, SEM SAVEPOINT,
++    entao uma requisicao rejeitada nao o deixa gravado (antes, o SAVEPOINT era liberado fora de transacao e ele permanecia)."""
++    await _failed_quote_leaves_no_receipt(client, db_engine, flowcore_secret, "q-legacy-on-conflict")
++
++
++async def _count(factory, model, *where):
++    async with factory() as db:
++        return await db.scalar(select(func.count()).select_from(model).where(*where))
++
++
++async def _post_ignoring_app_exception(client, url, **kwargs):
++    """A falha injetada pode chegar como excecao do ASGI ou como 500 sanitizado; ambos significam 'requisicao falhou'."""
++    try:
++        response = await client.post(url, **kwargs)
++    except RuntimeError:
++        return None
++    assert response.status_code == 500
++    return response
++
++
++@pytest.mark.asyncio
++async def test_failure_after_contact_customer_and_quote_rolls_back_all_together_and_retry_succeeds(
++    client, strict_sqlite, flowcore_secret, monkeypatch
++):
++    """Recibo, contato novo, cliente e orcamento criados na mesma requisicao somem JUNTOS se ela falha depois deles."""
++    await _all_or_nothing(client, strict_sqlite, flowcore_secret, monkeypatch)
++
++
++@pytest.mark.asyncio
++async def test_legacy_sqlite_failure_after_contact_customer_and_quote_also_rolls_back_all_together(
++    client, db_engine, flowcore_secret, monkeypatch
++):
++    """O mesmo cenario no modo ANTIGO do pysqlite (sem BEGIN explicito): como o recibo e o primeiro INSERT (sem SAVEPOINT),
++    ele abre a transacao real e o SAVEPOINT do contato fica dentro dela; tudo e desfeito junto."""
++    await _all_or_nothing(client, db_engine, flowcore_secret, monkeypatch)
++
++
++async def _all_or_nothing(client, engine, flowcore_secret, monkeypatch):
++    factory = await add_product(engine, stock=5)
++    real_save_quote = flowcore_api.save_quote
++
++    async def save_then_fail(*args, **kwargs):
++        await real_save_quote(*args, **kwargs)
++        raise RuntimeError("falha injetada depois de contato, cliente e orcamento")
++
++    monkeypatch.setattr(flowcore_api, "save_quote", save_then_fail)
++    key = "q-all-or-nothing"
++    await _post_ignoring_app_exception(
++        client, "/api/integrations/flowcore/quotes", headers=flowcore_secret, json=quote_payload(key=key)
++    )
++    assert await _count(factory, IntegrationIdempotency, IntegrationIdempotency.idempotency_key == key) == 0
++    assert await _count(factory, Contact, Contact.phone == "5511999990001") == 0
++    assert await _count(factory, StoreCustomer) == 0
++    assert await _count(factory, StoreQuote) == 0
++    assert await stock(engine) == 5
++
++    monkeypatch.setattr(flowcore_api, "save_quote", real_save_quote)
++    retry = await create_quote(client, flowcore_secret, key=key)
++    assert retry.status_code == 200 and not retry.json().get("duplicate")
++    assert await _count(factory, IntegrationIdempotency, IntegrationIdempotency.idempotency_key == key) == 1
++    assert await _count(factory, Contact, Contact.phone == "5511999990001") == 1
++    assert await _count(factory, StoreCustomer) == 1
++    assert await _count(factory, StoreQuote) == 1
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/backend/tests/test_store_migration.py b/backend/tests/test_store_migration.py
+index b290cd3..701963b 100644
+--- a/backend/tests/test_store_migration.py
++++ b/backend/tests/test_store_migration.py
+@@ -10,6 +10,13 @@ from models.store import StoreQuote
+ 
+ VERSIONS = Path(__file__).parents[1] / "alembic/versions"
+ 
++# Esquema HISTORICO de store_quotes logo depois de f4c18a2d9e10, escrito a mao (nao derivado do modelo atual).
++HISTORICAL_STORE_QUOTE_COLUMNS = {
++    "id", "contact_id", "customer_id", "items", "total", "expires_at", "confirmed_at", "order_result",
++    "created_at", "updated_at",
++}
++HISTORICAL_STORE_QUOTE_INDEXES = {"ix_store_quotes_contact_id", "ix_store_quotes_customer_id"}
++
+ 
+ def _load(filename: str, name: str):
+     spec = importlib.util.spec_from_file_location(name, VERSIONS / filename)
+@@ -20,18 +27,13 @@ def _load(filename: str, name: str):
+ 
+ async def test_store_quote_migration_upgrade_and_downgrade(db_engine):
+     migration = _load("f4c18a2d9e10_store_quotes.py", "store_quote_migration")
+-    # Coluna acrescentada por uma migration POSTERIOR (a84d20b1c6f3): esta migration antiga nao a cria.
+-    later_columns = {"integration_source"}
+-
+     def exercise(connection):
+         StoreQuote.__table__.drop(connection)
+         with Operations.context(MigrationContext.configure(connection)):
+             migration.upgrade()
+             names = {c["name"] for c in inspect(connection).get_columns("store_quotes")}
+-            assert names == set(StoreQuote.__table__.columns.keys()) - later_columns
+-            assert {i["name"] for i in inspect(connection).get_indexes("store_quotes")} == {
+-                "ix_store_quotes_contact_id", "ix_store_quotes_customer_id",
+-            }
++            assert names == HISTORICAL_STORE_QUOTE_COLUMNS
++            assert {i["name"] for i in inspect(connection).get_indexes("store_quotes")} == HISTORICAL_STORE_QUOTE_INDEXES
+             migration.downgrade()
+         assert "store_quotes" not in inspect(connection).get_table_names()
+ 
+@@ -52,18 +54,19 @@ async def test_flowcore_idempotency_migration_upgrade_and_downgrade(db_engine):
+         with Operations.context(MigrationContext.configure(connection)):
+             quotes.upgrade()
+             assert "integration_idempotency" not in inspect(connection).get_table_names()
+-            assert "integration_source" not in {c["name"] for c in inspect(connection).get_columns("store_quotes")}
++            assert {c["name"] for c in inspect(connection).get_columns("store_quotes")} == HISTORICAL_STORE_QUOTE_COLUMNS
+ 
+             flowcore.upgrade()
+             names = {c["name"] for c in inspect(connection).get_columns("store_quotes")}
+-            assert names == set(StoreQuote.__table__.columns.keys())
++            assert names == HISTORICAL_STORE_QUOTE_COLUMNS | {"integration_source"}  # esquema esperado, escrito a mao
++            assert names == set(StoreQuote.__table__.columns.keys())               # e igual ao modelo atual
+             assert "ix_store_quotes_integration_source" in {
+                 i["name"] for i in inspect(connection).get_indexes("store_quotes")
+             }
+             assert "integration_idempotency" in inspect(connection).get_table_names()
+ 
+             flowcore.downgrade()
+-            assert "integration_source" not in {c["name"] for c in inspect(connection).get_columns("store_quotes")}
++            assert {c["name"] for c in inspect(connection).get_columns("store_quotes")} == HISTORICAL_STORE_QUOTE_COLUMNS
+             assert "integration_idempotency" not in inspect(connection).get_table_names()
+             quotes.downgrade()
+         assert "store_quotes" not in inspect(connection).get_table_names()

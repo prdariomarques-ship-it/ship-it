@@ -1,0 +1,13 @@
+# PostgreSQL 16.13 descartável: pytest -v tests/flowcore_postgres_harness.py tests/flowcore_postgres_migration_harness.py
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_concurrent_confirmation_cannot_oversell PASSED [  9%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_simultaneous_same_key_returns_one_quote PASSED [ 18%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_distinct_keys_confirm_one_quote_once PASSED [ 27%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_create_and_confirm_same_customer_sku_both_lock_orders PASSED [ 36%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_ambiguous_customer_rolls_back_and_same_key_retries PASSED [ 45%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_multisku_failure_rolls_back_prior_debit PASSED [ 54%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_failure_after_contact_and_quote_rolls_back_receipt_contact_customer_and_quote_together PASSED [ 63%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_lost_response_retry_returns_same_result_without_duplicate_effects PASSED [ 72%]
+tests/flowcore_postgres_harness.py::test_flowcore_postgres_same_key_with_different_payload_is_409_and_creates_nothing PASSED [ 81%]
+tests/flowcore_postgres_migration_harness.py::test_the_chain_has_a_single_head_and_the_flowcore_migration_hangs_from_the_previous_head PASSED [ 90%]
+tests/flowcore_postgres_migration_harness.py::test_full_chain_upgrade_head_preserves_existing_rows_and_downgrade_keeps_them PASSED [100%]
+============================== 11 passed in 7.82s ==============================
