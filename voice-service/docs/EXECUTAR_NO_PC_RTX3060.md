@@ -19,6 +19,7 @@ py -3.11 -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 pip install -r requirements-chatterbox.txt
+pip install --no-deps chatterbox-tts==0.1.7   # SEM dependências: o pacote declara gradio==6.8.0, que conflita com o starlette do serviço (o código não usa gradio)
 python -c "import torch;print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"   # precisa mostrar True e a RTX 3060
 ```
 

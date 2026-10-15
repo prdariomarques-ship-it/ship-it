@@ -1,7 +1,20 @@
-# Motor Chatterbox Multilingual. Versões tiradas dos metadados do pacote chatterbox-tts 0.1.7 (Requires-Dist); a
-# instalação NÃO foi exercitada no ambiente de desenvolvimento (sem acesso ao host de pesos e sem GPU). Reconfirme em build.
+# Motor Chatterbox Multilingual. Versões tiradas dos metadados do pacote chatterbox-tts 0.1.7 (Requires-Dist).
+# ATENÇÃO: o pacote declara `gradio==6.8.0` (interface de demonstração, NÃO usada pelo código), e o gradio exige starlette<1.0,
+# que conflita com o starlette==1.7.0 do serviço (requirements.txt). Por isso as dependências REAIS ficam listadas aqui e o próprio
+# pacote entra SEM dependências, em um comando separado (ver docs/EXECUTAR_NO_PC_RTX3060.md):
+#   pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124   # (CUDA; antes de tudo)
+#   pip install -r requirements-chatterbox.txt
+#   pip install --no-deps chatterbox-tts==0.1.7
 -r requirements.txt
 numpy==1.26.4
-chatterbox-tts==0.1.7
-# o pacote fixa: torch==2.6.0 torchaudio==2.6.0 transformers==5.2.0 diffusers==0.29.0 librosa==0.11.0 safetensors==0.5.3
-# conformer==0.3.2 pykakasi==2.3.0 gradio==6.8.0 (gradio não é usado pelo serviço; vem como dependência do pacote)
+librosa==0.11.0
+s3tokenizer
+transformers==5.2.0
+diffusers==0.29.0
+resemble-perth>=1.0.0
+conformer==0.3.2
+safetensors==0.5.3
+spacy-pkuseg
+pykakasi==2.3.0
+pyloudnorm
+omegaconf
