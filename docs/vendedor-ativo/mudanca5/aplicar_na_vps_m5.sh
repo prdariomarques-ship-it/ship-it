@@ -26,11 +26,12 @@ back_out() {
 echo "== 1. lê o original do container (somente leitura)"
 [ "$(health)" = healthy ] || die "o container não está healthy"
 [ -s aplicar_m5.py ] || die "falta o aplicar_m5.py nesta pasta"
-docker cp "$BK:$PB" twin_conversation.md.orig
-[ -s twin_conversation.md.orig ] || die "não consegui ler o texto do container"
-B_ORIG=$(sha_file twin_conversation.md.orig)
+docker cp "$BK:$PB" twin_conversation.md.lido
+[ -s twin_conversation.md.lido ] || die "não consegui ler o texto do container"
+B_ORIG=$(sha_file twin_conversation.md.lido)
 expect "twin_conversation.md (cópia fiel)" "$(sha_live $PB)" "$B_ORIG"
-expect "twin_conversation.md é o da Mudança 3" "$B_ORIG" "$B_ORIG_ESPERADO"
+expect "twin_conversation.md é o da Mudança 3 (se a Mudança 5 já foi aplicada, o .orig guardado NÃO é sobrescrito)" "$B_ORIG" "$B_ORIG_ESPERADO"
+mv twin_conversation.md.lido twin_conversation.md.orig
 printf '%s  twin_conversation.md\n' "$B_ORIG" > hashes_antes_m5.txt
 echo "hash original: $B_ORIG"
 

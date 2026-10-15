@@ -29,3 +29,7 @@ new_case; ORIG=$(h); runapply FAIL_SECOND_MV=1;                  report "6 troca
 new_case; ORIG=$(h); touch $T/fake/unhealthy; runapply;          report "7 container sem health -> aborta sem tocar" 1 antes
 new_case; ORIG=$(h); runapply; ( export FAKE=$T/fake PATH=$T/bin:$PATH; cd $T/dir; bash rollback_m5.sh > $T/out2.txt 2>&1; echo "exit=$?" >> $T/out2.txt )
 [ "$(h)" = "$ORIG" ] && grep -q 'exit=0' $T/out2.txt && echo "[OK] 8 rollback depois do sucesso: $(grep -v '^exit' $T/out2.txt | tail -1)" || { echo "[FALHOU] 8 rollback"; tail -4 $T/out2.txt; }
+# 9. repetir o apply depois do sucesso aborta e NAO sobrescreve o .orig guardado (defeito visto na VPS em 15/10)
+new_case; ORIG=$(h); runapply; O1=$(sha256sum $T/dir/twin_conversation.md.orig | cut -c1-12); runapply; O2=$(sha256sum $T/dir/twin_conversation.md.orig | cut -c1-12)
+[ "$O1" = "$O2" ] && grep -q 'exit=1' $T/out.txt && echo "[OK] 9 repetir o apply depois do sucesso: aborta e o .orig guardado continua o mesmo" || echo "[FALHOU] 9 .orig sobrescrito ou nao abortou"
+( export FAKE=$T/fake PATH=$T/bin:$PATH; cd $T/dir; bash rollback_m5.sh > $T/out3.txt 2>&1 ); [ "$(h)" = "$ORIG" ] && echo "[OK] 9b rollback ainda funciona depois da repeticao" || { echo "[FALHOU] 9b"; tail -3 $T/out3.txt; }

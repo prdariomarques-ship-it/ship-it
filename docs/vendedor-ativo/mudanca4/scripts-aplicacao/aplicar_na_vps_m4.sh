@@ -32,9 +32,11 @@ back_out() {
 echo "== 1. pré-condições (nada é alterado)"
 [ "$(health)" = healthy ] || die "o container não está healthy"
 for f in aplicar_m4.py lista_silenciosos.txt rollback_na_vps_m4.sh; do [ -s "$f" ] || die "falta o arquivo $f"; done
-docker cp "$BK:$HP" handlers.py.orig
+if docker exec "$BK" test -e "$LP"; then die "já existe $LP no container (a Mudança 4 já foi aplicada?); o handlers.py.orig guardado NÃO foi sobrescrito"; fi
+docker cp "$BK:$HP" handlers.py.lido
 expect "handlers.py no container" "$(sha_live $HP)" "$H_ORIG"
-expect "handlers.py.orig (cópia fiel)" "$(sha_file handlers.py.orig)" "$H_ORIG"
+expect "handlers.py.lido (cópia fiel)" "$(sha_file handlers.py.lido)" "$H_ORIG"
+mv handlers.py.lido handlers.py.orig
 cp handlers.py.orig handlers.py.novo
 python3 aplicar_m4.py || die "o aplicar_m4.py recusou (nada foi gravado no container)"
 expect "handlers.py.novo" "$(sha_file handlers.py.novo)" "$H_NEW"

@@ -27,8 +27,10 @@ back_out() {
 echo "== 1. lê os originais do container (somente leitura)"
 [ "$(health)" = healthy ] || die "o container não está healthy"
 [ -s aplicar_m3a.py ] || die "falta o aplicar_m3a.py nesta pasta"
+docker cp "$BK:$PB" twin_conversation.md.lido
+if grep -q "FICHA-M3A:INICIO" twin_conversation.md.lido; then rm -f twin_conversation.md.lido; die "o bloco da Mudança 3 já está no container; os .orig guardados NÃO foram sobrescritos"; fi
 docker cp "$BK:$PA" darius_twin.md.orig
-docker cp "$BK:$PB" twin_conversation.md.orig
+mv twin_conversation.md.lido twin_conversation.md.orig
 [ -s darius_twin.md.orig ] && [ -s twin_conversation.md.orig ] || die "não consegui ler os textos do container"
 A_ORIG=$(sha_file darius_twin.md.orig); B_ORIG=$(sha_file twin_conversation.md.orig)
 expect "darius_twin.md (cópia fiel)" "$(sha_live $PA)" "$A_ORIG"
