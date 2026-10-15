@@ -1,0 +1,166 @@
+diff --git a/backend/tests/test_flowcore_integration.py b/backend/tests/test_flowcore_integration.py
+index ccff47b..cf224ce 100644
+--- a/backend/tests/test_flowcore_integration.py
++++ b/backend/tests/test_flowcore_integration.py
+@@ -20,6 +20,24 @@ from models.store import StoreCustomer, StoreQuote
+ from pydantic import SecretStr
+ 
+ 
++@pytest.fixture
++def strict_sqlite(db_engine):
++    """SQLite com transacao real: BEGIN explicito antes do primeiro SAVEPOINT (receita documentada do SQLAlchemy para pysqlite).
++
++    Sem isso, o modo antigo do pysqlite abre o SAVEPOINT FORA de uma transacao e o RELEASE o torna definitivo, de modo que um
++    rollback posterior NAO desfaz o recibo. PostgreSQL (o banco de producao) nao tem essa limitacao; o harness
++    `flowcore_postgres_harness.py` cobre a semantica real. A fixture afeta so o engine do teste que a pede."""
++    def disable_driver_begin(dbapi_connection, _connection_record):
++        dbapi_connection.isolation_level = None
++
++    def emit_begin(connection):
++        connection.exec_driver_sql("BEGIN")
++
++    event.listen(db_engine.sync_engine, "connect", disable_driver_begin)
++    event.listen(db_engine.sync_engine, "begin", emit_begin)
++    return db_engine
++
++
+ @pytest.fixture
+ def flowcore_secret(monkeypatch):
+     secret = SecretStr("flowcore-test-secret")
+@@ -118,13 +136,8 @@ async def test_quote_price_mismatch_returns_current_price_without_saving(
+     assert await stock(db_engine) == 5
+ 
+ 
+-@pytest.mark.asyncio
+-async def test_sqlite_legacy_savepoint_failure_does_not_leave_receipt(
+-    client, db_engine, flowcore_secret
+-):
+-    """Pending regression against conftest's unmodified legacy SQLite mode."""
++async def _failed_quote_leaves_no_receipt(client, db_engine, flowcore_secret, key):
+     factory = await add_product(db_engine, stock=5)
+-    key = "q-legacy-savepoint"
+     failed_quote = await create_quote(
+         client, flowcore_secret, key=key, price="9.00"
+     )
+@@ -135,11 +148,32 @@ async def test_sqlite_legacy_savepoint_failure_does_not_leave_receipt(
+             IntegrationIdempotency.operation == "create_quote",
+             IntegrationIdempotency.idempotency_key == key,
+         ))
+-        assert receipt is None, "legacy SQLite SAVEPOINT may have committed the receipt"
++        assert receipt is None, "o recibo de uma requisicao rejeitada nao pode permanecer"
+         assert await db.scalar(select(func.count()).select_from(StoreQuote)) == 0
+     assert await stock(db_engine) == 5
+ 
+ 
++@pytest.mark.asyncio
++async def test_savepoint_failure_does_not_leave_receipt(
++    client, strict_sqlite, flowcore_secret
++):
++    """Requisicao rejeitada (409): o rollback remove o recibo, numa transacao real (SQLite estrito)."""
++    await _failed_quote_leaves_no_receipt(client, strict_sqlite, flowcore_secret, "q-strict-savepoint")
++
++
++@pytest.mark.asyncio
++@pytest.mark.xfail(
++    strict=True,
++    reason="Limitacao CONHECIDA do pysqlite em modo antigo (conftest sem BEGIN explicito): o SAVEPOINT e liberado fora de "
++    "transacao e o recibo fica gravado apos o rollback. Nao ocorre no PostgreSQL (harness flowcore_postgres_harness.py). "
++    "xfail estrito: se o comportamento mudar, este teste acusa.",
++)
++async def test_sqlite_legacy_savepoint_failure_leaves_receipt_documented_limitation(
++    client, db_engine, flowcore_secret
++):
++    await _failed_quote_leaves_no_receipt(client, db_engine, flowcore_secret, "q-legacy-savepoint")
++
++
+ @pytest.mark.asyncio
+ async def test_sqlite_receipt_rollback_and_same_key_retry_with_explicit_outer_begin_comparison(
+     client, db_engine, flowcore_secret
+@@ -272,8 +306,9 @@ async def test_unknown_or_inactive_sku_is_404(client, db_engine, flowcore_secret
+ 
+ @pytest.mark.asyncio
+ async def test_quote_does_not_debit_and_confirmation_rejects_changed_price(
+-    client, db_engine, flowcore_secret
++    client, strict_sqlite, flowcore_secret
+ ):
++    db_engine = strict_sqlite
+     factory = await add_product(db_engine)
+     created = await create_quote(client, flowcore_secret)
+     assert created.status_code == 200
+diff --git a/backend/tests/test_store_migration.py b/backend/tests/test_store_migration.py
+index 4f7e031..b290cd3 100644
+--- a/backend/tests/test_store_migration.py
++++ b/backend/tests/test_store_migration.py
+@@ -5,21 +5,30 @@ from alembic.migration import MigrationContext
+ from alembic.operations import Operations
+ from sqlalchemy import inspect
+ 
++from models.integration_idempotency import IntegrationIdempotency
+ from models.store import StoreQuote
+ 
++VERSIONS = Path(__file__).parents[1] / "alembic/versions"
++
++
++def _load(filename: str, name: str):
++    spec = importlib.util.spec_from_file_location(name, VERSIONS / filename)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
+ 
+ async def test_store_quote_migration_upgrade_and_downgrade(db_engine):
+-    path = Path(__file__).parents[1] / "alembic/versions/f4c18a2d9e10_store_quotes.py"
+-    spec = importlib.util.spec_from_file_location("store_quote_migration", path)
+-    migration = importlib.util.module_from_spec(spec)
+-    spec.loader.exec_module(migration)
++    migration = _load("f4c18a2d9e10_store_quotes.py", "store_quote_migration")
++    # Coluna acrescentada por uma migration POSTERIOR (a84d20b1c6f3): esta migration antiga nao a cria.
++    later_columns = {"integration_source"}
+ 
+     def exercise(connection):
+         StoreQuote.__table__.drop(connection)
+         with Operations.context(MigrationContext.configure(connection)):
+             migration.upgrade()
+             names = {c["name"] for c in inspect(connection).get_columns("store_quotes")}
+-            assert names == set(StoreQuote.__table__.columns.keys())
++            assert names == set(StoreQuote.__table__.columns.keys()) - later_columns
+             assert {i["name"] for i in inspect(connection).get_indexes("store_quotes")} == {
+                 "ix_store_quotes_contact_id", "ix_store_quotes_customer_id",
+             }
+@@ -28,3 +37,36 @@ async def test_store_quote_migration_upgrade_and_downgrade(db_engine):
+ 
+     async with db_engine.begin() as connection:
+         await connection.run_sync(exercise)
++
++
++async def test_flowcore_idempotency_migration_upgrade_and_downgrade(db_engine):
++    """A migration a84d20b1c6f3 leva store_quotes ao modelo atual e cria/remove a tabela de recibos."""
++    quotes = _load("f4c18a2d9e10_store_quotes.py", "store_quote_migration_for_flowcore")
++    flowcore = _load("a84d20b1c6f3_flowcore_idempotency.py", "flowcore_idempotency_migration")
++    assert flowcore.down_revision == "9e2f1c6d7a80"
++
++    def exercise(connection):
++        # a fixture cria tudo pelo modelo; volta ao estado ANTERIOR a a84d20b1c6f3
++        IntegrationIdempotency.__table__.drop(connection)
++        StoreQuote.__table__.drop(connection)
++        with Operations.context(MigrationContext.configure(connection)):
++            quotes.upgrade()
++            assert "integration_idempotency" not in inspect(connection).get_table_names()
++            assert "integration_source" not in {c["name"] for c in inspect(connection).get_columns("store_quotes")}
++
++            flowcore.upgrade()
++            names = {c["name"] for c in inspect(connection).get_columns("store_quotes")}
++            assert names == set(StoreQuote.__table__.columns.keys())
++            assert "ix_store_quotes_integration_source" in {
++                i["name"] for i in inspect(connection).get_indexes("store_quotes")
++            }
++            assert "integration_idempotency" in inspect(connection).get_table_names()
++
++            flowcore.downgrade()
++            assert "integration_source" not in {c["name"] for c in inspect(connection).get_columns("store_quotes")}
++            assert "integration_idempotency" not in inspect(connection).get_table_names()
++            quotes.downgrade()
++        assert "store_quotes" not in inspect(connection).get_table_names()
++
++    async with db_engine.begin() as connection:
++        await connection.run_sync(exercise)
