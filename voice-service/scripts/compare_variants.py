@@ -9,6 +9,8 @@ Uso (PowerShell, dentro de voice-service, com o ambiente do Chatterbox ativo):
   # pesos locais (opcional; sem isso baixa/usa o cache do Hugging Face):  --model-dir C:\\models\\chatterbox
   # variações próprias:  --variant cfg=0.5,exg=0.5 --variant cfg=0,exg=0.5,temp=0.6,rep=1.4
   # só um trecho da referência (WAV, sem filtro):  --start 7 --end 19
+  # pacote pt-BR oficial (código do Space da Resemble, ambiente separado):  --space-dir C:\\voz\\space_ptbr
+    (esse motor só aceita cfg, exg e temp; o código do Space não tem rep/minp/topp nem o detector de repetição que corta a fala)
 Referência: .wav mono, ~10-15 s limpos, em PORTUGUÊS (o idioma da referência deve ser o do texto, senão o sotaque vaza).
 """
 from __future__ import annotations
@@ -88,11 +90,29 @@ def load_model(model_dir: Path | None, device: str):
     return ChatterboxMultilingualTTS.from_pretrained(device=device)
 
 
-def main(argv: list[str] | None = None, model_factory=load_model) -> int:
+# O generate() do Space pt-BR só aceita estes parametros (sem repetition_penalty/min_p/top_p).
+PTBR_PARAMS = ("cfg", "exg", "temp")
+
+
+def load_ptbr_model(space_dir: Path, device: str):
+    """Carrega o pacote pt-BR com o código-fonte do próprio Space (pasta baixada com `snapshot_download(repo_type="space")`)."""
+    import sys
+
+    src = Path(space_dir) / "chatterbox" / "src"
+    if not (src / "chatterbox" / "tts.py").is_file():
+        raise FileNotFoundError(f"não achei {src / 'chatterbox' / 'tts.py'}: baixe o Space antes (ver docs/EXECUTAR_NO_PC_RTX3060.md)")
+    sys.path.insert(0, str(src))
+    from chatterbox.tts import ChatterboxTTS  # type: ignore  # o 'chatterbox' do Space, não o do PyPI
+
+    return ChatterboxTTS.from_pretrained(device)
+
+
+def main(argv: list[str] | None = None, model_factory=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--reference", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--model-dir", type=Path, default=None)
+    ap.add_argument("--space-dir", type=Path, default=None, help="usa o pacote pt-BR com o código do Space baixado nesta pasta")
     ap.add_argument("--device", default=None)
     ap.add_argument("--language", default="pt")
     ap.add_argument("--variant", action="append", default=None)
@@ -104,6 +124,16 @@ def main(argv: list[str] | None = None, model_factory=load_model) -> int:
         print(f"gravação de referência não encontrada: {args.reference}")
         return 2
     variants = [parse_variant(v) for v in (args.variant or DEFAULT_VARIANTS)]
+    ptbr = args.space_dir is not None
+    if ptbr:
+        for spec in args.variant or ():
+            extra = [k.strip().partition("=")[0] for k in spec.split(",") if k.strip().partition("=")[0] not in PTBR_PARAMS]
+            if extra:
+                print(f"o motor pt-BR do Space não aceita {', '.join(extra)}; use só {', '.join(PTBR_PARAMS)}")
+                return 2
+    if model_factory is None:
+        model_factory = (lambda _d, dev: load_ptbr_model(args.space_dir, dev)) if ptbr else load_model
+    used = {k: v for k, v in _PARAMS.items() if not ptbr or k in PTBR_PARAMS}
     reference = args.reference
     if (args.start is None) != (args.end is None):
         print("use --start e --end juntos")
@@ -132,12 +162,12 @@ def main(argv: list[str] | None = None, model_factory=load_model) -> int:
         for name, text in SAMPLES.items():
             wav = model.generate(
                 text, language_id=args.language, audio_prompt_path=str(reference),
-                **{param: var[key] for key, (param, _, _, _) in _PARAMS.items()},
+                **{param: var[key] for key, (param, _, _, _) in used.items()},
             )
             samples = wav.squeeze().detach().cpu().numpy()
             write_wav(args.out / f"{letter}_{name}.wav", samples, int(model.sr))
             print(f"gerado {letter}_{name}.wav")
-    (args.out / "chave.json").write_text(json.dumps({"idioma": args.language, "modelo_local": str(args.model_dir) if args.model_dir else "cache/HF", "variacoes": key}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (args.out / "chave.json").write_text(json.dumps({"idioma": args.language, "modelo_local": str(args.space_dir) if ptbr else (str(args.model_dir) if args.model_dir else "cache/HF"), "motor": "ptbr-space" if ptbr else "v2-pypi", "variacoes": key}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nPronto. Ouça os arquivos de {args.out} SEM abrir chave.json; depois me diga a letra preferida.")
     return 0
 

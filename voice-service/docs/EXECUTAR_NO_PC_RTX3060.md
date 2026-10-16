@@ -70,3 +70,24 @@ no IP privado do PC (`--host <ip privado>`), nunca em `0.0.0.0` exposto. Na VPS:
 Com um contato **seu** (preferência `reply_mode=audio`) e `STORE_VOICE_ENABLED=true` só no ambiente de teste: confira no celular que
 chega como **nota de voz** (ícone de microfone, "gravando áudio…"), com o texto escrito antes. Se não tocar como nota de voz, teste
 `EVOLUTION_VOICE_ENCODING=false` (bytes como estão) ou `true` (o Evolution converte com ffmpeg) e me diga o resultado.
+
+## Pacote pt-BR oficial (Space da Resemble) em ambiente separado
+
+O `chatterbox-tts 0.1.7` do PyPI só carrega o modelo V2 (idioma `pt`, com sotaque) e tem um detector de repetição que, com a sua referência,
+encerrou a fala depois de 0,5–1,5 s (`forcing EOS token, token_repetition=True`). O código do Space pt-BR não tem esse detector e carrega
+`t3_pt_br.safetensors` + `s3gen_v3.pt`. Ele pede outras versões (torch 2.8/cu128, transformers 4.46.3), por isso vai num ambiente à parte (`.venv-ptbr`);
+o `.venv` atual continua como reserva.
+
+```powershell
+cd C:\Users\dario\FlowCore\ship-it\voice-service
+python -m venv .venv-ptbr
+.\.venv-ptbr\Scripts\python.exe -m pip install --upgrade pip
+.\.venv-ptbr\Scripts\python.exe -m pip install huggingface_hub
+# código do Space (sem áudios/imagens) em C:\voz\space_ptbr
+.\.venv-ptbr\Scripts\python.exe -c "from huggingface_hub import snapshot_download as s; print(s('ResembleAI/Chatterbox-Multilingual-TTS-pt-br', repo_type='space', local_dir=r'C:\voz\space_ptbr', ignore_patterns=['*.wav','*.mp3','*.png','*.jpg']))"
+Get-Content C:\voz\space_ptbr\requirements.txt
+.\.venv-ptbr\Scripts\python.exe -m pip install torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+.\.venv-ptbr\Scripts\python.exe -m pip install -r C:\voz\space_ptbr\requirements.txt
+.\.venv-ptbr\Scripts\python.exe -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+.\.venv-ptbr\Scripts\python.exe -m scripts.compare_variants --space-dir C:\voz\space_ptbr --reference "<gravacao.wav>" --start 7 --end 19 --variant "cfg=0.5,exg=0.5" --variant "cfg=0.3,exg=0.5,temp=0.7" --variant "cfg=0,exg=0.5" --out C:\voz\teste_ptbr
+```

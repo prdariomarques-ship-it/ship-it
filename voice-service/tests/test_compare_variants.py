@@ -110,3 +110,41 @@ def test_run_with_start_end_uses_the_trimmed_reference_and_extra_params(tmp_path
     assert rc == 0 and (out / "referencia_recortada.wav").is_file()
     assert all(c[2].endswith("referencia_recortada.wav") and c[4] == 0.0 and c[5] == 0.6 and c[6] == 1.4 for c in fake.calls)
     assert cv.main(["--reference", str(ref), "--out", str(out), "--start", "1"], model_factory=lambda d, dev: fake) == 2
+
+
+class _PtbrModel:
+    """Imita o generate() do Space pt-BR: SÓ aceita estes parametros (rep/minp/topp dariam TypeError)."""
+    sr = 24000
+
+    def __init__(self):
+        self.calls = []
+
+    def generate(self, text, audio_prompt_path=None, exaggeration=0.5, cfg_weight=0.5, temperature=0.8, language_id="en"):
+        self.calls.append((language_id, exaggeration, cfg_weight, temperature))
+        return _Tensor(np.sin(np.linspace(0, 440, 2400, dtype=np.float32))[None, :])
+
+
+def test_ptbr_engine_passes_only_the_space_parameters(tmp_path):
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(b"x")
+    fake = _PtbrModel()
+    out = tmp_path / "saida"
+    rc = cv.main(["--reference", str(ref), "--out", str(out), "--device", "cpu", "--seed", "3", "--space-dir", str(tmp_path),
+                  "--variant", "cfg=0.3,exg=0.6,temp=0.7"], model_factory=lambda d, dev: fake)
+    assert rc == 0 and fake.calls == [("pt", 0.6, 0.3, 0.7)] * len(SAMPLES)
+    meta = json.loads((out / "chave.json").read_text(encoding="utf-8"))
+    assert meta["motor"] == "ptbr-space"
+
+
+def test_ptbr_engine_rejects_parameters_the_space_does_not_have(tmp_path):
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(b"x")
+    called = []
+    rc = cv.main(["--reference", str(ref), "--out", str(tmp_path / "o"), "--device", "cpu", "--space-dir", str(tmp_path),
+                  "--variant", "cfg=0,rep=1.4"], model_factory=lambda d, dev: called.append(1))
+    assert rc == 2 and called == []
+
+
+def test_load_ptbr_model_requires_the_downloaded_space(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        cv.load_ptbr_model(tmp_path, "cpu")
