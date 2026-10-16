@@ -9,6 +9,7 @@ Uso (PowerShell, dentro de voice-service, com o ambiente do Chatterbox ativo):
   # pesos locais (opcional; sem isso baixa/usa o cache do Hugging Face):  --model-dir C:\\models\\chatterbox
   # variações próprias:  --variant cfg=0.5,exg=0.5 --variant cfg=0,exg=0.5,temp=0.6,rep=1.4
   # só um trecho da referência (WAV, sem filtro):  --start 7 --end 19
+  # a geração caiu ou saiu áudio cortado? rode o MESMO comando com --retomar: confere o que já existe e refaz só o que falta/está incompleto
   # pacote pt-BR oficial (código do Space da Resemble, ambiente separado):  --space-dir C:\\voz\\space_ptbr
     (esse motor só aceita cfg, exg e temp; o código do Space não tem rep/minp/topp nem o detector de repetição que corta a fala)
 Referência: .wav mono, ~10-15 s limpos, em PORTUGUÊS (o idioma da referência deve ser o do texto, senão o sotaque vaza).
@@ -73,6 +74,27 @@ def trim_wav(source: Path, destination: Path, start: float, end: float) -> Path:
     return destination
 
 
+# Fala em português: ~13-16 caracteres/s. Fora desta faixa, quase certo que cortou (curto demais) ou não parou (longo demais).
+MIN_CHARS_PER_SECOND, MAX_CHARS_PER_SECOND = 6.0, 25.0
+
+
+def generation_problem(path: Path, text: str) -> str | None:
+    """None se o WAV gerado parece completo para o texto; senão o motivo (arquivo ausente, ilegível, curto ou longo demais)."""
+    if not path.is_file():
+        return "não existe"
+    try:
+        with wave.open(str(path), "rb") as handle:
+            seconds = handle.getnframes() / float(handle.getframerate())
+    except (wave.Error, EOFError, OSError):
+        return "arquivo ilegível ou cortado"
+    chars = len(text)
+    if seconds < chars / MAX_CHARS_PER_SECOND:
+        return f"curto demais ({seconds:.1f} s para {chars} caracteres): provavelmente cortado"
+    if seconds > chars / MIN_CHARS_PER_SECOND:
+        return f"longo demais ({seconds:.1f} s para {chars} caracteres): provavelmente não parou de falar"
+    return None
+
+
 def write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
     clipped = np.clip(np.asarray(samples, dtype=np.float32).reshape(-1), -1.0, 1.0)
     with wave.open(str(path), "wb") as handle:
@@ -117,6 +139,7 @@ def main(argv: list[str] | None = None, model_factory=None) -> int:
     ap.add_argument("--language", default="pt")
     ap.add_argument("--variant", action="append", default=None)
     ap.add_argument("--seed", type=int, default=None, help="semente do sorteio das letras (padrão: aleatória)")
+    ap.add_argument("--retomar", action="store_true", help="reaproveita chave.json e os arquivos já gerados; refaz só o que falta ou saiu incompleto")
     ap.add_argument("--start", type=float, default=None, help="início (s) do trecho da referência a usar (só WAV; sem filtro)")
     ap.add_argument("--end", type=float, default=None, help="fim (s) do trecho da referência a usar")
     args = ap.parse_args(argv)
@@ -151,24 +174,45 @@ def main(argv: list[str] | None = None, model_factory=None) -> int:
     if args.start is not None:
         reference = trim_wav(args.reference, args.out / "referencia_recortada.wav", args.start, args.end)
         print(f"referência recortada: {args.start:.1f}–{args.end:.1f} s -> {reference}")
-    model = model_factory(args.model_dir, device)
-    letters = [chr(ord("A") + i) for i in range(len(variants))]
-    order = list(range(len(variants)))
-    random.Random(args.seed).shuffle(order)
+    resuming = False
     key: dict[str, dict[str, float]] = {}
-    for letter, index in zip(letters, order):
-        var = variants[index]
-        key[letter] = var
+    if args.retomar and (args.out / "chave.json").is_file():
+        saved = json.loads((args.out / "chave.json").read_text(encoding="utf-8"))
+        key = {letter: {k: float(v) for k, v in var.items()} for letter, var in saved["variacoes"].items()}
+        resuming = True
+        print(f"retomando: reaproveito as letras de {args.out / 'chave.json'} e os arquivos que já estão completos")
+    else:
+        letters = [chr(ord("A") + i) for i in range(len(variants))]
+        order = list(range(len(variants)))
+        random.Random(args.seed).shuffle(order)
+        key = {letter: variants[index] for letter, index in zip(letters, order)}
+    (args.out / "chave.json").write_text(json.dumps({"idioma": args.language, "modelo_local": str(args.space_dir) if ptbr else (str(args.model_dir) if args.model_dir else "cache/HF"), "motor": "ptbr-space" if ptbr else "v2-pypi", "variacoes": key}, ensure_ascii=False, indent=2), encoding="utf-8")
+    model = None
+    redone = kept = 0
+    for letter, var in key.items():
         for name, text in SAMPLES.items():
+            target = args.out / f"{letter}_{name}.wav"
+            if resuming and generation_problem(target, text) is None:
+                kept += 1
+                print(f"ok (já existe) {target.name}")
+                continue
+            if model is None:
+                model = model_factory(args.model_dir, device)
             wav = model.generate(
                 text, language_id=args.language, audio_prompt_path=str(reference),
-                **{param: var[key] for key, (param, _, _, _) in used.items()},
+                **{param: var[k] for k, (param, _, _, _) in used.items()},
             )
             samples = wav.squeeze().detach().cpu().numpy()
-            write_wav(args.out / f"{letter}_{name}.wav", samples, int(model.sr))
-            print(f"gerado {letter}_{name}.wav")
-    (args.out / "chave.json").write_text(json.dumps({"idioma": args.language, "modelo_local": str(args.space_dir) if ptbr else (str(args.model_dir) if args.model_dir else "cache/HF"), "motor": "ptbr-space" if ptbr else "v2-pypi", "variacoes": key}, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\nPronto. Ouça os arquivos de {args.out} SEM abrir chave.json; depois me diga a letra preferida.")
+            write_wav(target, samples, int(model.sr))
+            redone += 1
+            problem = generation_problem(target, text)
+            print(f"gerado {target.name}" + (f"   ATENÇÃO: {problem}" if problem else ""))
+    pending = [f"{letter}_{name}.wav" for letter in key for name, text in SAMPLES.items() if generation_problem(args.out / f"{letter}_{name}.wav", text)]
+    print(f"\ngerados agora: {redone}   já existiam completos: {kept}")
+    if pending:
+        print("AINDA incompletos (rode de novo com --retomar para refazer só estes): " + ", ".join(pending))
+        return 1
+    print(f"Pronto. Ouça os arquivos de {args.out} SEM abrir chave.json; depois me diga a letra preferida.")
     return 0
 
 

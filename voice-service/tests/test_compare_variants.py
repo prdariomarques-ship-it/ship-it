@@ -9,6 +9,11 @@ from scripts import compare_variants as cv
 from scripts.samples import SAMPLES
 
 
+def _speech(text, chars_per_second=14.0, rate=24000):
+    """Áudio de mentira com a duração que uma fala normal teria para o texto (o verificador compara duração com tamanho do texto)."""
+    return np.sin(np.linspace(0, 440, int(len(text) / chars_per_second * rate), dtype=np.float32))[None, :]
+
+
 class _Tensor:
     def __init__(self, arr):
         self.arr = arr
@@ -35,7 +40,7 @@ class _FakeModel:
     def generate(self, text, language_id, audio_prompt_path, exaggeration, cfg_weight, temperature=0.8,
                  repetition_penalty=1.2, min_p=0.05, top_p=1.0):
         self.calls.append((text, language_id, audio_prompt_path, exaggeration, cfg_weight, temperature, repetition_penalty))
-        return _Tensor(np.sin(np.linspace(0, 440, 2400, dtype=np.float32))[None, :])
+        return _Tensor(_speech(text))
 
 
 def test_parse_variant_defaults_and_errors():
@@ -121,7 +126,7 @@ class _PtbrModel:
 
     def generate(self, text, audio_prompt_path=None, exaggeration=0.5, cfg_weight=0.5, temperature=0.8, language_id="en"):
         self.calls.append((language_id, exaggeration, cfg_weight, temperature))
-        return _Tensor(np.sin(np.linspace(0, 440, 2400, dtype=np.float32))[None, :])
+        return _Tensor(_speech(text))
 
 
 def test_ptbr_engine_passes_only_the_space_parameters(tmp_path):
@@ -148,3 +153,55 @@ def test_ptbr_engine_rejects_parameters_the_space_does_not_have(tmp_path):
 def test_load_ptbr_model_requires_the_downloaded_space(tmp_path):
     with pytest.raises(FileNotFoundError):
         cv.load_ptbr_model(tmp_path, "cpu")
+
+
+def test_generation_problem_flags_cut_and_runaway_audio(tmp_path):
+    text = SAMPLES["retomada_orcamento"]
+    ok = tmp_path / "ok.wav"
+    cv.write_wav(ok, _speech(text)[0], 24000)
+    assert cv.generation_problem(ok, text) is None
+    short = tmp_path / "short.wav"
+    cv.write_wav(short, _speech(text, chars_per_second=200.0)[0], 24000)       # 1 s para 200 caracteres (o corte do detector de repetição)
+    assert "curto demais" in cv.generation_problem(short, text)
+    long = tmp_path / "long.wav"
+    cv.write_wav(long, _speech(text, chars_per_second=3.0)[0], 24000)          # não parou de falar
+    assert "longo demais" in cv.generation_problem(long, text)
+    assert cv.generation_problem(tmp_path / "nao.wav", text) == "não existe"
+    broken = tmp_path / "broken.wav"
+    broken.write_bytes(b"RIFF")
+    assert "ilegível" in cv.generation_problem(broken, text)
+
+
+def test_retomar_reuses_the_key_and_redoes_only_missing_or_incomplete(tmp_path):
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(b"x")
+    out = tmp_path / "saida"
+    first = _FakeModel()
+    assert cv.main(["--reference", str(ref), "--out", str(out), "--device", "cpu", "--seed", "5"], model_factory=lambda d, dev: first) == 0
+    key_before = (out / "chave.json").read_text(encoding="utf-8")
+    victim_missing, victim_cut = out / "A_pos_venda.wav", out / "B_retomada_orcamento.wav"
+    victim_missing.unlink()
+    cv.write_wav(victim_cut, _speech(SAMPLES["retomada_orcamento"], chars_per_second=200.0)[0], 24000)
+    untouched = (out / "C_atendimento_inicial.wav").read_bytes()
+    second = _FakeModel()
+    loads = []
+    rc = cv.main(["--reference", str(ref), "--out", str(out), "--device", "cpu", "--seed", "99", "--retomar"],
+                 model_factory=lambda d, dev: loads.append(1) or second)
+    assert rc == 0 and len(second.calls) == 2 and loads == [1]
+    assert {c[0] for c in second.calls} == {SAMPLES["pos_venda"], SAMPLES["retomada_orcamento"]}
+    assert (out / "chave.json").read_text(encoding="utf-8") == key_before          # mesmas letras, mesmo com --seed diferente
+    assert (out / "C_atendimento_inicial.wav").read_bytes() == untouched
+    # tudo completo: não carrega o modelo
+    loads.clear()
+    assert cv.main(["--reference", str(ref), "--out", str(out), "--device", "cpu", "--retomar"], model_factory=lambda d, dev: loads.append(1)) == 0
+    assert loads == []
+
+
+def test_run_reports_incomplete_audio_and_exits_nonzero(tmp_path):
+    class _Cutting(_FakeModel):
+        def generate(self, text, **kwargs):
+            return _Tensor(_speech(text, chars_per_second=300.0))
+
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(b"x")
+    assert cv.main(["--reference", str(ref), "--out", str(tmp_path / "o"), "--device", "cpu", "--variant", "cfg=0.5"], model_factory=lambda d, dev: _Cutting()) == 1

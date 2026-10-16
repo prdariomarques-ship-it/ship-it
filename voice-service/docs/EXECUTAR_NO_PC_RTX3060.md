@@ -91,3 +91,6 @@ Get-Content C:\voz\space_ptbr\requirements.txt
 .\.venv-ptbr\Scripts\python.exe -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 .\.venv-ptbr\Scripts\python.exe -m scripts.compare_variants --space-dir C:\voz\space_ptbr --reference "<gravacao.wav>" --start 7 --end 19 --variant "cfg=0.5,exg=0.5" --variant "cfg=0.3,exg=0.5,temp=0.7" --variant "cfg=0,exg=0.5" --out C:\voz\teste_ptbr
 ```
+
+### Geração caiu ou saiu áudio cortado: refazer só o que falta
+Rode o MESMO comando acrescentando `--retomar`. Ele reaproveita as letras do `chave.json`, confere cada `.wav` já gerado (duração compatível com o texto: frase curta demais = cortada, longa demais = não parou de falar) e gera de novo **só** o que não existe ou saiu incompleto. Se tudo estiver completo, nem carrega o modelo. Ao final lista o que ainda estiver incompleto e sai com código 1. Cada geração nova imprime `ATENÇÃO: ...` quando já sai suspeita.
