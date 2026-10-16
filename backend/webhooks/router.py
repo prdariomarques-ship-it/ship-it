@@ -182,6 +182,9 @@ async def _transcribe_audio(
     stt = get_stt_provider()
     if stt is None or not stt.enabled or inbound.media_key is None:
         return ""
+    allowed = {name.strip() for name in get_settings().stt_instances.split(",") if name.strip()}
+    if allowed and (inbound.instance or "") not in allowed:
+        return ""  # instancia fora da lista: o audio NAO sai do servidor
     downloaded = await provider.download_media(inbound.media_key, instance=inbound.instance or None)
     if downloaded is None:
         return ""

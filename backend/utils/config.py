@@ -232,6 +232,18 @@ class Settings(BaseSettings):
     # background wiring has been confirmed. See webhooks/router.py's
     # defer_audio computation.
     stt_background_enabled: bool = False
+    # Instancias WhatsApp cujo audio PODE ser enviado ao servico de transcricao (nomes separados por virgula, ex.:
+    # "MARQUESCOLOR,b2b-sales"). Vazio = todas (comportamento anterior). O audio sai do servidor, entao a lista existe para manter de
+    # fora conversas pessoais (familia, igreja) sem depender de cada fluxo lembrar disso.
+    stt_instances: str = ""
+
+    # Groq (Whisper hospedado). Usado quando stt_provider="groq". A chave vem SO de variavel de ambiente (GROQ_API_KEY);
+    # sem chave o provedor fica desabilitado (enabled=False) e o webhook segue como se nao houvesse STT.
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_stt_model: str = "whisper-large-v3-turbo"
+    groq_stt_language: str = "pt"
+    groq_stt_timeout_seconds: float = 20.0
 
     # n8n
     n8n_base_url: str = "http://localhost:5678"

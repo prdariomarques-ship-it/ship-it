@@ -270,3 +270,26 @@ async def test_audio_do_dono_com_chave_que_nao_confere_e_recusado_sem_baixar(wor
         async with world.sessions() as db:
             await handlers.transcribe_owner_audio(db, {"message_id": mid, "media_key": key})
     assert world.provider.transport.calls == [] and world.stt.calls == []
+
+
+# ---------------------------------------------------------------- lista de instâncias com STT
+
+async def test_audio_de_instancia_fora_da_lista_nao_sai_do_servidor(provider, stt, monkeypatch):
+    from webhooks.router import _transcribe_audio
+
+    monkeypatch.setattr(get_settings(), "stt_instances", "MARQUESCOLOR,b2b-sales")
+    inbound = provider.parse_webhook(_payload())
+    inbound.instance = "darioos"                   # instância válida para download, mas fora da lista
+    assert await _transcribe_audio(None, provider, inbound) == ""
+    assert not getattr(stt, "calls", [])           # nem baixou nem transcreveu
+    assert provider.transport.calls == []
+
+
+async def test_audio_de_instancia_na_lista_e_transcrito(provider, stt, monkeypatch):
+    from webhooks.router import _transcribe_audio
+
+    monkeypatch.setattr(get_settings(), "stt_instances", "MARQUESCOLOR, darioos")
+    inbound = provider.parse_webhook(_payload())
+    inbound.instance = "darioos"
+    assert await _transcribe_audio(None, provider, inbound) == "quero duas latas de tinta branca"
+    assert len(stt.calls) == 1

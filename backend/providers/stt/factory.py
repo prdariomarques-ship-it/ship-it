@@ -7,18 +7,16 @@ backend configured -- keep existing behavior, never crash" rather than a
 misconfiguration to raise on, so this returns None instead of raising
 when unset, unlike the mandatory providers (mail, whatsapp, ...).
 
-Review finding (round 6): no real STT backend is implemented here (see
-base.py's module docstring for why) -- `_PROVIDERS` is deliberately empty.
-`get_stt_provider()` returning None whenever `settings.stt_provider` is
-unset (the default) is the correct, already-relied-upon behavior, not a
-placeholder; if a real backend is ever added, it registers here the same
-way GmailProvider does in providers/mail/factory.py.
+`get_stt_provider()` returns None whenever `settings.stt_provider` is unset (the default): that is the correct, already-relied-upon
+behavior, not a placeholder. The only backend registered is "groq" (providers/stt/groq.py), which stays disabled (`enabled=False`)
+until GROQ_API_KEY is set.
 """
 
 from providers.stt.base import STTProvider
+from providers.stt.groq import GroqSTTProvider
 from utils.config import get_settings
 
-_PROVIDERS: dict[str, type[STTProvider]] = {}
+_PROVIDERS: dict[str, type[STTProvider]] = {"groq": GroqSTTProvider}
 
 
 class UnknownSTTProviderError(ValueError):
