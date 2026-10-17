@@ -209,6 +209,28 @@ services:
       retries: 5
       start_period: 30s
 
+  # Ponte Dario OS -> Zérvis (ADR-0003, docs/integrations/zervis.md). Opt-in:
+  # só sobe com `--profile zervis`. Lê o Dario OS com um token de escopo
+  # `darioos:read` e expõe um servidor MCP somente-leitura; publicado apenas
+  # em 127.0.0.1 -- quem precisa de acesso remoto usa túnel, não esta porta.
+  zervis-bridge:
+    profiles: [zervis]
+    build: ../integrations/zervis
+    restart: unless-stopped
+    environment:
+      ZERVIS_BRIDGE_DARIOOS_API_URL: http://backend:8000/api
+      ZERVIS_BRIDGE_DARIOOS_TOKEN: ${ZERVIS_BRIDGE_DARIOOS_TOKEN:-}
+      ZERVIS_BRIDGE_MCP_TOKEN: ${ZERVIS_BRIDGE_MCP_TOKEN:-}
+      ZERVIS_BRIDGE_REDIS_URL: redis://redis:6379/0
+    ports:
+      - "127.0.0.1:8810:8810"
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks: [darioos]
+
   prometheus:
     image: prom/prometheus:v2.45.0
     restart: unless-stopped

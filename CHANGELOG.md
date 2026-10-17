@@ -16,6 +16,11 @@ técnico não-bloqueante.
   em `logs`); validade máxima `SCOPED_TOKEN_MAX_DAYS` (90) e revogação por
   `SCOPED_TOKEN_REVOKED_BEFORE`. Sem migration.
 
+- **Ponte Dario OS ↔ Zérvis** (`integrations/zervis/`, `docs/integrations/zervis.md`):
+  serviço opt-in (`--profile zervis`) que expõe o estado do Dario OS como
+  servidor MCP somente-leitura e entrega eventos sanitizados (sem telefone,
+  contato nem `job_payload`). Usa o token com escopo; sem mudança no backend.
+
 ### Corrigido
 
 - **Token de `state` do OAuth aceito como Bearer.** Os tokens de `state`
