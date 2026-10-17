@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     password_reset_confirm_limit: int = 10
     password_reset_confirm_window_seconds: int = 3600
 
+    # Scoped read-only tokens (auth/scopes.py, docs/adr/ADR-0003): long-lived
+    # credentials for trusted read-only integrations, minted out-of-band by
+    # scripts/mint_scoped_token.py. `max_days` caps the TTL at issue time;
+    # `revoked_before` is the kill switch -- a unix timestamp, and every
+    # scoped token with an earlier `iat` is rejected (set it to "now" to
+    # revoke all outstanding scoped tokens; there is no per-token store).
+    scoped_token_max_days: int = 90
+    scoped_token_revoked_before: int = 0
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
     cache_default_ttl_seconds: int = 60

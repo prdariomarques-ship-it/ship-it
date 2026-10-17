@@ -1,10 +1,16 @@
 """JWT creation and validation."""
 
+import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import jwt as pyjwt
 
 from utils.config import get_settings
+
+# Claim that marks a token as scoped (limited), as opposed to a full-access
+# token. See auth/scopes.py for what a scope is allowed to do.
+SCOPE_CLAIM = "scope"
 
 
 def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
@@ -18,16 +24,62 @@ def create_access_token(subject: str, expires_minutes: int | None = None) -> str
     return pyjwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def decode_access_token(token: str) -> str | None:
-    """Return the token subject, or None if the token is invalid/expired."""
+def create_scoped_access_token(subject: str, scope: str, expires_days: int) -> str:
+    """Long-lived token limited to `scope` (enforced in `auth/scopes.py`).
+
+    TTL is validated against `scoped_token_max_days`: a scoped token is meant
+    for an integration, not a person, so it must expire, but not every 30
+    minutes like an interactive session. Carries a `jti` for audit trails.
+    """
+    settings = get_settings()
+    if not scope:
+        raise ValueError("scope must not be empty")
+    if expires_days < 1 or expires_days > settings.scoped_token_max_days:
+        raise ValueError(
+            f"expires_days must be between 1 and {settings.scoped_token_max_days}"
+        )
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": subject,
+        SCOPE_CLAIM: scope,
+        "jti": uuid.uuid4().hex,
+        "iat": now,
+        "exp": now + timedelta(days=expires_days),
+    }
+    return pyjwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_access_claims(token: str) -> dict[str, Any] | None:
+    """Return the verified claims of an access token (full-access or scoped).
+
+    None when the signature/expiry is invalid, `sub` is missing, or the token
+    is not an access token at all: OAuth `state` tokens (they carry `purpose`)
+    share the signing key but must never be accepted as a Bearer credential.
+    """
     settings = get_settings()
     try:
         payload = pyjwt.decode(
             token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
         )
-        return payload.get("sub")
     except pyjwt.PyJWTError:
         return None
+    if "purpose" in payload or not payload.get("sub"):
+        return None
+    return payload
+
+
+def decode_access_token(token: str) -> str | None:
+    """Return the subject of a full-access token, or None if invalid/expired.
+
+    Scoped tokens are deliberately rejected here: any caller of this helper
+    expects a token that may do anything its user can, and a limited token
+    must never be mistaken for one. Callers that handle scoped tokens use
+    `decode_access_claims` and enforce the scope explicitly.
+    """
+    payload = decode_access_claims(token)
+    if payload is None or SCOPE_CLAIM in payload:
+        return None
+    return payload["sub"]
 
 
 _OAUTH_STATE_PURPOSE = (

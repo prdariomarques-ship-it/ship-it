@@ -8,6 +8,21 @@ Nada pendente no momento — ver `ROADMAP_v1_4.md` para os próximos itens
 planejados (27-29, Google Calendar) e `TECHNICAL_DEBT.md` para débito
 técnico não-bloqueante.
 
+### Adicionado
+
+- **Tokens com escopo de leitura** (`auth/scopes.py`, ADR-0003): credencial de
+  longa duração, só `GET`/`HEAD` em um allowlist explícito de caminhos, para
+  integrações confiáveis. Emitido por `scripts/mint_scoped_token.py` (auditado
+  em `logs`); validade máxima `SCOPED_TOKEN_MAX_DAYS` (90) e revogação por
+  `SCOPED_TOKEN_REVOKED_BEFORE`. Sem migration.
+
+### Corrigido
+
+- **Token de `state` do OAuth aceito como Bearer.** Os tokens de `state`
+  (Gmail, Calendar, Contacts, Drive) compartilham a chave de assinatura e
+  eram aceitos por `decode_access_token` como acesso completo por 10 minutos;
+  agora são recusados.
+
 ## [1.4.0] - 2026-07-21
 
 Ciclo predominantemente funcional: os 6 itens Must/Should Have planejados
