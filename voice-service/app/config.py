@@ -21,7 +21,8 @@ class VoiceSettings(BaseSettings):
     tokens: str = ""
 
     # --- motor ----------------------------------------------------------------------------------------------
-    engine: str = "chatterbox"  # chatterbox | qwen3tts | fake (fake só com allow_fake_engine=true; uso de teste)
+    # chatterbox | chatterbox_ptbr | qwen3tts | fake (fake só com allow_fake_engine=true; uso de teste)
+    engine: str = "chatterbox"
     allow_fake_engine: bool = False
     device: str = "cpu"  # cpu | cuda | cuda:0 ...
     # Revisão (commit) dos pesos no Hugging Face. Vazio = recusa carregar: não se fixa "main".
@@ -32,6 +33,11 @@ class VoiceSettings(BaseSettings):
     chatterbox_cfg_weight: float = 0.5
     chatterbox_exaggeration: float = 0.5
     chatterbox_pt_br_pack: bool = False  # usa o pacote de língua única pt-BR quando disponível no model_dir
+    # Motor `chatterbox_ptbr` (pacote pt-BR oficial: código do Space da Resemble, em ambiente Python separado). A temperatura
+    # só existe nele; cfg_weight e exaggeration acima valem para os dois motores Chatterbox. A configuração aprovada por escuta
+    # às cegas (17/10/2026, variante C) é cfg=0.3, exaggeration=0.7, temperature=0.8 -- ver docs/EXECUTAR_NO_PC_RTX3060.md.
+    ptbr_space_dir: Path | None = None  # pasta do Space baixado (contém chatterbox/src/chatterbox/tts.py)
+    chatterbox_temperature: float = 0.8
 
     # --- limites --------------------------------------------------------------------------------------------
     max_text_chars: int = 350
@@ -64,6 +70,13 @@ class VoiceSettings(BaseSettings):
     def _exg(cls, v: float) -> float:
         if not 0.0 <= v <= 2.0:
             raise ValueError("chatterbox_exaggeration deve estar entre 0 e 2")
+        return v
+
+    @field_validator("chatterbox_temperature")
+    @classmethod
+    def _temp(cls, v: float) -> float:
+        if not 0.05 <= v <= 2.0:
+            raise ValueError("chatterbox_temperature deve estar entre 0.05 e 2")
         return v
 
     @field_validator("max_concurrency")

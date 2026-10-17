@@ -50,6 +50,9 @@ def build_engine(settings) -> Engine:
     if name == "chatterbox":
         from app.engines.chatterbox_engine import ChatterboxEngine
         return ChatterboxEngine(settings)
+    if name == "chatterbox_ptbr":
+        from app.engines.chatterbox_ptbr_engine import ChatterboxPtBrEngine
+        return ChatterboxPtBrEngine(settings)
     if name == "qwen3tts":
         from app.engines.qwen3_engine import Qwen3Engine
         return Qwen3Engine(settings)

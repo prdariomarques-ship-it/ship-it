@@ -94,3 +94,36 @@ Get-Content C:\voz\space_ptbr\requirements.txt
 
 ### Geração caiu ou saiu áudio cortado: refazer só o que falta
 Rode o MESMO comando acrescentando `--retomar`. Ele reaproveita as letras do `chave.json`, confere cada `.wav` já gerado (duração compatível com o texto: frase curta demais = cortada, longa demais = não parou de falar) e gera de novo **só** o que não existe ou saiu incompleto. Se tudo estiver completo, nem carrega o modelo. Ao final lista o que ainda estiver incompleto e sai com código 1. Cada geração nova imprime `ATENÇÃO: ...` quando já sai suspeita.
+
+## Motor `chatterbox_ptbr` no serviço (configuração aprovada na escuta às cegas de 17/10/2026)
+
+Variante **C**: `cfg_weight=0.3`, `exaggeration=0.7`, `temperature=0.8`. Aprovada só em duas das três frases (a 1ª, de atendimento inicial, não
+passou): é "razoável", não "excelente" — a escuta no aparelho (passo 7) ainda decide. O ritmo veio da **referência compacta** (pausas > 0,3 s
+reduzidas para 0,2 s; silêncio de 58% para 26%): sem isso todas as variantes saíram em "slow motion", porque o Chatterbox copia o ritmo da gravação.
+
+```powershell
+cd C:\Users\dario\FlowCore\ship-it\voice-service
+# 1) referência compacta (não toca no original). Se já existe C:\voz\ref_compacta.wav, aprovada por escuta, USE ESSE arquivo.
+.\.venv-ptbr\Scripts\python.exe -m scripts.compact_pauses "<gravacao_original.wav>" C:\voz\ref_compacta.wav
+# 2) pesos pt-BR em pasta fixa + revisão (precisa de internet uma vez; depois o serviço roda offline)
+.\.venv-ptbr\Scripts\python.exe -m scripts.download_ptbr_weights --space-dir C:\voz\space_ptbr --dest C:\models\chatterbox_ptbr
+# 3) perfil de voz a partir da referência compacta (consentimento explícito, como no passo 3)
+.\.venv-ptbr\Scripts\python.exe scripts\prepare_reference.py C:\voz\ref_compacta.wav --profiles-dir C:\voz\profiles --agent loja `
+  --voice-owner "Dário Marques Neto" --consent-scope "voz sintética do assistente da Loja Marquescolor, uso autorizado pelo titular" --confirm-authorized
+# 4) serviço no ambiente do pacote pt-BR (as dependências do serviço — requirements.txt — precisam estar nesse ambiente)
+.\.venv-ptbr\Scripts\python.exe -m pip install -r requirements.txt
+$env:VOICE_ENGINE = "chatterbox_ptbr"; $env:VOICE_DEVICE = "cuda"
+$env:VOICE_PTBR_SPACE_DIR = "C:\voz\space_ptbr"; $env:VOICE_MODEL_DIR = "C:\models\chatterbox_ptbr"
+$env:VOICE_MODEL_REVISION = "<o valor impresso no passo 2>"
+$env:VOICE_CHATTERBOX_CFG_WEIGHT = "0.3"; $env:VOICE_CHATTERBOX_EXAGGERATION = "0.7"; $env:VOICE_CHATTERBOX_TEMPERATURE = "0.8"
+# demais variáveis (VOICE_TOKENS, VOICE_PROFILES_DIR, VOICE_STORAGE_DIR) como no passo 4
+.\.venv-ptbr\Scripts\python.exe -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8765
+```
+
+O motor recusa carregar se já houver outro pacote `chatterbox` na memória (o do PyPI) ou se `VOICE_MODEL_REVISION` estiver vazio ou passar de
+64 caracteres (limite da coluna `store_voice_sends.model_revision`). `chatterbox_pt_br_pack` (config antiga) não é usado por nenhum motor.
+Cobertura: duplo do pacote do Space (sem pesos reais); a validação real é a escuta.
+
+**Disponibilidade:** o gerador roda na GPU do PC do titular. PC desligado ou fora da rede = o job `store.voice_reply` termina em
+`failed_before_send`; o cliente já recebeu a resposta por escrito, então só o áudio é perdido. A VPS não hospeda o gerador (RAM e swap
+insuficientes, sem GPU).
