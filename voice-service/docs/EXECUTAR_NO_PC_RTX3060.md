@@ -35,8 +35,8 @@ declara MIT; a conferência do texto é sua/da equipe (eu não consegui abrir o 
 ## 3. Perfil de voz a partir da SUA gravação (consentimento explícito)
 ```powershell
 $ref = "C:\caminho\WhatsApp Ptt 2026-10-12 at 13.39.29.ogg"
-python scripts\analyze_reference.py $ref                     # só lê; sugere o melhor trecho (use ~10–15 s limpos)
-python scripts\prepare_reference.py $ref --profiles-dir C:\voz\profiles --agent loja --start 3.0 --end 15.0 `
+python -m scripts.analyze_reference $ref                     # só lê; sugere o melhor trecho (use ~10–15 s limpos)
+python -m scripts.prepare_reference $ref --profiles-dir C:\voz\profiles --agent loja --start 3.0 --end 15.0 `
   --voice-owner "Dário Marques Neto" --consent-scope "voz sintética do assistente da Loja Marquescolor, uso autorizado pelo titular" --confirm-authorized
 ```
 Ajuste `--start/--end` ao trecho sugerido. O original fica intacto em `original/` com SHA-256. **Nenhum filtro é aplicado.**
@@ -108,7 +108,7 @@ cd C:\Users\dario\FlowCore\ship-it\voice-service
 # 2) pesos pt-BR em pasta fixa + revisão (precisa de internet uma vez; depois o serviço roda offline)
 .\.venv-ptbr\Scripts\python.exe -m scripts.download_ptbr_weights --space-dir C:\voz\space_ptbr --dest C:\models\chatterbox_ptbr
 # 3) perfil de voz a partir da referência compacta (consentimento explícito, como no passo 3)
-.\.venv-ptbr\Scripts\python.exe scripts\prepare_reference.py C:\voz\ref_compacta.wav --profiles-dir C:\voz\profiles --agent loja `
+.\.venv-ptbr\Scripts\python.exe -m scripts.prepare_reference C:\voz\ref_compacta.wav --profiles-dir C:\voz\profiles --agent loja `
   --voice-owner "Dário Marques Neto" --consent-scope "voz sintética do assistente da Loja Marquescolor, uso autorizado pelo titular" --confirm-authorized
 # 4) serviço no ambiente do pacote pt-BR (as dependências do serviço — requirements.txt — precisam estar nesse ambiente)
 .\.venv-ptbr\Scripts\python.exe -m pip install -r requirements.txt
