@@ -1,0 +1,361 @@
+# Cole TUDO de uma vez na VPS (como root). Cria ~/groq_stt com 4 arquivos e confere o hash de cada um.
+mkdir -p ~/groq_stt && cd ~/groq_stt
+cat > groq.py <<'GROQ_EOF_1'
+"""Transcricao de audio via Groq (Whisper hospedado, API compativel com a da OpenAI).
+
+Contrato: `providers/stt/base.py`. Falha NUNCA vira texto inventado: qualquer erro de rede/HTTP, audio grande demais, resposta vazia
+ou transcricao que e so uma "alucinacao" tipica do Whisper levanta `STTProviderError` (o chamador ja trata isso como "sem
+transcricao"). A chave de API so e lida das configuracoes (variavel de ambiente) e nunca entra em mensagem de erro ou log.
+"""
+from __future__ import annotations
+
+import asyncio
+import re
+import unicodedata
+
+import httpx
+
+from providers.stt.base import STTProvider, STTProviderError
+from utils.config import get_settings
+
+# Limite de tamanho de arquivo da API de transcricao (plano gratuito); acima disso nem tentamos enviar.
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
+_ATTEMPTS = 2  # transcricao nao tem efeito colateral: uma nova tentativa e segura; poucas, porque o webhook pode estar esperando
+_RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+_MAX_RETRY_WAIT_SECONDS = 5.0
+
+_EXTENSIONS = {
+    "audio/ogg": "ogg", "audio/opus": "ogg", "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/mp4": "m4a", "audio/m4a": "m4a",
+    "audio/x-m4a": "m4a", "audio/aac": "m4a", "audio/wav": "wav", "audio/x-wav": "wav", "audio/webm": "webm", "audio/flac": "flac",
+}
+
+# Saidas que o Whisper inventa em audio curto, mudo ou com ruido (a transcricao INTEIRA e uma destas = nao ha fala).
+_HALLUCINATIONS = frozenset(
+    {
+        "legendas pela comunidade amara.org", "legendas pela comunidade", "amara.org", "obrigado por assistir",
+        "obrigada por assistir", "inscreva-se no canal", "se inscreva no canal", "tchau tchau",
+    }
+)
+
+
+def _normalize(text: str) -> str:
+    folded = unicodedata.normalize("NFKD", text.lower())
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return re.sub(r"[^\w\s.\-]", "", folded).strip(" .-\n\t")
+
+
+def _extension(mime_type: str) -> str:
+    base = (mime_type or "").split(";")[0].strip().lower()
+    return _EXTENSIONS.get(base, "ogg")
+
+
+class GroqSTTProvider(STTProvider):
+    name = "groq"
+
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        settings = get_settings()
+        self._key = settings.groq_api_key
+        self._url = settings.groq_base_url.rstrip("/") + "/audio/transcriptions"
+        self._model = settings.groq_stt_model
+        self._language = settings.groq_stt_language
+        self._timeout = settings.groq_stt_timeout_seconds
+        self._transport = transport  # so os testes injetam; em producao e sempre None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._key)
+
+    async def transcribe(self, audio_bytes: bytes, mime_type: str) -> str:
+        if not self.enabled:
+            raise STTProviderError("Groq STT sem chave configurada")
+        if not audio_bytes:
+            raise STTProviderError("audio vazio")
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            raise STTProviderError("audio maior que o limite da API de transcricao")
+        filename = f"audio.{_extension(mime_type)}"
+        data = {"model": self._model, "temperature": "0", "response_format": "json"}
+        if self._language:
+            data["language"] = self._language
+        last = "falha desconhecida"
+        for attempt in range(1, _ATTEMPTS + 1):
+            wait = 1.0 * attempt
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
+                    response = await client.post(
+                        self._url,
+                        headers={"Authorization": f"Bearer {self._key}"},
+                        data=data,
+                        files={"file": (filename, audio_bytes, mime_type or "application/octet-stream")},
+                    )
+            except httpx.HTTPError as exc:
+                last = f"erro de rede ({type(exc).__name__})"
+            else:
+                if response.status_code == 200:
+                    return self._parse(response)
+                last = f"HTTP {response.status_code}: {self._error_message(response)}"
+                if response.status_code not in _RETRY_STATUS:
+                    break
+                try:
+                    wait = min(float(response.headers.get("retry-after", wait)), _MAX_RETRY_WAIT_SECONDS)
+                except ValueError:
+                    pass
+            if attempt < _ATTEMPTS:
+                await asyncio.sleep(wait)
+        raise STTProviderError(f"Groq STT falhou: {last}")
+
+    @staticmethod
+    def _error_message(response: httpx.Response) -> str:
+        try:
+            error = response.json().get("error")
+            message = error.get("message") if isinstance(error, dict) else error
+        except (ValueError, AttributeError):
+            message = None
+        return str(message or "sem detalhe")[:200]
+
+    @staticmethod
+    def _parse(response: httpx.Response) -> str:
+        try:
+            text = str(response.json().get("text") or "").strip()
+        except (ValueError, AttributeError):
+            raise STTProviderError("Groq STT devolveu resposta invalida") from None
+        if not text:
+            raise STTProviderError("Groq STT devolveu transcricao vazia")
+        if _normalize(text) in _HALLUCINATIONS:
+            raise STTProviderError("transcricao parece alucinacao do Whisper (sem fala)")
+        return text
+GROQ_EOF_1
+cat > aplicar_groq.py <<'GROQ_EOF_2'
+#!/usr/bin/env python3
+"""Gera as versões novas de config.py, factory.py e router.py (do container) com EDIÇÕES ANCORADAS: só insere o necessário para o Groq.
+
+Uso:  python3 aplicar_groq.py PASTA      (PASTA tem config.py.lido, factory.py.lido, router.py.lido; grava *.novo ao lado)
+Aborta sem gravar NADA se qualquer âncora não aparecer exatamente 1 vez, se já estiver aplicado, ou se o router não importar get_settings.
+"""
+import sys
+from pathlib import Path
+
+CONFIG_ANCHOR = "    stt_background_enabled: bool = False\n"
+CONFIG_ADD = '''    # Instancias WhatsApp cujo audio PODE ser enviado ao servico de transcricao (nomes separados por virgula, ex.:
+    # "MARQUESCOLOR,b2b-sales"). Vazio = todas (comportamento anterior). O audio sai do servidor, entao a lista existe para manter de
+    # fora conversas pessoais (familia, igreja) sem depender de cada fluxo lembrar disso.
+    stt_instances: str = ""
+
+    # Groq (Whisper hospedado). Usado quando stt_provider="groq". A chave vem SO de variavel de ambiente (GROQ_API_KEY);
+    # sem chave o provedor fica desabilitado (enabled=False) e o webhook segue como se nao houvesse STT.
+    groq_api_key: str = ""
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_stt_model: str = "whisper-large-v3-turbo"
+    groq_stt_language: str = "pt"
+    groq_stt_timeout_seconds: float = 20.0
+'''
+FACTORY_IMPORT_ANCHOR = "from providers.stt.base import STTProvider\n"
+FACTORY_IMPORT_NEW = FACTORY_IMPORT_ANCHOR + "from providers.stt.groq import GroqSTTProvider\n"
+FACTORY_DICT_ANCHOR = "_PROVIDERS: dict[str, type[STTProvider]] = {}\n"
+FACTORY_DICT_NEW = '_PROVIDERS: dict[str, type[STTProvider]] = {"groq": GroqSTTProvider}\n'
+ROUTER_ANCHOR = '    if stt is None or not stt.enabled or inbound.media_key is None:\n        return ""\n'
+ROUTER_ADD = '''    allowed = {name.strip() for name in get_settings().stt_instances.split(",") if name.strip()}
+    if allowed and (inbound.instance or "") not in allowed:
+        return ""  # instancia fora da lista: o audio NAO sai do servidor
+'''
+
+
+def once(text: str, anchor: str, what: str) -> None:
+    n = text.count(anchor)
+    if n != 1:
+        raise SystemExit(f"ABORTAR: {what}: âncora encontrada {n} vez(es), esperado 1 (o arquivo do container difere do esperado)")
+
+
+def build(config: str, factory: str, router: str) -> tuple[str, str, str]:
+    if "groq" in factory.lower() or "stt_instances" in config or "stt_instances" in router:
+        raise SystemExit("ABORTAR: parece que o Groq já foi aplicado (não vou aplicar duas vezes)")
+    if "from utils.config import get_settings" not in router:
+        raise SystemExit("ABORTAR: router.py não importa get_settings")
+    once(config, CONFIG_ANCHOR, "config.py")
+    once(factory, FACTORY_IMPORT_ANCHOR, "factory.py (import)")
+    once(factory, FACTORY_DICT_ANCHOR, "factory.py (_PROVIDERS)")
+    once(router, ROUTER_ANCHOR, "router.py")
+    config = config.replace(CONFIG_ANCHOR, CONFIG_ANCHOR + CONFIG_ADD, 1)
+    factory = factory.replace(FACTORY_IMPORT_ANCHOR, FACTORY_IMPORT_NEW, 1).replace(FACTORY_DICT_ANCHOR, FACTORY_DICT_NEW, 1)
+    router = router.replace(ROUTER_ANCHOR, ROUTER_ANCHOR + ROUTER_ADD, 1)
+    return config, factory, router
+
+
+def main(folder: str) -> None:
+    d = Path(folder)
+    read = lambda name: (d / f"{name}.lido").read_text(encoding="utf-8")
+    new = build(read("config.py"), read("factory.py"), read("router.py"))
+    for name, text in zip(("config.py", "factory.py", "router.py"), new):
+        (d / f"{name}.novo").write_text(text, encoding="utf-8", newline="")
+    print("gerados: config.py.novo factory.py.novo router.py.novo")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        raise SystemExit(__doc__)
+    main(sys.argv[1])
+GROQ_EOF_2
+cat > aplicar_na_vps_groq.sh <<'GROQ_EOF_3'
+#!/bin/bash
+# Groq STT: aplicação segura no container do backend. Uso:  bash aplicar_na_vps_groq.sh   (na pasta com aplicar_groq.py e groq.py)
+# Muda 3 arquivos (edições ancoradas), cria 1 (groq.py) e acrescenta 3 linhas ao /app/.env. EXIGE reiniciar o backend (alguns segundos).
+# A chave é pedida com digitação OCULTA e só trafega por stdin: não vai para histórico, arquivo da VPS fora do /app/.env, nem tela.
+# Nada é gravado no container até os arquivos novos estarem conferidos DENTRO dele; qualquer falha devolve tudo e reinicia de novo.
+set -euo pipefail
+BK=darioos-evolution-backend-1
+cd "$(dirname "$0")"
+CFG=/app/utils/config.py; FAC=/app/providers/stt/factory.py; RTR=/app/webhooks/router.py; GRQ=/app/providers/stt/groq.py; ENVF=/app/.env
+GROQ_SHA_ESPERADO=10dd87cfc6bf7659fc887c35668c0d0c41662df508bde0dffe2a2f23afc29249   # groq.py do repositório (commit 1762b73)
+INSTANCIAS="${STT_INSTANCES_ALVO:-MARQUESCOLOR,b2b-sales}"
+ESPERA_HEALTH=${ESPERA_HEALTH:-90}
+
+die() { echo "ABORTAR: $*"; exit 1; }
+sha_file() { sha256sum "$1" | awk '{print $1}'; }
+sha_live() { docker exec "$BK" sha256sum "$1" | awk '{print $1}'; }
+expect() { [ -n "$2" ] && [ "$2" = "$3" ] || die "$1: obtido '${2:-vazio}', esperado '$3'"; }
+health() { docker inspect -f '{{.State.Health.Status}}' "$BK" 2>/dev/null || echo desconhecido; }
+wait_healthy() { local i=0; while [ "$i" -lt "$ESPERA_HEALTH" ]; do [ "$(health)" = healthy ] && return 0; sleep 1; i=$((i+1)); done; return 1; }
+cleanup_tmp() { docker exec "$BK" rm -f "$CFG.groq_new" "$FAC.groq_new" "$RTR.groq_new" "$GRQ.groq_new" >/dev/null 2>&1 || true; }
+trap cleanup_tmp EXIT
+restore_all() {
+  docker cp config.py.orig "$BK:$CFG" || echo "ATENÇÃO: falha ao copiar config.py"
+  docker cp factory.py.orig "$BK:$FAC" || echo "ATENÇÃO: falha ao copiar factory.py"
+  docker cp router.py.orig "$BK:$RTR" || echo "ATENÇÃO: falha ao copiar router.py"
+  docker exec "$BK" rm -f "$GRQ" || true
+  if [ "${ENV_CRIADO:-0}" = 1 ]; then docker exec "$BK" rm -f "$ENVF" || true
+  elif [ "${ENV_SALVO:-0}" = 1 ]; then docker exec "$BK" sh -c "cp -p $ENVF.groq_bak $ENVF" || echo "ATENÇÃO: falha ao restaurar o .env"; fi
+}
+back_out() {
+  echo "PROBLEMA: $1. Devolvendo o original..."
+  restore_all
+  docker restart "$BK" >/dev/null || echo "ATENÇÃO: falha ao reiniciar"
+  wait_healthy && echo "backend healthy de novo" || echo "ATENÇÃO: backend não ficou healthy; rode rollback_groq.sh e olhe docker logs"
+  echo "REVERTIDO"
+  exit 1
+}
+
+echo "== 1. lê os originais do container (somente leitura)"
+[ "$(health)" = healthy ] || die "o container não está healthy"
+[ -s aplicar_groq.py ] && [ -s groq.py ] || die "faltam aplicar_groq.py e/ou groq.py nesta pasta"
+expect "groq.py desta pasta" "$(sha_file groq.py)" "$GROQ_SHA_ESPERADO"
+docker exec "$BK" test ! -e "$GRQ" || die "$GRQ já existe no container (Groq já aplicado?)"
+for f in config.py:$CFG factory.py:$FAC router.py:$RTR; do
+  n=${f%%:*}; p=${f#*:}
+  docker cp "$BK:$p" "$n.lido"
+  [ -s "$n.lido" ] || die "não consegui ler $p"
+  expect "$n (cópia fiel)" "$(sha_live $p)" "$(sha_file $n.lido)"
+done
+python3 aplicar_groq.py . || die "o aplicar_groq.py recusou (nada foi gravado no container)"
+for n in config.py factory.py router.py; do mv "$n.lido" "$n.orig"; printf '%s  %s\n' "$(sha_file $n.orig)" "$n" >> hashes_antes_groq.tmp; done
+mv hashes_antes_groq.tmp hashes_antes_groq.txt
+echo "OK (originais guardados como *.orig)"
+
+echo "== 2. chave (digitação oculta) e conferência do .env"
+if [ -z "${GROQ_API_KEY:-}" ]; then read -rsp "Cole a chave NOVA da Groq (não aparece na tela) e tecle Enter: " GROQ_API_KEY; echo; fi
+case "$GROQ_API_KEY" in gsk_*) ;; *) die "a chave deve começar com gsk_";; esac
+[ "${#GROQ_API_KEY}" -ge 30 ] || die "a chave parece curta demais"
+ENV_CRIADO=0; ENV_SALVO=0
+if docker exec "$BK" test -f "$ENVF"; then
+  [ "$(docker exec "$BK" grep -c -E '^(STT_PROVIDER|GROQ_API_KEY|STT_INSTANCES)=' "$ENVF" || true)" = 0 ] || die "o $ENVF já define STT_PROVIDER/GROQ_API_KEY/STT_INSTANCES; ajuste à mão"
+  docker exec "$BK" sh -c "cp -p $ENVF $ENVF.groq_bak"; ENV_SALVO=1
+else
+  ENV_CRIADO=1; echo criado > env_criado_groq.txt
+fi
+echo "OK"
+
+echo "== 3. copia para nomes temporários e confere (o código em uso não muda)"
+docker cp config.py.novo "$BK:$CFG.groq_new"; docker cp factory.py.novo "$BK:$FAC.groq_new"; docker cp router.py.novo "$BK:$RTR.groq_new"; docker cp groq.py "$BK:$GRQ.groq_new"
+expect "config temporário" "$(sha_live $CFG.groq_new)" "$(sha_file config.py.novo)"
+expect "factory temporário" "$(sha_live $FAC.groq_new)" "$(sha_file factory.py.novo)"
+expect "router temporário" "$(sha_live $RTR.groq_new)" "$(sha_file router.py.novo)"
+expect "groq temporário" "$(sha_live $GRQ.groq_new)" "$GROQ_SHA_ESPERADO"
+echo "OK"
+
+echo "== 4. troca (cópias de segurança dentro do container) e grava as 3 linhas no .env"
+if ! docker exec "$BK" sh -c "set -e; cp -p $CFG $CFG.groq_bak; cp -p $FAC $FAC.groq_bak; cp -p $RTR $RTR.groq_bak; mv $CFG.groq_new $CFG; mv $FAC.groq_new $FAC; mv $RTR.groq_new $RTR; mv $GRQ.groq_new $GRQ"; then
+  back_out "a troca falhou"
+fi
+if ! printf '\nSTT_PROVIDER=groq\nSTT_INSTANCES=%s\nGROQ_API_KEY=%s\n' "$INSTANCIAS" "$GROQ_API_KEY" | docker exec -i "$BK" sh -c "cat >> $ENVF && chmod 600 $ENVF"; then
+  back_out "não consegui gravar o .env"
+fi
+expect "config final" "$(sha_live $CFG)" "$(sha_file config.py.novo)"
+expect "factory final" "$(sha_live $FAC)" "$(sha_file factory.py.novo)" 
+expect "router final" "$(sha_live $RTR)" "$(sha_file router.py.novo)"
+echo "OK"
+
+echo "== 5. reinicia o backend e espera ficar healthy"
+docker restart "$BK" >/dev/null || back_out "o restart falhou"
+wait_healthy || back_out "o backend não ficou healthy em ${ESPERA_HEALTH}s"
+echo "OK"
+
+echo "== 6. verificação funcional dentro do container (inclui 1 chamada real à Groq com 1 s de silêncio)"
+docker exec -i -e ALVO_INSTANCIAS="$INSTANCIAS" "$BK" python - <<'PY' || back_out "a verificação funcional falhou"
+import asyncio, io, os, wave
+from providers.stt.base import STTProviderError
+from providers.stt.factory import get_stt_provider
+from utils.config import get_settings
+import webhooks.router  # noqa: F401  (importa sem erro)
+
+s = get_settings(); p = get_stt_provider()
+assert s.stt_provider == "groq", s.stt_provider
+assert s.stt_instances == os.environ["ALVO_INSTANCIAS"], s.stt_instances
+assert p is not None and p.name == "groq" and p.enabled, "provedor groq não está habilitado (chave não chegou?)"
+buf = io.BytesIO()
+with wave.open(buf, "wb") as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b"\x00\x00" * 16000)
+try:
+    print("resposta da Groq:", repr(asyncio.run(p.transcribe(buf.getvalue(), "audio/wav"))))
+except STTProviderError as exc:
+    msg = str(exc)
+    # silêncio => "transcricao vazia"/"alucinacao" significa que a chamada CHEGOU e a chave foi aceita
+    assert "vazia" in msg or "alucina" in msg, msg
+    print("a Groq respondeu (silêncio sem texto, como esperado):", msg)
+print("provedor groq habilitado; instâncias:", s.stt_instances)
+PY
+echo "OK"
+
+echo "SUCESSO: transcrição Groq ligada para: $INSTANCIAS. Para desfazer: bash rollback_groq.sh"
+GROQ_EOF_3
+cat > rollback_groq.sh <<'GROQ_EOF_4'
+#!/bin/bash
+# Groq STT: reversão segura. Uso:  bash rollback_groq.sh   (na mesma pasta do aplicar_na_vps_groq.sh). Reinicia o backend.
+set -euo pipefail
+BK=darioos-evolution-backend-1
+cd "$(dirname "$0")"
+CFG=/app/utils/config.py; FAC=/app/providers/stt/factory.py; RTR=/app/webhooks/router.py; GRQ=/app/providers/stt/groq.py; ENVF=/app/.env
+ESPERA_HEALTH=${ESPERA_HEALTH:-90}
+die() { echo "ABORTAR: $*"; exit 1; }
+sha_file() { sha256sum "$1" | awk '{print $1}'; }
+sha_live() { docker exec "$BK" sha256sum "$1" | awk '{print $1}'; }
+expect() { [ -n "$2" ] && [ "$2" = "$3" ] || die "$1: obtido '${2:-vazio}', esperado '$3'"; }
+health() { docker inspect -f '{{.State.Health.Status}}' "$BK" 2>/dev/null || echo desconhecido; }
+trap 'docker exec "$BK" rm -f "$CFG.groq_rb" "$FAC.groq_rb" "$RTR.groq_rb" >/dev/null 2>&1 || true' EXIT
+[ -s hashes_antes_groq.txt ] || die "falta hashes_antes_groq.txt (gerado na aplicação)"
+for f in config.py:$CFG factory.py:$FAC router.py:$RTR; do
+  n=${f%%:*}; p=${f#*:}
+  want=$(awk -v n="$n" '$2==n{print $1}' hashes_antes_groq.txt)
+  expect "$n.orig" "$(sha_file $n.orig)" "$want"
+  docker cp "$n.orig" "$BK:$p.groq_rb"
+  expect "$n temporário" "$(sha_live $p.groq_rb)" "$want"
+done
+docker exec "$BK" sh -c "set -e; mv $CFG.groq_rb $CFG; mv $FAC.groq_rb $FAC; mv $RTR.groq_rb $RTR; rm -f $GRQ"
+if [ -f env_criado_groq.txt ]; then
+  docker exec "$BK" rm -f "$ENVF"
+elif docker exec "$BK" test -f "$ENVF.groq_bak"; then
+  docker exec "$BK" sh -c "cp -p $ENVF.groq_bak $ENVF"
+fi
+for f in config.py:$CFG factory.py:$FAC router.py:$RTR; do
+  n=${f%%:*}; p=${f#*:}
+  expect "$n final" "$(sha_live $p)" "$(awk -v n="$n" '$2==n{print $1}' hashes_antes_groq.txt)"
+done
+docker restart "$BK" >/dev/null
+i=0; while [ "$i" -lt "$ESPERA_HEALTH" ]; do [ "$(health)" = healthy ] && break; sleep 1; i=$((i+1)); done
+[ "$(health)" = healthy ] || die "o backend não ficou healthy depois da reversão (docker logs $BK)"
+echo "REVERTIDO: arquivos e .env voltaram ao estado anterior ao Groq; backend reiniciado e healthy."
+GROQ_EOF_4
+cat > SHA256SUMS <<'GROQ_EOF_9'
+10dd87cfc6bf7659fc887c35668c0d0c41662df508bde0dffe2a2f23afc29249  groq.py
+7d3070cbc865b0c810f3881fd43fbc6e99308e9afec18f122a48990f4e22e8b1  aplicar_groq.py
+fddc810b7461ae2d974667a4dc271463a47aed1f00653dcb359e946635b6f079  aplicar_na_vps_groq.sh
+aaad167cc84716f126080fc06d65ad26bc0c7c4e8c83dfe54821d25b7fe0e5f7  rollback_groq.sh
+GROQ_EOF_9
+sha256sum -c SHA256SUMS && echo "ARQUIVOS CONFEREM" || echo "ARQUIVO DIFERENTE: não rode o próximo passo"

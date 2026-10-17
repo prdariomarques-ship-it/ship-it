@@ -23,3 +23,13 @@ STT_INSTANCES=MARQUESCOLOR,b2b-sales
 
 ## Testes
 `tests/test_groq_stt.py` (14, transporte HTTP simulado — **não** prova qualidade nem fala com a Groq) e 2 testes novos em `tests/test_audio_media_contract.py` (lista de instâncias). Mutações verificadas: sem a lista, sem o filtro de alucinação e sem o limite de tamanho, cada uma derruba testes. Suíte completa do backend (sem `test_gcalendar_tools.py`, que já falha na coleta sem as minhas mudanças): 23 falhas, todas também presentes sem a mudança (orquestrador/registros/estilo), nenhuma nova.
+
+## Aplicação na VPS (pronta; só rodar com autorização)
+Arquivos: `aplicar_groq.py` (edições ancoradas em config.py/factory.py/router.py do container), `aplicar_na_vps_groq.sh`, `rollback_groq.sh`, `groq.py`, e `BLOCO_COLAR_NA_VPS.txt` (cria tudo em `~/groq_stt` e confere o hash de cada arquivo).
+1. Cole o bloco na VPS, depois: `cd ~/groq_stt && bash aplicar_na_vps_groq.sh`. A chave é pedida com digitação oculta.
+2. O script lê os 3 arquivos do container, aplica as edições, confere cada cópia DENTRO do container, troca, grava `STT_PROVIDER`, `STT_INSTANCES` e `GROQ_API_KEY` no `/app/.env` (permissão 600), **reinicia o backend** e roda uma verificação funcional com 1 s de silêncio na Groq. Qualquer falha devolve os arquivos e o `.env` e reinicia de novo.
+3. Desfazer: `bash rollback_groq.sh`.
+- Recusa sem tocar em nada se: uma âncora não aparece exatamente 1 vez (o arquivo de produção difere do esperado), o Groq já foi aplicado, o `.env` já define essas chaves, o container não está healthy ou a chave não começa com `gsk_`.
+- Instâncias liberadas por padrão: `MARQUESCOLOR,b2b-sales` (mude com `STT_INSTANCES_ALVO=... bash aplicar_na_vps_groq.sh`).
+- `harness_groq.sh` testa a LÓGICA (18 casos, docker de mentira, usando os arquivos reais do commit anterior). **Não** prova o comportamento do Docker real nem da Groq real: a primeira execução real é o teste, e ela se desfaz sozinha se falhar.
+- Limite conhecido: o `.env` dentro do contêiner e os arquivos copiados se perdem se o contêiner for recriado (mesma limitação G03 das outras mudanças).
