@@ -293,3 +293,24 @@ async def test_audio_de_instancia_na_lista_e_transcrito(provider, stt, monkeypat
     inbound.instance = "darioos"
     assert await _transcribe_audio(None, provider, inbound) == "quero duas latas de tinta branca"
     assert len(stt.calls) == 1
+
+
+async def test_instancia_extra_liberada_so_quando_listada(provider, monkeypatch):
+    assert await provider.download_media(KEY, instance="b2b-sales") is None            # padrão: fora
+    assert provider.transport.calls == []
+    monkeypatch.setattr(get_settings(), "evolution_media_extra_instances", " b2b-sales , outra ")
+    assert await provider.download_media(KEY, instance="b2b-sales") == (AUDIO, "audio/ogg")
+    assert provider.transport.calls[-1][1].endswith("/getBase64FromMediaMessage/b2b-sales")
+    assert await provider.download_media(KEY, instance="azusa-church") is None          # só a listada
+    assert await provider.download_media(KEY, instance="darioos") == (AUDIO, "audio/ogg")  # as duas originais continuam valendo
+
+
+async def test_audio_b2b_vira_texto_do_agente_quando_liberado(provider, stt, monkeypatch):
+    from webhooks.router import _transcribe_audio
+
+    inbound = provider.parse_webhook(_payload())
+    inbound.instance = "b2b-sales"
+    assert await _transcribe_audio(None, provider, inbound) == ""                       # antes da liberação: ignorado
+    assert stt.calls == []
+    monkeypatch.setattr(get_settings(), "evolution_media_extra_instances", "b2b-sales")
+    assert await _transcribe_audio(None, provider, inbound) == "quero duas latas de tinta branca"

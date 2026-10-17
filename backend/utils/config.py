@@ -232,6 +232,10 @@ class Settings(BaseSettings):
     # background wiring has been confirmed. See webhooks/router.py's
     # defer_audio computation.
     stt_background_enabled: bool = False
+    # Instancias ALEM da loja e da pessoal cujo audio recebido o backend pode baixar para transcrever (nomes separados por virgula,
+    # ex.: "b2b-sales"). Vazio = so as duas instancias configuradas (comportamento anterior). Liberar uma instancia aqui faz o agente
+    # dela passar a entender e responder audios como responde texto.
+    evolution_media_extra_instances: str = ""
     # Instancias WhatsApp cujo audio PODE ser enviado ao servico de transcricao (nomes separados por virgula, ex.:
     # "MARQUESCOLOR,b2b-sales"). Vazio = todas (comportamento anterior). O audio sai do servidor, entao a lista existe para manter de
     # fora conversas pessoais (familia, igreja) sem depender de cada fluxo lembrar disso.

@@ -164,7 +164,8 @@ class EvolutionProvider(WhatsAppProvider):
         base64); callers treat that exactly like "this provider doesn't support media download". Only the two configured
         instances may be addressed. This is a read-style call, but it goes through the same single-attempt transport as the
         sends: an ambiguous failure is reported as None and the durable job retry decides what to do next."""
-        if instance and instance not in {self._instance, self._personal_instance}:
+        extra = {name.strip() for name in get_settings().evolution_media_extra_instances.split(",") if name.strip()}
+        if instance and instance not in {self._instance, self._personal_instance} | extra:
             return None
         try:
             result = await self._post(
