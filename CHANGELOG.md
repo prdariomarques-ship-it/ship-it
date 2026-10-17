@@ -22,6 +22,10 @@ técnico não-bloqueante.
   (Gmail, Calendar, Contacts, Drive) compartilham a chave de assinatura e
   eram aceitos por `decode_access_token` como acesso completo por 10 minutos;
   agora são recusados.
+- **Event Bus: fan-out Redis nunca se recuperava.** Após a primeira falha,
+  `_redis_available` ficava `False` até reiniciar a API. O bus agora tenta de
+  novo depois de `EVENTS_REDIS_RETRY_SECONDS` (padrão 30) com um cliente novo,
+  sem uma tentativa de conexão por publish enquanto o Redis está fora.
 
 ## [1.4.0] - 2026-07-21
 

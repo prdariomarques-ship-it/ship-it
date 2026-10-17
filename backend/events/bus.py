@@ -9,7 +9,8 @@ Two audiences, one `publish` call:
   subscribes).
 - **Redis pub/sub** (best-effort) fans the same event out to other processes
   (a future dedicated worker, the AI Console, a metrics sidecar). It degrades
-  silently if Redis is unavailable — the in-process path never depends on it.
+  silently if Redis is unavailable — the in-process path never depends on it —
+  and is probed again after a cooldown, so it recovers without a restart.
 
 This does not replace the durable job queue (`jobs/`): the bus is for
 notifying interested parties about something that already happened
@@ -18,6 +19,7 @@ survive a crash or be retried belongs in a job, not an event handler.
 """
 
 import json
+import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -60,6 +62,8 @@ class EventBus:
         self._wildcard_handlers: dict[str, list[EventHandler]] = defaultdict(list)
         self._redis: aioredis.Redis | None = None
         self._redis_available = True
+        # Monotonic deadline before which a failed Redis is not probed again.
+        self._redis_retry_at = 0.0
 
     def subscribe(self, event_name: str, handler: EventHandler) -> None:
         """Register a handler for an exact event name or a `"domain.*"` wildcard."""
@@ -94,7 +98,7 @@ class EventBus:
         return handlers
 
     async def _publish_to_redis(self, event: Event) -> None:
-        if not self._redis_available:
+        if not self._redis_available and time.monotonic() < self._redis_retry_at:
             return
         try:
             if self._redis is None:
@@ -103,8 +107,27 @@ class EventBus:
                 )
             await self._redis.publish(self._settings.events_channel, event.to_json())
         except Exception:  # noqa: BLE001 - the bus must survive Redis being down
-            logger.warning("Redis unavailable; events stay in-process only")
-            self._redis_available = False
+            if self._redis_available:
+                logger.warning("Redis unavailable; events stay in-process only")
+            self._mark_redis_down()
+        else:
+            if not self._redis_available:
+                logger.info("Redis fan-out recovered")
+            self._redis_available = True
+
+    def _mark_redis_down(self) -> None:
+        """Degrade to in-process only, then probe again after a cooldown.
+
+        The client is dropped so the next probe builds a fresh connection
+        instead of reusing a broken one. A permanent flip (the previous
+        behaviour) silently disabled cross-process fan-out until the API
+        restarted, which a Redis restart or network blip made routine.
+        """
+        self._redis = None
+        self._redis_available = False
+        self._redis_retry_at = (
+            time.monotonic() + self._settings.events_redis_retry_seconds
+        )
 
 
 event_bus = EventBus()

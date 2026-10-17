@@ -195,6 +195,8 @@ class Settings(BaseSettings):
 
     # Event Bus (best-effort Redis fan-out; in-process delivery never depends on it)
     events_channel: str = "darioos:events"
+    # After a Redis failure the bus stays in-process for this long before probing again.
+    events_redis_retry_seconds: int = 30
 
     # Context Observation Engine (observation/) — keeps a CurrentContext
     # snapshot fresh via a self-rescheduling job (jobs/), not a new timer

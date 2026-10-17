@@ -1,5 +1,6 @@
 """Event Bus: in-process pub/sub, wildcard subscriptions, handler isolation."""
 
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -151,3 +152,60 @@ async def test_publish_fans_out_to_redis_when_available(bus):
     channel, payload = mock_redis.publish.call_args.args
     assert channel == bus._settings.events_channel
     assert event.name == "agent.replied"
+
+
+@pytest.mark.asyncio
+async def test_redis_fanout_recovers_after_cooldown(bus):
+    """A transient Redis outage must not disable fan-out until restart."""
+    down = patch("events.bus.aioredis.from_url", side_effect=ConnectionError("down"))
+    with down:
+        await bus.publish("a.b", {})
+    assert bus._redis_available is False
+
+    # Still inside the cooldown: no probe, even though Redis is back.
+    mock_redis = AsyncMock()
+    with patch("events.bus.aioredis.from_url", return_value=mock_redis) as factory:
+        await bus.publish("a.b", {})
+        factory.assert_not_called()
+
+        bus._redis_retry_at = time.monotonic() - 1  # cooldown elapsed
+        await bus.publish("a.b", {})
+
+    mock_redis.publish.assert_awaited_once()
+    assert bus._redis_available is True
+
+
+@pytest.mark.asyncio
+async def test_redis_publish_failure_drops_the_client_and_reconnects(bus):
+    """A client whose connection broke mid-life is rebuilt, not reused."""
+    broken = AsyncMock()
+    broken.publish.side_effect = ConnectionError("reset")
+    healthy = AsyncMock()
+
+    with patch("events.bus.aioredis.from_url", side_effect=[broken, healthy]):
+        await bus.publish("a.b", {})
+        assert bus._redis is None and bus._redis_available is False
+
+        bus._redis_retry_at = time.monotonic() - 1
+        await bus.publish("a.b", {})
+
+    healthy.publish.assert_awaited_once()
+    assert bus._redis_available is True
+
+
+@pytest.mark.asyncio
+async def test_redis_still_down_after_cooldown_backs_off_again(bus):
+    attempts = 0
+
+    def _from_url(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise ConnectionError("down")
+
+    with patch("events.bus.aioredis.from_url", side_effect=_from_url):
+        await bus.publish("a.b", {})
+        bus._redis_retry_at = time.monotonic() - 1
+        await bus.publish("a.b", {})
+        await bus.publish("a.b", {})  # new cooldown is running
+
+    assert attempts == 2
