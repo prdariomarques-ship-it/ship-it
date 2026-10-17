@@ -120,6 +120,8 @@ $env:VOICE_CHATTERBOX_CFG_WEIGHT = "0.3"; $env:VOICE_CHATTERBOX_EXAGGERATION = "
 .\.venv-ptbr\Scripts\python.exe -m uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8765
 ```
 
+As amostras e a medição (`scripts.make_samples`, `scripts.measure`) usam `psutil`, que não está em nenhum `requirements`: `.\.venv-ptbr\Scripts\python.exe -m pip install psutil`.
+
 O motor recusa carregar se já houver outro pacote `chatterbox` na memória (o do PyPI) ou se `VOICE_MODEL_REVISION` estiver vazio ou passar de
 64 caracteres (limite da coluna `store_voice_sends.model_revision`). `chatterbox_pt_br_pack` (config antiga) não é usado por nenhum motor.
 Cobertura: duplo do pacote do Space (sem pesos reais); a validação real é a escuta.
