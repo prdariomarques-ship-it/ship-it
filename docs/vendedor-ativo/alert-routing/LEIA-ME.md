@@ -1,3 +1,4 @@
+SUPERSEDED: este pacote foi substituído por docs/vendedor-ativo/owner-guard (o ponto de edição daqui não existe no handlers.py de produção).
 # Alertas ao dono por outra linha quando a da loja cai
 
 **Por quê:** os alertas do Gêmeo ("Mensagem sensível... não foi respondida") e do anti-loop saem pela linha PADRÃO (a loja), por desenho. Na queda de 16/10 (15:50–madrugada), dois deles (Claudio Lasakosvitsch às 17:14 e "❤️" às 19:59, horário de Brasília) não chegaram ao dono.

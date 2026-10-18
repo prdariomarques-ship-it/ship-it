@@ -131,3 +131,22 @@ def alert_instance(settings, *, max_age_seconds: float = 600.0, state: LineWatch
     if state.last_states.get(default, OPEN) == OPEN:
         return None
     return pick_sender(state.last_states, default, settings.evolution_personal_instance)
+
+
+def _digits(phone: str) -> str:
+    return "".join(ch for ch in str(phone or "") if ch.isdigit())
+
+
+def route_owner_alert(to: str, instance: str | None, settings=None) -> str | None:
+    """Envio SEM linha explicita para o telefone do dono (alerta do Gemeo, anti-loop, vigia): se a linha padrao (loja) esta fora do ar,
+    devolve outra no ar; em qualquer outro caso devolve `instance` como veio. Compara os ultimos 11 digitos do telefone."""
+    if instance:
+        return instance
+    if settings is None:
+        from utils.config import get_settings
+
+        settings = get_settings()
+    owner = _digits(getattr(settings, "line_watch_alert_phone", "") or getattr(settings, "whatsapp_owner_alert_phone", ""))
+    if len(owner) < 10 or _digits(to)[-11:] != owner[-11:]:
+        return None
+    return alert_instance(settings)
