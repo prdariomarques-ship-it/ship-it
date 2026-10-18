@@ -88,11 +88,11 @@ async def world(db_engine, tmp_path, monkeypatch):
     w.send, w.process, w.source = ns["send_whatsapp_text"], ns["process_inbound_whatsapp_message"], source
 
     # --- LLM e módulos de produção que o repositório não tem
-    async def fake_run(self, **kwargs):
+    async def fake_run(**kwargs):
         w.llm_calls.append(kwargs.get("agent_name"))
         return types.SimpleNamespace(reply="Resposta do agente.")
     from orchestrator.service import ai_orchestrator
-    monkeypatch.setattr(type(ai_orchestrator), "run", fake_run)
+    monkeypatch.setattr(ai_orchestrator, "run", fake_run)
     hist = types.ModuleType("services.extra_agent_history")
     hist.build_extra_agent_history = lambda recent, message: []
     monkeypatch.setitem(sys.modules, "services.extra_agent_history", hist)
@@ -187,9 +187,9 @@ async def test_personal_instance_path_is_untouched(world, monkeypatch):
     await _owner_turn(world, instance="Dario")
     from orchestrator import pipeline
 
-    async def fake_process(self, **kwargs):
+    async def fake_process(**kwargs):
         return types.SimpleNamespace(reply="resposta da pipeline")
-    monkeypatch.setattr(type(pipeline.cognitive_pipeline), "process", fake_process)
+    monkeypatch.setattr(pipeline.cognitive_pipeline, "process", fake_process)
     await _inbound(world, "Dario")
     ((_, payload),) = world.enqueued
     assert payload["content"] == "resposta da pipeline" and "_owner_guard" not in payload and await _guard_logs(world) == []
