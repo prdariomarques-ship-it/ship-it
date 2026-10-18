@@ -22,7 +22,7 @@ report() {  # nome ; exit ; antes|mudou ; extras esperados ; reinícios
   echo "[$ok] $1: $ex arquivos=$3 extras=$xs reinicios=$rs temporarios=$tmp"; [ "$ok" = FALHOU ] && tail -6 $T/out.txt | sed 's/^/        /'
 }
 new_case; ORIG=$(state); runapply;                                                  report "1 sucesso" 0 mudou 2 1
-grep -q 'default=180' $T/fake/root/app/owner_activity_windows.txt && grep -q '_oa.send_guard' $T/fake/root/app/jobs/handlers.py && echo "[OK] 1b janelas criadas e handlers editados" || echo "[FALHOU] 1b"
+grep -q 'default=360' $T/fake/root/app/owner_activity_windows.txt && grep -q '_oa.send_guard' $T/fake/root/app/jobs/handlers.py && echo "[OK] 1b janelas criadas e handlers editados" || echo "[FALHOU] 1b"
 new_case; printf 'b2b=60\n' > $T/fake/root/app/owner_activity_windows.txt; ORIG=$(state); runapply
 [ "$(cat $T/fake/root/app/owner_activity_windows.txt)" = "b2b=60" ] && grep -q 'exit=0' $T/out.txt && echo "[OK] 2 arquivo de janelas já existente NÃO é sobrescrito" || echo "[FALHOU] 2"
 new_case; ORIG=$(state); touch $T/fake/smoke_fail $T/fake/healthy_again_after_second_restart; runapply; report "3 verificação funcional falha -> restaura, remove módulo e janelas, reinicia" 1 antes 0 2

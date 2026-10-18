@@ -10,7 +10,7 @@ Atencao: respostas automaticas do WhatsApp Business (ausencia/saudacao) tambem s
 Duas verificacoes: `pre_check` (antes de gerar a resposta: evita o custo e os efeitos colaterais) e `send_guard` (imediatamente ANTES de
 transmitir, pega o dono que entrou durante a geracao). Ao suprimir registra o evento `suppressed_owner_active` com agente, contato,
 id da mensagem do dono, janela e fase. Janela por agente em /app/owner_activity_windows.txt (lido a cada decisao; sem reiniciar):
-linhas `b2b=180`, `azusa=180`, `store=180`, `default=180`, em segundos; 0 desliga para aquele agente; `#` comenta.
+linhas `b2b=360`, `azusa=360`, `store=360`, `default=360`, em segundos; 0 desliga para aquele agente; `#` comenta.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-DEFAULT_WINDOW_SECONDS = 180
+DEFAULT_WINDOW_SECONDS = 360
 WINDOWS_FILE = os.environ.get("OWNER_ACTIVITY_FILE", "/app/owner_activity_windows.txt")
 _ALIASES = {"azusa_intake": "azusa", "b2b-sales": "b2b", "azusa-church": "azusa", "loja": "store"}
 
@@ -31,7 +31,7 @@ class OwnerActivity:
 
 
 def load_windows(path: str | None = None) -> dict[str, int]:
-    """{'default': 180, 'b2b': 120, ...}; arquivo ausente/ilegivel = {} (tudo no padrao). Linhas invalidas sao ignoradas."""
+    """{'default': 360, 'b2b': 120, ...}; arquivo ausente/ilegivel = {} (tudo no padrao). Linhas invalidas sao ignoradas."""
     out: dict[str, int] = {}
     try:
         with open(path or WINDOWS_FILE, encoding="utf-8") as handle:

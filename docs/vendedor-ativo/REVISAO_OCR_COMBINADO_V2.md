@@ -15,7 +15,7 @@ ZIP recebido: sha256 `0ba5ff41eba09c6a21367461c9a2815d1d87fc7cd5f0e9a5349734afed
 - APIs que o código usa existem no repositório com a assinatura esperada: `UserRepository.get_first_admin`, `MessageRepository.get`, `agent_run_timeout_seconds`, `LLMResult.tool_calls`, `MessageMediaType` com valores minúsculos.
 
 ## Pontos de atenção
-1. **`ChatRequest` ganhou `extra="forbid"`**: qualquer cliente que hoje mande campo extra para `/api/chat` passa a receber 422. O frontend deste repositório não chama `/chat`; é preciso conferir outros clientes antes de aplicar.
+1. **[RESOLVIDO em `ocr-v2-ajustes/`, não aplicado]** **`ChatRequest` ganhou `extra="forbid"`**: qualquer cliente que hoje mande campo extra para `/api/chat` passa a receber 422. O frontend deste repositório não chama `/chat`; Ajuste: `ChatRequest` volta a ignorar extras e recusa só `ocr_source_message_id`/`expected_instance` (422), com 4 testes.
 2. **Ruído de fim de linha**: `chat/*` aparece reescrito por inteiro (CRLF→LF). Em `api/routes.py` (15 linhas) e `api/contact_workspace.py` (3 linhas) o candidato mistura LF e CRLF. Só whitespace, mas dificulta revisar e aplicar.
 3. Inconsistência de números no próprio pacote: o README cita 362 testes de frontend e 41 de backend; `summary.json` e o checklist citam 368 e 43. Reproduzi 368.
 4. A explicação envia o OCR e a legenda ao provedor de IA configurado (há aviso antes do clique). Anexos enviados pelo próprio dono (`fromMe`) ficam fora, por desenho.

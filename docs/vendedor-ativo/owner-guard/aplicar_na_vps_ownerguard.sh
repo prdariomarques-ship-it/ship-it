@@ -11,7 +11,7 @@ OLD_SVC=f6b6d5e1a6d0c8bea50293d5b24530ccb5edcd4861b1dce0c618d4d5ccb1a79c
 OLD_JOB=e9ccfa2659bc350d3f7e24f80b61ea782b741f70024daeeec95bafaed121674e
 NEW_SVC=ccf2203bb641fa849c35c095f3d32a2e2590a900bc7083edf012fdbc5479dd89
 NEW_JOB=21ac90687208fec800ea9ba9135bf908a940a57d12a11e4eb5f24e8cc1e5e07a
-OA_SHA=c9e89240af47e11f7964a2352eb86c50baf48d21c2a2393d15e0719678db4505
+OA_SHA=63285e777d9a68c54c4b1bd392aa487150d638fe17254a2f2fbc9bef1dfdc5b9
 ESPERA_HEALTH=${ESPERA_HEALTH:-90}
 
 die() { echo "ABORTAR: $*"; exit 1; }
@@ -65,7 +65,7 @@ echo "OK"
 echo "== 3. troca (cópias de segurança dentro do container)"
 if ! docker exec "$BK" sh -c "set -e; cp -p $SVC $SVC.og_bak; cp -p $JOB $JOB.og_bak; cp -p $HND $HND.og_bak; mv $SVC.og_new $SVC; mv $JOB.og_new $JOB; mv $HND.og_new $HND; mv $OAM.og_new $OAM"; then back_out "a troca falhou"; fi
 if [ "$WIN_CRIADO" = 1 ]; then
-  printf '# Janela (segundos) em que o dono "está ativo" depois de escrever/enviar mídia: o agente fica calado. 0 desliga. Lido a cada decisão; não precisa reiniciar.\ndefault=180\nb2b=180\nazusa=180\nstore=180\n' | docker exec -i "$BK" sh -c "cat > $WIN" || back_out "não consegui criar $WIN"
+  printf '# Janela (segundos) em que o dono "está ativo" depois de escrever/enviar mídia: o agente fica calado. 0 desliga. Lido a cada decisão; não precisa reiniciar.\ndefault=360\nb2b=360\nazusa=360\nstore=360\n' | docker exec -i "$BK" sh -c "cat > $WIN" || back_out "não consegui criar $WIN"
 fi
 expect "handlers final" "$(sha_live $HND)" "$(sha_file handlers.py.novo)"
 echo "OK"

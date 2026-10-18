@@ -142,7 +142,7 @@ async def test_extra_agents_stay_silent_while_the_owner_is_active_and_log_the_ev
     assert world.llm_calls == [] and world.enqueued == []                                         # nem gerou nem enfileirou
     (event,) = await _guard_logs(world)
     assert event["event"] == "suppressed_owner_active" and event["agent"] == agent and event["phase"] == "pre"
-    assert event["owner_message_id"] == owner_msg and event["window_seconds"] == 180 and event["contact_id"] == world.contact_id
+    assert event["owner_message_id"] == owner_msg and event["window_seconds"] == 360 and event["contact_id"] == world.contact_id
 
 
 @pytest.mark.parametrize("instance", ["b2b-sales", "azusa-church"])
