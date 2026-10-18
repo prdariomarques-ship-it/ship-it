@@ -8,3 +8,5 @@ pydantic_core==2.50.1
 anyio==4.15.1
 h11==0.16.0
 av==18.1.0
+httpx==0.28.1  # cliente do motor elevenlabs
+httpcore==1.0.9

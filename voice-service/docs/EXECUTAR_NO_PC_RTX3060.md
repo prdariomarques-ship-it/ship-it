@@ -143,3 +143,22 @@ Para voz "em câmera lenta" ou abafada, o serviço pode tratar o áudio GERADO (
 
 Ponto de partida das amostras P2/P3_suave: `VOICE_POST_COMPACT_PAUSES=true`, `VOICE_POST_TEMPO=1.12`, `VOICE_POST_BRIGHTNESS_DB=3`.
 Falha do filtro devolve `502 postprocess_failed` (nunca áudio cru sem aviso). Reinicie o serviço depois de mudar as variáveis.
+
+## Motor ElevenLabs (nuvem, opcional)
+
+Troca só o gerador: `VOICE_ENGINE=elevenlabs`. A voz é um `voice_id` clonado na conta ElevenLabs (Instant Voice Clone, pela interface web, com
+gravações do titular); a referência local do perfil não é usada, mas o perfil (consentimento, token por agente) continua exigido.
+O texto de cada resposta é enviado à ElevenLabs. A qualidade do clone depende da gravação enviada (sorriso, ritmo natural, sala silenciosa).
+
+| Variável | Padrão | Nota |
+|---|---|---|
+| `VOICE_ELEVENLABS_API_KEY_FILE` | — | arquivo com a chave (ex.: `C:\voz\elevenlabs_key.txt`); preferido |
+| `VOICE_ELEVENLABS_API_KEY` | — | alternativa (secret store); nunca em chat/log |
+| `VOICE_ELEVENLABS_VOICE_ID` | — | obrigatório |
+| `VOICE_ELEVENLABS_MODEL_ID` | `eleven_multilingual_v2` | `eleven_flash_v2_5`/`eleven_turbo_v2_5` também enviam `language_code` |
+| `VOICE_ELEVENLABS_STABILITY` / `_SIMILARITY` / `_STYLE` | 0.4 / 0.8 / 0.3 | stability menor = mais expressivo |
+| `VOICE_ELEVENLABS_SPEED` | 1.0 | 0.7 a 1.2 |
+| `VOICE_ELEVENLABS_TIMEOUT_SECONDS` / `_MAX_RETRIES` | 60 / 2 | 429 e 5xx são repetidos; 401/402/403/422 não |
+
+Parâmetros da API escritos a partir do conhecimento do fornecedor e testados só com transporte simulado; a primeira chamada real valida.
+Pós-processamento (`VOICE_POST_*`) continua disponível, mas costuma ser desnecessário neste motor.

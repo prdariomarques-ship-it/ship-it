@@ -53,6 +53,9 @@ def build_engine(settings) -> Engine:
     if name == "chatterbox_ptbr":
         from app.engines.chatterbox_ptbr_engine import ChatterboxPtBrEngine
         return ChatterboxPtBrEngine(settings)
+    if name == "elevenlabs":
+        from app.engines.elevenlabs_engine import ElevenLabsEngine
+        return ElevenLabsEngine(settings)
     if name == "qwen3tts":
         from app.engines.qwen3_engine import Qwen3Engine
         return Qwen3Engine(settings)

@@ -5,7 +5,7 @@ O serviço escuta em 127.0.0.1 por padrão e exige token. Nada aqui tem valor de
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,7 +21,7 @@ class VoiceSettings(BaseSettings):
     tokens: str = ""
 
     # --- motor ----------------------------------------------------------------------------------------------
-    # chatterbox | chatterbox_ptbr | qwen3tts | fake (fake só com allow_fake_engine=true; uso de teste)
+    # chatterbox | chatterbox_ptbr | elevenlabs | qwen3tts | fake (fake só com allow_fake_engine=true; uso de teste)
     engine: str = "chatterbox"
     allow_fake_engine: bool = False
     device: str = "cpu"  # cpu | cuda | cuda:0 ...
@@ -38,6 +38,42 @@ class VoiceSettings(BaseSettings):
     # às cegas (17/10/2026, variante C) é cfg=0.3, exaggeration=0.7, temperature=0.8 -- ver docs/EXECUTAR_NO_PC_RTX3060.md.
     ptbr_space_dir: Path | None = None  # pasta do Space baixado (contém chatterbox/src/chatterbox/tts.py)
     chatterbox_temperature: float = 0.8
+
+    # Motor `elevenlabs` (nuvem; o texto sai da máquina). A voz é um voice_id clonado na conta ElevenLabs; a referência local não é usada.
+    # Chave: prefira o ARQUIVO (fora do repositório); a variável direta existe para ambientes com secret store.
+    elevenlabs_api_key: SecretStr | None = None
+    elevenlabs_api_key_file: Path | None = None
+    elevenlabs_voice_id: str = ""
+    elevenlabs_model_id: str = "eleven_multilingual_v2"
+    elevenlabs_base_url: str = "https://api.elevenlabs.io"
+    elevenlabs_stability: float = 0.4     # menor = mais expressivo/variável; maior = mais monótono
+    elevenlabs_similarity: float = 0.8
+    elevenlabs_style: float = 0.3         # exagero de estilo; custa latência em alguns modelos
+    elevenlabs_speaker_boost: bool = True
+    elevenlabs_speed: float = 1.0         # 0.7 a 1.2
+    elevenlabs_timeout_seconds: float = 60.0
+    elevenlabs_max_retries: int = 2
+
+    @field_validator("elevenlabs_stability", "elevenlabs_similarity", "elevenlabs_style")
+    @classmethod
+    def _el_unit(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("parâmetros de voz ElevenLabs (stability/similarity/style) devem estar entre 0 e 1")
+        return v
+
+    @field_validator("elevenlabs_speed")
+    @classmethod
+    def _el_speed(cls, v: float) -> float:
+        if not 0.7 <= v <= 1.2:
+            raise ValueError("elevenlabs_speed deve estar entre 0.7 e 1.2")
+        return v
+
+    @field_validator("elevenlabs_max_retries")
+    @classmethod
+    def _el_retries(cls, v: int) -> int:
+        if not 0 <= v <= 5:
+            raise ValueError("elevenlabs_max_retries deve estar entre 0 e 5")
+        return v
 
     # --- limites --------------------------------------------------------------------------------------------
     max_text_chars: int = 350
