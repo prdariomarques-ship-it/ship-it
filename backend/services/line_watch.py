@@ -9,6 +9,7 @@ Se NENHUMA linha esta no ar (ou o Evolution nao responde), nao ha por onde avisa
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
@@ -32,10 +33,14 @@ class LineEvent:
 class LineWatchState:
     bad_checks: dict[str, int] = field(default_factory=dict)
     alerted: set[str] = field(default_factory=set)
+    last_states: dict[str, str] = field(default_factory=dict)   # ultimo estado conhecido de cada linha (ver alert_instance)
+    last_checked: float = 0.0
 
     def reset(self) -> None:
         self.bad_checks.clear()
         self.alerted.clear()
+        self.last_states.clear()
+        self.last_checked = 0.0
 
 
 line_watch_state = LineWatchState()
@@ -105,3 +110,24 @@ def message_for(event: LineEvent, interval_seconds: int) -> str:
     again = " (lembrete)" if event.kind == "still_down" else ""
     return (f"⚠️ A linha {event.instance} está FORA DO AR{again}: estado \"{event.state}\" há cerca de {minutes} min. "
             "Veja o aparelho (Aparelhos conectados) e o QR no painel do Evolution. Alerta automático, não responda.")
+
+
+def record_states(states: dict[str, str], state: LineWatchState = line_watch_state) -> None:
+    """Guarda o ultimo estado conhecido das linhas (so em memoria) para `alert_instance`."""
+    state.last_states = dict(states)
+    state.last_checked = time.time()
+
+
+def alert_instance(settings, *, max_age_seconds: float = 600.0, state: LineWatchState = line_watch_state) -> str | None:
+    """Linha por onde enviar um alerta ao dono quando a linha PADRAO (a da loja) esta fora do ar; None = manter o padrao.
+
+    Os alertas do Gemeo/anti-loop saem pela linha padrao por desenho (`jobs/handlers.py`); em 16/10/2026, com a loja caida, dois deles nao
+    chegaram ao dono. So troca de linha quando o vigia viu a padrao fora do ar ha menos de `max_age_seconds`; sem leitura recente
+    (vigia desligado, backend recem-reiniciado) o comportamento e o de sempre. Nunca faz chamada de rede: usa a ultima leitura do vigia.
+    """
+    default = settings.evolution_instance
+    if not state.last_states or time.time() - state.last_checked > max_age_seconds:
+        return None
+    if state.last_states.get(default, OPEN) == OPEN:
+        return None
+    return pick_sender(state.last_states, default, settings.evolution_personal_instance)

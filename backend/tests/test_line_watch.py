@@ -191,3 +191,25 @@ def test_default_watch_list_comes_from_the_configured_instances(settings, monkey
     monkeypatch.setattr(settings, "line_watch_instances", "")
     monkeypatch.setattr(settings, "evolution_instance", "MARQUESCOLOR")
     assert line_watch.watched_instances(settings) == ["MARQUESCOLOR", "Dario"]
+
+
+# ---------------------------------------------------------------- alerta do Gêmeo por outra linha quando a da loja cai
+def test_alert_instance_switches_only_when_the_default_line_is_known_down(settings, monkeypatch):
+    monkeypatch.setattr(settings, "evolution_instance", "MARQUESCOLOR")
+    assert line_watch.alert_instance(settings) is None                                   # sem leitura do vigia: comportamento de sempre
+    line_watch.record_states({"MARQUESCOLOR": "open", "b2b-sales": "open"})
+    assert line_watch.alert_instance(settings) is None                                   # loja no ar: segue pela loja
+    line_watch.record_states({"MARQUESCOLOR": "connecting", "b2b-sales": "open", "Dario": "open"})
+    assert line_watch.alert_instance(settings) == "b2b-sales"                            # loja fora: outra linha, não a pessoal
+    line_watch.record_states({"MARQUESCOLOR": "connecting", "b2b-sales": "close"})
+    assert line_watch.alert_instance(settings) is None                                   # nenhuma outra no ar: mantém o padrão
+    line_watch.record_states({"MARQUESCOLOR": "connecting", "b2b-sales": "open"})
+    line_watch.line_watch_state.last_checked -= 3600
+    assert line_watch.alert_instance(settings) is None                                   # leitura velha demais: não confia
+
+
+async def test_tick_records_the_states_it_read(session_factory, settings, monkeypatch):
+    _patch_states(monkeypatch, {"MARQUESCOLOR": "close", "b2b-sales": "open", "azusa-church": "open", "Dario": "open"})
+    async with session_factory() as db:
+        await line_watch_tick(db, {})
+    assert line_watch.line_watch_state.last_states["MARQUESCOLOR"] == "close"

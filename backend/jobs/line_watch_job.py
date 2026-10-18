@@ -23,6 +23,7 @@ async def _run_round(db: AsyncSession, settings, jobs: JobService) -> None:
     if not instances:
         return
     states = await line_watch.fetch_states(instances, base_url=settings.evolution_base_url, api_key=settings.evolution_api_key)
+    line_watch.record_states(states)
     events = await line_watch.evaluate(states, confirm_checks=settings.line_watch_confirm_checks,
                                        repeat_minutes=settings.line_watch_repeat_minutes)
     phone = settings.line_watch_alert_phone or settings.whatsapp_owner_alert_phone

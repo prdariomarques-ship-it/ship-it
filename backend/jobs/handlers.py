@@ -177,6 +177,13 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     send_intent_id = None
     alert_contact_id = payload.get('_twin_alert_contact_id')
     alert_dedup_key = payload.get('_twin_alert_dedup_key')
+    if instance is None and alert_dedup_key:
+        # Alerta ao proprietario sem linha explicita: sai pela padrao (loja). Se o vigia viu a padrao fora do ar, sai por outra no ar
+        # (so o transporte muda; o escopo da reserva continua em _twin_alert_instance). Sem leitura recente do vigia: comportamento de sempre.
+        from services import line_watch
+        from utils.config import get_settings as _get_settings
+
+        instance = line_watch.alert_instance(_get_settings()) or None
     # Review fix (B): the alert's reservation SCOPE (set by decide_owner_alert
     # -> alert_claim when the alert was first decided) is a separate concern
     # from `instance` above, which only ever means "which Evolution gateway
