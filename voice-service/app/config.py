@@ -58,6 +58,25 @@ class VoiceSettings(BaseSettings):
     opus_bitrate: int = 28000
     target_peak_dbfs: float = -3.0  # só normaliza o pico do ÁUDIO GERADO (nunca a gravação de referência)
 
+    # --- pós-processamento do áudio gerado (tudo desligado por padrão; ver app/postprocess.py) ---------------
+    post_compact_pauses: bool = False
+    post_tempo: float = 1.0          # 1.0 = sem alteração; 1.12 = 12% mais rápido, mesmo tom
+    post_brightness_db: float = 0.0  # 0 = sem alteração; 3 = brilho leve; 6 é forte (chia)
+
+    @field_validator("post_tempo")
+    @classmethod
+    def _post_tempo(cls, v: float) -> float:
+        if not 0.8 <= v <= 1.5:
+            raise ValueError("post_tempo deve estar entre 0.8 e 1.5")
+        return v
+
+    @field_validator("post_brightness_db")
+    @classmethod
+    def _post_brightness(cls, v: float) -> float:
+        if not 0.0 <= v <= 6.0:
+            raise ValueError("post_brightness_db deve estar entre 0 e 6")
+        return v
+
     @field_validator("chatterbox_cfg_weight")
     @classmethod
     def _cfg(cls, v: float) -> float:

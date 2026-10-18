@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app import audio as audio_mod
 from app.engines.base import Engine, EngineError, EngineNotReady
+from app.postprocess import postprocess
 from app.profiles import ProfileError, VoiceProfile, load_profile
 from app.storage import AudioStore, StoredAudio
 
@@ -115,7 +116,12 @@ class SynthService:
         if seconds > self.s.max_audio_seconds:
             raise SynthError(422, "audio_too_long", f"áudio gerado acima de {self.s.max_audio_seconds:.0f} s")
         try:
-            data = audio_mod.encode_ogg_opus(result.samples, result.sample_rate, self.s.opus_bitrate, self.s.target_peak_dbfs)
+            try:
+                samples = postprocess(result.samples, result.sample_rate, compact=self.s.post_compact_pauses,
+                                      tempo=self.s.post_tempo, brightness_db=self.s.post_brightness_db)
+            except Exception as exc:  # noqa: BLE001 - filtro do PyAV ausente/rejeitado: falha visível, não áudio silenciosamente cru
+                raise SynthError(502, "postprocess_failed", f"{type(exc).__name__}: {exc}") from exc
+            data = audio_mod.encode_ogg_opus(samples, result.sample_rate, self.s.opus_bitrate, self.s.target_peak_dbfs)
             info = audio_mod.probe_ogg_opus(data)
         except audio_mod.AudioFormatError as exc:
             raise SynthError(502, "invalid_audio_format", str(exc)) from exc

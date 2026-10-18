@@ -129,3 +129,17 @@ Cobertura: duplo do pacote do Space (sem pesos reais); a validação real é a e
 **Disponibilidade:** o gerador roda na GPU do PC do titular. PC desligado ou fora da rede = o job `store.voice_reply` termina em
 `failed_before_send`; o cliente já recebeu a resposta por escrito, então só o áudio é perdido. A VPS não hospeda o gerador (RAM e swap
 insuficientes, sem GPU).
+
+## Pós-processamento opcional (pausas, ritmo, brilho)
+
+Para voz "em câmera lenta" ou abafada, o serviço pode tratar o áudio GERADO (nunca a referência) antes de codificar. Tudo vem **desligado**
+(`app/postprocess.py`); ligue por variável de ambiente e confira na escuta antes de usar:
+
+| Variável | Padrão | Efeito |
+|---|---|---|
+| `VOICE_POST_COMPACT_PAUSES` | `false` | pausas acima de 0,30 s ficam com 0,12 s de cada lado |
+| `VOICE_POST_TEMPO` | `1.0` | 0,8 a 1,5; `1.12` = 12% mais rápido, mesmo tom |
+| `VOICE_POST_BRIGHTNESS_DB` | `0` | 0 a 6; `3` = brilho leve (passa-alta 70 Hz + presença 3 kHz + agudos 4,5 kHz) |
+
+Ponto de partida das amostras P2/P3_suave: `VOICE_POST_COMPACT_PAUSES=true`, `VOICE_POST_TEMPO=1.12`, `VOICE_POST_BRIGHTNESS_DB=3`.
+Falha do filtro devolve `502 postprocess_failed` (nunca áudio cru sem aviso). Reinicie o serviço depois de mudar as variáveis.
