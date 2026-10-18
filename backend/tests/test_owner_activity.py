@@ -165,3 +165,23 @@ async def test_message_suppressed_during_pause_is_not_answered_later(sessions):
     async with sessions() as db:
         assert await oa.pre_check(db, "b2b", cid, 101, B2B, now=NOW) is False
     assert [l.payload["phase"] for l in await _logs(sessions)] == ["pre"]                          # só registra; nenhum job de retomada existe
+
+
+async def test_inbound_row_flagged_human_never_counts_as_owner(sessions):
+    cid = await _contact(sessions)
+    await _msg(sessions, cid, direction="INBOUND", human=True, seconds_ago=10)                     # entrada nunca é o dono, mesmo marcada
+    async with sessions() as db:
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW) is True
+
+
+async def test_window_zero_disables_in_every_layer(sessions, tmp_path, monkeypatch):
+    cid = await _contact(sessions)
+    await _msg(sessions, cid, seconds_ago=5)
+    path = tmp_path / "janelas.txt"
+    path.write_text("b2b=0\n", encoding="utf-8")
+    monkeypatch.setattr(oa, "WINDOWS_FILE", str(path))
+    async with sessions() as db:
+        assert await oa.find_owner_activity(db, cid, B2B, 0, NOW) is None                          # camada do banco
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW) is True                         # camada do agente
+        assert await oa.send_guard(db, oa.guard_payload("b2b", cid, 0), B2B, now=NOW) is True
+        assert await oa.pre_check(db, "azusa", cid, 0, B2B, now=NOW) is False                      # só o b2b foi desligado
