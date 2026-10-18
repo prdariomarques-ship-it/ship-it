@@ -135,3 +135,33 @@ async def test_row_without_provider_timestamp_uses_created_at_and_epoch_cannot_d
     row = type("R", (), {"direction": "outbound", "sent_by_human": True, "is_autopilot_reply": False, "id": 1, "media_type": "text",
                          "provider_timestamp": 1792330000, "created_at": NOW - timedelta(seconds=10)})()
     assert oa.latest_owner_activity([row], 180, NOW) is not None                                  # epoch ignorado, vale created_at
+
+
+@pytest.mark.parametrize("seconds_ago,suppressed", [(179, True), (180, True), (181, False)])
+async def test_window_boundary_is_inclusive_at_180s(sessions, seconds_ago, suppressed):
+    cid = await _contact(sessions)
+    await _msg(sessions, cid, seconds_ago=seconds_ago)
+    async with sessions() as db:
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW) is (not suppressed)
+
+
+async def test_pause_then_resume_follows_the_owner_clock_and_a_new_owner_message_restarts_it(sessions):
+    cid = await _contact(sessions)
+    await _msg(sessions, cid, seconds_ago=100)                                                    # dono falou aos T-100
+    async with sessions() as db:
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW) is False                       # pausado
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW + timedelta(seconds=79)) is False   # T+79 = 179 s depois
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW + timedelta(seconds=81)) is True     # 181 s: retoma
+    await _msg(sessions, cid, seconds_ago=-100)                                                   # dono volta a falar aos T+100
+    async with sessions() as db:
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW + timedelta(seconds=150)) is False   # pausa reiniciada
+        assert await oa.pre_check(db, "b2b", cid, 0, B2B, now=NOW + timedelta(seconds=281)) is True    # retoma de novo
+
+
+async def test_message_suppressed_during_pause_is_not_answered_later(sessions):
+    """Documenta o comportamento atual: a guarda só suprime; não reagenda. O cliente que escreveu durante a pausa fica sem resposta do agente."""
+    cid = await _contact(sessions)
+    await _msg(sessions, cid, seconds_ago=60)
+    async with sessions() as db:
+        assert await oa.pre_check(db, "b2b", cid, 101, B2B, now=NOW) is False
+    assert [l.payload["phase"] for l in await _logs(sessions)] == ["pre"]                          # só registra; nenhum job de retomada existe
