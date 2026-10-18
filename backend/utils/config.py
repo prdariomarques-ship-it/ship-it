@@ -232,6 +232,16 @@ class Settings(BaseSettings):
     # background wiring has been confirmed. See webhooks/router.py's
     # defer_audio computation.
     stt_background_enabled: bool = False
+    # Vigia das linhas do WhatsApp (services/line_watch.py): consulta o estado de cada instancia no Evolution a cada rodada e avisa o
+    # dono quando uma cair (estado diferente de "open"), por OUTRA linha que esteja no ar. Desligado por padrao.
+    line_watch_enabled: bool = False
+    # Instancias vigiadas, separadas por virgula. Vazio = a da loja e a pessoal configuradas.
+    line_watch_instances: str = ""
+    line_watch_interval_seconds: int = 120
+    line_watch_confirm_checks: int = 2          # rodadas seguidas fora do ar antes de avisar (evita alarme falso)
+    line_watch_repeat_minutes: int = 60         # lembrete enquanto a linha continuar fora
+    # Telefone (com DDI) que recebe o alerta; vazio = usa whatsapp_owner_alert_phone.
+    line_watch_alert_phone: str = ""
     # Instancias ALEM da loja e da pessoal cujo audio recebido o backend pode baixar para transcrever (nomes separados por virgula,
     # ex.: "b2b-sales"). Vazio = so as duas instancias configuradas (comportamento anterior). Liberar uma instancia aqui faz o agente
     # dela passar a entender e responder audios como responde texto.

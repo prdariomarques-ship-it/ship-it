@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 import jobs.handlers  # noqa: F401 - register the built-in job handlers
 import jobs.style_job  # noqa: F401 - register the darius.distill_style job handler
 import observation.scheduler  # noqa: F401 - register the observation.tick job handler
+import jobs.line_watch_job  # noqa: F401 - register the lines.watch job handler
 from admin.router import router as admin_router
 from agents.router import router as agents_router
 from database.session import async_session_factory
@@ -18,6 +19,7 @@ from observation.events import (
     register_event_subscribers as register_observation_event_subscribers,
 )
 from observation.scheduler import start as start_observation_scheduler
+from jobs.line_watch_job import start as start_line_watch
 from api.contact_workspace import router as contact_workspace_router
 from api.routes import (
     calendar_router,
@@ -123,6 +125,9 @@ async def lifespan(app: FastAPI):
         if settings.style_distill_enabled:
             async with async_session_factory() as session:
                 await start_style_distill(session)
+        if settings.line_watch_enabled:
+            async with async_session_factory() as session:
+                await start_line_watch(session)
     logger.info(
         "%s v%s started (%s)",
         settings.app_name,

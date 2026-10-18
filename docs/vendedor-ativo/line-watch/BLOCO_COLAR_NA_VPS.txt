@@ -1,0 +1,415 @@
+# Cole TUDO de uma vez na VPS (como root). Cria ~/line_watch com 5 arquivos e confere o hash de cada um.
+mkdir -p ~/line_watch && cd ~/line_watch
+cat > line_watch.py <<'LW_EOF_1'
+"""Vigia das linhas do WhatsApp: consulta `GET /instance/connectionState/<instancia>` no Evolution e decide quando avisar o dono.
+
+Motivo: em 16/10/2026 a linha da loja caiu (`device_removed`, estado `connecting`) e ficou ~12 h fora sem ninguem perceber; nenhuma regra do
+Prometheus cobria isso. Este modulo e ADITIVO: nao toca no provedor do WhatsApp nem no fluxo das mensagens. So le o estado e, quando
+preciso, enfileira um `whatsapp.send_text` para o dono por uma linha que esteja `open` (preferindo uma que nao seja a pessoal).
+
+Regras: so avisa depois de `confirm_checks` rodadas seguidas fora do ar; nao repete antes de `repeat_minutes`; avisa uma vez quando volta.
+Se NENHUMA linha esta no ar (ou o Evolution nao responde), nao ha por onde avisar: so registra no log.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from urllib.parse import quote
+
+import httpx
+
+from services.rate_limit import rate_limiter
+
+OPEN = "open"
+UNREACHABLE = "unreachable"
+
+
+@dataclass
+class LineEvent:
+    kind: str          # "down" | "still_down" | "recovered"
+    instance: str
+    state: str
+    checks_down: int = 0
+
+
+@dataclass
+class LineWatchState:
+    bad_checks: dict[str, int] = field(default_factory=dict)
+    alerted: set[str] = field(default_factory=set)
+
+    def reset(self) -> None:
+        self.bad_checks.clear()
+        self.alerted.clear()
+
+
+line_watch_state = LineWatchState()
+
+
+def watched_instances(settings) -> list[str]:
+    names = [n.strip() for n in settings.line_watch_instances.split(",") if n.strip()]
+    if not names:
+        names = [n for n in (settings.evolution_instance, settings.evolution_personal_instance) if n]
+    return list(dict.fromkeys(names))
+
+
+async def fetch_states(instances: list[str], *, base_url: str, api_key: str, timeout: float = 15.0,
+                       transport: httpx.AsyncBaseTransport | None = None) -> dict[str, str]:
+    """Estado de cada instancia segundo o Evolution; erro de rede/HTTP vira `unreachable` (nunca levanta)."""
+    states: dict[str, str] = {}
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+        for instance in instances:
+            try:
+                response = await client.get(f"{base_url.rstrip('/')}/instance/connectionState/{quote(instance, safe='')}",
+                                            headers={"apikey": api_key})
+                if response.status_code != 200:
+                    states[instance] = UNREACHABLE
+                    continue
+                state = (response.json().get("instance") or {}).get("state")
+                states[instance] = str(state) if state else UNREACHABLE
+            except (httpx.HTTPError, ValueError, AttributeError):
+                states[instance] = UNREACHABLE
+    return states
+
+
+async def evaluate(states: dict[str, str], *, confirm_checks: int, repeat_minutes: int,
+                   state: LineWatchState = line_watch_state) -> list[LineEvent]:
+    """Atualiza o estado em memoria e devolve os avisos devidos nesta rodada."""
+    events: list[LineEvent] = []
+    for instance, current in states.items():
+        if current == OPEN:
+            state.bad_checks[instance] = 0
+            if instance in state.alerted:
+                state.alerted.discard(instance)
+                events.append(LineEvent("recovered", instance, current))
+            continue
+        bad = state.bad_checks.get(instance, 0) + 1
+        state.bad_checks[instance] = bad
+        if bad < max(1, confirm_checks):
+            continue
+        # O limitador (Redis, com fallback local) segura repeticoes mesmo se o backend reiniciar no meio da queda.
+        allowed = await rate_limiter.is_allowed(f"line-watch:{instance}", limit=1, window_seconds=max(60, repeat_minutes * 60))
+        first = instance not in state.alerted
+        state.alerted.add(instance)
+        if allowed:
+            events.append(LineEvent("down" if first else "still_down", instance, current, bad))
+    return events
+
+
+def pick_sender(states: dict[str, str], down_instance: str, personal_instance: str = "") -> str | None:
+    """Uma linha no ar (diferente da que caiu), preferindo uma que NAO seja a pessoal do dono."""
+    open_lines = [i for i, s in states.items() if s == OPEN and i != down_instance]
+    others = [i for i in open_lines if i != personal_instance]
+    return (others or open_lines or [None])[0]
+
+
+def message_for(event: LineEvent, interval_seconds: int) -> str:
+    if event.kind == "recovered":
+        return f"✅ A linha {event.instance} voltou (open). Alerta automático, não responda."
+    minutes = max(1, round(event.checks_down * interval_seconds / 60))
+    again = " (lembrete)" if event.kind == "still_down" else ""
+    return (f"⚠️ A linha {event.instance} está FORA DO AR{again}: estado \"{event.state}\" há cerca de {minutes} min. "
+            "Veja o aparelho (Aparelhos conectados) e o QR no painel do Evolution. Alerta automático, não responda.")
+LW_EOF_1
+cat > line_watch_job.py <<'LW_EOF_2'
+"""Job `lines.watch`: vigia das linhas do WhatsApp, autorreagendavel (mesmo padrao de `observation/scheduler.py` e `jobs/style_job.py`).
+
+Cada rodada consulta o Evolution, decide os avisos (`services/line_watch.py`), enfileira `whatsapp.send_text` para o dono por uma linha
+no ar e se reagenda. A rodada NUNCA deixa a corrente morrer: qualquer erro vira log e o proximo job e criado mesmo assim.
+Desligado por padrao (`LINE_WATCH_ENABLED=false`): a semente `start` nem cria a corrente.
+"""
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from jobs.registry import job_handler
+from jobs.service import JobService
+from repositories.job import JobRepository
+from services import line_watch
+from services.audit import record_log
+from utils.config import get_settings
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
+JOB_NAME = "lines.watch"
+
+
+async def _run_round(db: AsyncSession, settings, jobs: JobService) -> None:
+    instances = line_watch.watched_instances(settings)
+    if not instances:
+        return
+    states = await line_watch.fetch_states(instances, base_url=settings.evolution_base_url, api_key=settings.evolution_api_key)
+    events = await line_watch.evaluate(states, confirm_checks=settings.line_watch_confirm_checks,
+                                       repeat_minutes=settings.line_watch_repeat_minutes)
+    phone = settings.line_watch_alert_phone or settings.whatsapp_owner_alert_phone
+    for event in events:
+        text = line_watch.message_for(event, settings.line_watch_interval_seconds)
+        sender = line_watch.pick_sender(states, event.instance, settings.evolution_personal_instance)
+        sent = bool(phone and sender)
+        await record_log(
+            db, source="line_watch", level="info" if event.kind == "recovered" else "error",
+            message=text, payload={"instance": event.instance, "state": event.state, "kind": event.kind,
+                                   "sent_via": sender if sent else None, "no_phone": not phone, "no_open_line": sender is None},
+        )
+        if sent:
+            await jobs.enqueue("whatsapp.send_text", {"to": phone, "content": text, "instance": sender})
+
+
+@job_handler(JOB_NAME)
+async def line_watch_tick(db: AsyncSession, payload: dict) -> None:
+    settings = get_settings()
+    jobs = JobService(db)
+    try:
+        await _run_round(db, settings, jobs)
+    except Exception:  # noqa: BLE001 - a corrente nao pode morrer por um erro numa rodada
+        logger.exception("line_watch: erro na rodada; segue para a proxima")
+    await jobs.enqueue(JOB_NAME, delay_seconds=settings.line_watch_interval_seconds)
+
+
+async def start(db: AsyncSession) -> None:
+    """Semeia a primeira rodada. Idempotente: nao cria uma segunda corrente."""
+    if not get_settings().line_watch_enabled:
+        return
+    if await JobRepository(db).pending_by_name(JOB_NAME) is not None:
+        return
+    await JobService(db).enqueue(JOB_NAME, delay_seconds=0)
+LW_EOF_2
+cat > aplicar_linewatch.py <<'LW_EOF_3'
+#!/usr/bin/env python3
+"""Gera config.py.novo e main.py.novo (do container) para o vigia de linhas, com EDIÇÕES ANCORADAS e padrões de produção.
+
+Uso:  LW_INSTANCES="a,b" LW_PHONE="5511..." python3 aplicar_linewatch.py PASTA   (PASTA tem config.py.lido e main.py.lido)
+Aborta sem gravar NADA se uma âncora não aparecer exatamente 1 vez ou se já estiver aplicado.
+Em produção o vigia nasce LIGADO (line_watch_enabled=True) com as instâncias e o telefone informados; no repositório o padrão é desligado.
+Só o import do job entra no main.py (registra o handler); a primeira rodada é semeada pelo script de aplicação.
+"""
+import os
+import sys
+from pathlib import Path
+
+CONFIG_ANCHOR = "    stt_background_enabled: bool = False\n"
+CONFIG_ADD = '''    # Vigia das linhas do WhatsApp (services/line_watch.py): consulta o estado de cada instancia no Evolution a cada rodada e avisa o
+    # dono quando uma cair (estado diferente de "open"), por OUTRA linha que esteja no ar. Desligado por padrao.
+    line_watch_enabled: bool = {enabled}
+    # Instancias vigiadas, separadas por virgula. Vazio = a da loja e a pessoal configuradas.
+    line_watch_instances: str = {instances}
+    line_watch_interval_seconds: int = 120
+    line_watch_confirm_checks: int = 2          # rodadas seguidas fora do ar antes de avisar (evita alarme falso)
+    line_watch_repeat_minutes: int = 60         # lembrete enquanto a linha continuar fora
+    # Telefone (com DDI) que recebe o alerta; vazio = usa whatsapp_owner_alert_phone.
+    line_watch_alert_phone: str = {phone}
+'''
+MAIN_ANCHOR = "import observation.scheduler  # noqa: F401 - register the observation.tick job handler\n"
+MAIN_ADD = "import jobs.line_watch_job  # noqa: F401 - register the lines.watch job handler\n"
+
+
+def once(text: str, anchor: str, what: str) -> None:
+    n = text.count(anchor)
+    if n != 1:
+        raise SystemExit(f"ABORTAR: {what}: âncora encontrada {n} vez(es), esperado 1 (o arquivo do container difere do esperado)")
+
+
+def build(config: str, main: str, *, enabled=False, instances="", phone="") -> tuple[str, str]:
+    if "line_watch" in config or "line_watch" in main:
+        raise SystemExit("ABORTAR: parece que o vigia já foi aplicado (não vou aplicar duas vezes)")
+    once(config, CONFIG_ANCHOR, "config.py")
+    once(main, MAIN_ANCHOR, "main.py")
+    add = CONFIG_ADD.replace("{enabled}", repr(bool(enabled))).replace("{instances}", '"' + instances + '"').replace("{phone}", '"' + phone + '"')
+    return config.replace(CONFIG_ANCHOR, CONFIG_ANCHOR + add, 1), main.replace(MAIN_ANCHOR, MAIN_ANCHOR + MAIN_ADD, 1)
+
+
+def main_cli(folder: str) -> None:
+    d = Path(folder)
+    read = lambda name: (d / f"{name}.lido").read_text(encoding="utf-8")
+    instances, phone = os.environ.get("LW_INSTANCES", ""), os.environ.get("LW_PHONE", "")
+    if not phone.isdigit() or not 10 <= len(phone) <= 15:
+        raise SystemExit("ABORTAR: LW_PHONE deve ter só dígitos (10 a 15, com DDI)")
+    if not instances.strip():
+        raise SystemExit("ABORTAR: LW_INSTANCES vazio")
+    config, main = build(read("config.py"), read("main.py"), enabled=True, instances=instances, phone=phone)
+    (d / "config.py.novo").write_text(config, encoding="utf-8", newline="")
+    (d / "main.py.novo").write_text(main, encoding="utf-8", newline="")
+    print("gerados: config.py.novo main.py.novo")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        raise SystemExit(__doc__)
+    main_cli(sys.argv[1])
+LW_EOF_3
+cat > aplicar_na_vps_linewatch.sh <<'LW_EOF_4'
+#!/bin/bash
+# Vigia das linhas do WhatsApp: aplicação segura no container do backend. Uso:  bash aplicar_na_vps_linewatch.sh   (na pasta com os 3 arquivos .py)
+# Muda config.py e main.py (edições ancoradas), cria services/line_watch.py e jobs/line_watch_job.py, REINICIA o backend (segundos) e semeia a
+# 1ª rodada do job lines.watch. NÃO envia nenhuma mensagem durante a aplicação: a verificação só LÊ o estado das linhas no Evolution.
+# Qualquer falha devolve arquivos, apaga os jobs semeados e reinicia de novo.
+set -euo pipefail
+BK=darioos-evolution-backend-1
+cd "$(dirname "$0")"
+CFG=/app/utils/config.py; MAIN=/app/main.py; SVC=/app/services/line_watch.py; JOB=/app/jobs/line_watch_job.py
+SVC_SHA_ESPERADO=f6b6d5e1a6d0c8bea50293d5b24530ccb5edcd4861b1dce0c618d4d5ccb1a79c
+JOB_SHA_ESPERADO=e9ccfa2659bc350d3f7e24f80b61ea782b741f70024daeeec95bafaed121674e
+ESPERA_HEALTH=${ESPERA_HEALTH:-90}
+export LW_INSTANCES="${LW_INSTANCES:-MARQUESCOLOR,b2b-sales,azusa-church,Dário Marques Neto}"
+
+die() { echo "ABORTAR: $*"; exit 1; }
+sha_file() { sha256sum "$1" | awk '{print $1}'; }
+sha_live() { docker exec "$BK" sha256sum "$1" | awk '{print $1}'; }
+expect() { [ -n "$2" ] && [ "$2" = "$3" ] || die "$1: obtido '${2:-vazio}', esperado '$3'"; }
+health() { docker inspect -f '{{.State.Health.Status}}' "$BK" 2>/dev/null || echo desconhecido; }
+wait_healthy() { local i=0; while [ "$i" -lt "$ESPERA_HEALTH" ]; do [ "$(health)" = healthy ] && return 0; sleep 1; i=$((i+1)); done; return 1; }
+PYDEL='from sqlalchemy import delete
+import asyncio
+from database.session import async_session_factory
+from models.job import Job, JobStatus
+async def run():
+    async with async_session_factory() as s:
+        r = await s.execute(delete(Job).where(Job.name == "lines.watch", Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])))
+        await s.commit(); print("jobs lines.watch removidos:", r.rowcount)
+asyncio.run(run())'
+trap 'docker exec "$BK" rm -f "$CFG.lw_new" "$MAIN.lw_new" "$SVC.lw_new" "$JOB.lw_new" >/dev/null 2>&1 || true' EXIT
+back_out() {
+  echo "PROBLEMA: $1. Devolvendo o original..."
+  docker exec -i "$BK" python -c "$PYDEL" >/dev/null 2>&1 || echo "ATENÇÃO: não consegui apagar os jobs semeados (rode o rollback_linewatch.sh)"
+  docker cp config.py.orig "$BK:$CFG" || echo "ATENÇÃO: falha ao copiar config.py"
+  docker cp main.py.orig "$BK:$MAIN" || echo "ATENÇÃO: falha ao copiar main.py"
+  docker exec "$BK" rm -f "$SVC" "$JOB" || true
+  docker restart "$BK" >/dev/null || echo "ATENÇÃO: falha ao reiniciar"
+  wait_healthy && echo "backend healthy de novo" || echo "ATENÇÃO: backend não ficou healthy; rode rollback_linewatch.sh e olhe docker logs"
+  echo "REVERTIDO"
+  exit 1
+}
+
+echo "== 1. confere os arquivos desta pasta e lê os originais do container (somente leitura)"
+[ "$(health)" = healthy ] || die "o container não está healthy"
+[ -s aplicar_linewatch.py ] && [ -s line_watch.py ] && [ -s line_watch_job.py ] || die "faltam arquivos nesta pasta"
+expect "line_watch.py desta pasta" "$(sha_file line_watch.py)" "$SVC_SHA_ESPERADO"
+expect "line_watch_job.py desta pasta" "$(sha_file line_watch_job.py)" "$JOB_SHA_ESPERADO"
+docker exec "$BK" test ! -e "$SVC" || die "$SVC já existe no container (vigia já aplicado?)"
+docker exec "$BK" test ! -e "$JOB" || die "$JOB já existe no container"
+for f in config.py:$CFG main.py:$MAIN; do
+  n=${f%%:*}; p=${f#*:}
+  docker cp "$BK:$p" "$n.lido"; [ -s "$n.lido" ] || die "não consegui ler $p"
+  expect "$n (cópia fiel)" "$(sha_live $p)" "$(sha_file $n.lido)"
+done
+echo "OK"
+
+echo "== 2. telefone que recebe o alerta"
+PHONE="${LW_PHONE:-}"
+[ -n "$PHONE" ] || PHONE=$(docker exec "$BK" printenv WHATSAPP_OWNER_ALERT_PHONE 2>/dev/null || true)
+if [ -z "$PHONE" ]; then read -rp "Telefone que vai RECEBER o alerta (só dígitos, com DDI, ex.: 5511912345678): " PHONE; fi
+PHONE=${PHONE//[^0-9]/}
+export LW_PHONE="$PHONE"
+echo "OK (termina em ${PHONE: -4})"
+
+echo "== 3. gera os arquivos novos (aborta sem tocar em nada se uma âncora não bater)"
+python3 aplicar_linewatch.py . || die "o aplicar_linewatch.py recusou (nada foi gravado no container)"
+for n in config.py main.py; do mv "$n.lido" "$n.orig"; printf '%s  %s\n' "$(sha_file $n.orig)" "$n" >> hashes_antes_linewatch.tmp; done
+mv hashes_antes_linewatch.tmp hashes_antes_linewatch.txt
+echo "OK (originais guardados como *.orig)"
+
+echo "== 4. copia para nomes temporários e confere (o código em uso não muda)"
+docker cp config.py.novo "$BK:$CFG.lw_new"; docker cp main.py.novo "$BK:$MAIN.lw_new"; docker cp line_watch.py "$BK:$SVC.lw_new"; docker cp line_watch_job.py "$BK:$JOB.lw_new"
+expect "config temporário" "$(sha_live $CFG.lw_new)" "$(sha_file config.py.novo)"
+expect "main temporário" "$(sha_live $MAIN.lw_new)" "$(sha_file main.py.novo)"
+expect "line_watch temporário" "$(sha_live $SVC.lw_new)" "$SVC_SHA_ESPERADO"
+expect "line_watch_job temporário" "$(sha_live $JOB.lw_new)" "$JOB_SHA_ESPERADO"
+echo "OK"
+
+echo "== 5. troca (cópias de segurança dentro do container)"
+if ! docker exec "$BK" sh -c "set -e; cp -p $CFG $CFG.lw_bak; cp -p $MAIN $MAIN.lw_bak; mv $CFG.lw_new $CFG; mv $MAIN.lw_new $MAIN; mv $SVC.lw_new $SVC; mv $JOB.lw_new $JOB"; then back_out "a troca falhou"; fi
+expect "config final" "$(sha_live $CFG)" "$(sha_file config.py.novo)"
+expect "main final" "$(sha_live $MAIN)" "$(sha_file main.py.novo)"
+echo "OK"
+
+echo "== 6. reinicia o backend e espera ficar healthy"
+docker restart "$BK" >/dev/null || back_out "o restart falhou"
+wait_healthy || back_out "o backend não ficou healthy em ${ESPERA_HEALTH}s"
+echo "OK"
+
+echo "== 7. verificação funcional (só LÊ o estado das linhas; não envia mensagem)"
+docker exec -i -e LW_PHONE="$PHONE" "$BK" python - <<'PY' || back_out "a verificação funcional falhou"
+import asyncio, os
+from jobs import line_watch_job
+from services import line_watch
+from utils.config import get_settings
+
+s = get_settings()
+assert s.line_watch_enabled is True and s.line_watch_alert_phone == os.environ["LW_PHONE"], "configuração não carregou"
+names = line_watch.watched_instances(s)
+assert len(names) >= 2, names
+states = asyncio.run(line_watch.fetch_states(names, base_url=s.evolution_base_url, api_key=s.evolution_api_key))
+for n in names:
+    print("  linha", n, "->", states[n])
+assert any(v != "unreachable" for v in states.values()), "o Evolution não respondeu para nenhuma linha"
+print("vigia carregado; linhas:", ", ".join(names))
+PY
+echo "OK"
+
+echo "== 8. semeia a primeira rodada do job (idempotente)"
+docker exec -i "$BK" python - <<'PY' || back_out "não consegui semear o job"
+import asyncio
+from database.session import async_session_factory
+from jobs.line_watch_job import JOB_NAME, start
+from repositories.job import JobRepository
+
+async def run():
+    async with async_session_factory() as s:
+        await start(s)
+        assert await JobRepository(s).pending_by_name(JOB_NAME) is not None, "job não foi criado"
+    print("job lines.watch semeado")
+asyncio.run(run())
+PY
+echo "OK"
+echo "SUCESSO: vigia ligado. A 1ª rodada roda em instantes; você será avisado (no WhatsApp ${PHONE: -4}) se alguma linha ficar fora do ar por ~4 min. Para desfazer: bash rollback_linewatch.sh"
+LW_EOF_4
+cat > rollback_linewatch.sh <<'LW_EOF_5'
+#!/bin/bash
+# Vigia de linhas: reversão segura. Uso:  bash rollback_linewatch.sh   (na mesma pasta do aplicar_na_vps_linewatch.sh). Reinicia o backend.
+set -euo pipefail
+BK=darioos-evolution-backend-1
+cd "$(dirname "$0")"
+CFG=/app/utils/config.py; MAIN=/app/main.py; SVC=/app/services/line_watch.py; JOB=/app/jobs/line_watch_job.py
+ESPERA_HEALTH=${ESPERA_HEALTH:-90}
+die() { echo "ABORTAR: $*"; exit 1; }
+sha_file() { sha256sum "$1" | awk '{print $1}'; }
+sha_live() { docker exec "$BK" sha256sum "$1" | awk '{print $1}'; }
+expect() { [ -n "$2" ] && [ "$2" = "$3" ] || die "$1: obtido '${2:-vazio}', esperado '$3'"; }
+health() { docker inspect -f '{{.State.Health.Status}}' "$BK" 2>/dev/null || echo desconhecido; }
+trap 'docker exec "$BK" rm -f "$CFG.lw_rb" "$MAIN.lw_rb" >/dev/null 2>&1 || true' EXIT
+[ -s hashes_antes_linewatch.txt ] || die "falta hashes_antes_linewatch.txt (gerado na aplicação)"
+for f in config.py:$CFG main.py:$MAIN; do
+  n=${f%%:*}; p=${f#*:}
+  want=$(awk -v n="$n" '$2==n{print $1}' hashes_antes_linewatch.txt)
+  expect "$n.orig" "$(sha_file $n.orig)" "$want"
+  docker cp "$n.orig" "$BK:$p.lw_rb"
+  expect "$n temporário" "$(sha_live $p.lw_rb)" "$want"
+done
+# 1º apaga a corrente de jobs (enquanto o módulo ainda existe), depois troca os arquivos
+docker exec -i "$BK" python - <<'PY' || die "não consegui apagar os jobs lines.watch (nada foi trocado)"
+import asyncio
+from sqlalchemy import delete
+from database.session import async_session_factory
+from models.job import Job, JobStatus
+
+async def run():
+    async with async_session_factory() as s:
+        r = await s.execute(delete(Job).where(Job.name == "lines.watch", Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])))
+        await s.commit(); print("jobs lines.watch removidos:", r.rowcount)
+asyncio.run(run())
+PY
+docker exec "$BK" sh -c "set -e; mv $CFG.lw_rb $CFG; mv $MAIN.lw_rb $MAIN; rm -f $SVC $JOB"
+for f in config.py:$CFG main.py:$MAIN; do
+  n=${f%%:*}; p=${f#*:}
+  expect "$n final" "$(sha_live $p)" "$(awk -v n="$n" '$2==n{print $1}' hashes_antes_linewatch.txt)"
+done
+docker restart "$BK" >/dev/null
+i=0; while [ "$i" -lt "$ESPERA_HEALTH" ]; do [ "$(health)" = healthy ] && break; sleep 1; i=$((i+1)); done
+[ "$(health)" = healthy ] || die "o backend não ficou healthy depois da reversão (docker logs $BK)"
+echo "REVERTIDO: config.py/main.py voltaram ao original, módulos removidos, jobs apagados; backend reiniciado e healthy."
+echo "Obs.: se o vigia rodou entre a leitura e a troca, um job pode ter sido recriado: rode de novo se aparecer erro 'handler desconhecido' no log."
+LW_EOF_5
+cat > SHA256SUMS <<'LW_EOF_9'
+f6b6d5e1a6d0c8bea50293d5b24530ccb5edcd4861b1dce0c618d4d5ccb1a79c  line_watch.py
+e9ccfa2659bc350d3f7e24f80b61ea782b741f70024daeeec95bafaed121674e  line_watch_job.py
+b0c284f5d978b158cf17e18a8f4f6e3cfd6f1b1ac739988580df6868bc2639a6  aplicar_linewatch.py
+1325dfa147e89190d48577ae6236eb5ed908986a406dd45c047c38e537a69dc4  aplicar_na_vps_linewatch.sh
+139481ff9ceca28de336cf6da22918360f0bed0aa156439414d780afa0f89fc7  rollback_linewatch.sh
+LW_EOF_9
+sha256sum -c SHA256SUMS && echo "ARQUIVOS CONFEREM" || echo "ARQUIVO DIFERENTE: não rode o próximo passo"
