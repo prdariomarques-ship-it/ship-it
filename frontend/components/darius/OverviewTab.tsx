@@ -26,9 +26,15 @@ export function OverviewTab({ onOpen }: { onOpen: (tab: "approvals" | "whatsapp"
   const routing = useWhatsAppRouting();
   const suspension = useSuspension();
 
-  const failedLinks = (links.data?.counts.failed ?? 0) + (links.data?.counts.expired ?? 0);
-  const suspendedScopes = suspension.data
-    ? suspension.data.suspended_instances.length + (suspension.data.global_suspended ? 1 : 0)
+  // react-query keeps the last good `data` when a refetch fails. A figure from before the outage must not pass as
+  // current, so a query in error is treated as having no value at all.
+  const pausedData = paused.isError ? undefined : paused.data;
+  const linksData = links.isError ? undefined : links.data;
+  const suspensionData = suspension.isError ? undefined : suspension.data;
+
+  const failedLinks = (linksData?.counts.failed ?? 0) + (linksData?.counts.expired ?? 0);
+  const suspendedScopes = suspensionData
+    ? suspensionData.suspended_instances.length + (suspensionData.global_suspended ? 1 : 0)
     : null;
 
   return (
@@ -37,23 +43,23 @@ export function OverviewTab({ onOpen }: { onOpen: (tab: "approvals" | "whatsapp"
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <button type="button" className="text-left" onClick={() => onOpen("approvals")} aria-label="Abrir aprovações">
           <Figure label="Aguardando aprovação" hint="tarefas em PAUSED no DARIUS">
-            {paused.data ? paused.data.total : <Unavailable reason={paused.isLoading ? "carregando" : "DARIUS não respondeu"} />}
+            {pausedData ? pausedData.total : <Unavailable reason={paused.isLoading ? "carregando" : "DARIUS não respondeu"} />}
           </Figure>
         </button>
         <button type="button" className="text-left" onClick={() => onOpen("whatsapp")} aria-label="Abrir WhatsApp">
           <Figure label="WhatsApp → DARIUS" hint="mensagens roteadas (total registrado)">
-            {links.data ? (
-              Object.values(links.data.counts).reduce((sum, value) => sum + value, 0)
+            {linksData ? (
+              Object.values(linksData.counts).reduce((sum, value) => sum + value, 0)
             ) : (
               <Unavailable reason={links.isLoading ? "carregando" : "leitura falhou"} />
             )}
           </Figure>
         </button>
         <Figure label="Falhas / expiradas" hint="mensagens roteadas sem resposta enviada">
-          {links.data ? failedLinks : <Unavailable reason={links.isLoading ? "carregando" : "leitura falhou"} />}
+          {linksData ? failedLinks : <Unavailable reason={links.isLoading ? "carregando" : "leitura falhou"} />}
         </Figure>
         <button type="button" className="text-left" onClick={() => onOpen("suspension")} aria-label="Abrir suspensão">
-          <Figure label="Escopos suspensos" hint={suspension.data?.global_suspended ? "inclui suspensão global" : "global e instâncias"}>
+          <Figure label="Escopos suspensos" hint={suspensionData?.global_suspended ? "inclui suspensão global" : "global e instâncias"}>
             {suspendedScopes !== null ? suspendedScopes : <Unavailable reason={suspension.isLoading ? "carregando" : "leitura falhou"} />}
           </Figure>
         </button>

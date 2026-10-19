@@ -3,6 +3,8 @@ conversations a human took over (the only place where this panel can tell why DA
 # ruff: noqa: F811  -- pytest fixtures imported from the bridge suite are re-declared as test parameters
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import httpx
 import pytest
 from sqlalchemy import text
@@ -137,7 +139,9 @@ async def test_only_paused_conversations_are_listed_with_masked_phone_reason_and
     assert ana["contact_name"] == "Ana" and ana["instance"] == "store"
     assert ana["phone_tail"] == "0001" and "5511999990001" not in str(body)      # never the full number
     assert ana["reason"] == "dono assumiu" and ana["actor_id"] == admin_user.id
-    assert ana["paused_since"] is not None and ana["send_in_flight"] is False
+    assert ana["send_in_flight"] is False
+    since = datetime.fromisoformat(ana["paused_since"])
+    assert since.utcoffset() == timedelta(0)           # explicit UTC, never a naive value the browser reads as local
     assert by_contact[c]["actor_id"] is None
 
     only_store = (await client.get(PREFIX + "/paused-conversations?instance=store", headers=admin_headers)).json()

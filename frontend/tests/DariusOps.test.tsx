@@ -1,12 +1,15 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/useApi", () => ({ apiFetch: vi.fn() }));
 
 import { DariusPanel } from "@/components/darius/DariusPanel";
-import { renderWithQueryClient } from "./test-utils";
-import { apiError, ROUTING, serve, TASK } from "./darius-test-utils";
+import { createTestQueryClient, renderWithQueryClient } from "./test-utils";
+import { apiError, DARIUS_OK, ROUTING, serve, TASK } from "./darius-test-utils";
+
+const DARIUS_OK_SNAPSHOT = DARIUS_OK;
 
 const METRICS = {
   generatedAt: 1760900000000,
@@ -26,6 +29,41 @@ const METRICS = {
 };
 
 const figure = (label: string) => screen.getByText(label).closest("div")!;
+
+describe("Overview during an outage", () => {
+  it("does not keep showing figures read before DARIUS went down", async () => {
+    let down = false;
+    const guard = (value: unknown) => () => (down ? apiError("DARIUS circuit open: failing fast", 502) : value);
+    serve({
+      "/admin/darius/status": DARIUS_OK_SNAPSHOT,
+      "/admin/darius/tasks": guard({ items: [], total: 3, next_offset: null }),
+      "/admin/darius/whatsapp-tasks": guard({ items: [], counts: { failed: 1, reply_queued: 4 }, next_offset: null }),
+      "/admin/darius/whatsapp-routing": ROUTING,
+      "/admin/automation/suspension": guard({
+        global_suspended: false, global_forced_by_environment: false, suspended_instances: ["personal"],
+        configured_instances: ["personal"], details: [],
+      }),
+    });
+    const client = createTestQueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <DariusPanel />
+      </QueryClientProvider>
+    );
+    const paused = () => screen.getByText("Aguardando aprovação").closest("div")!.parentElement!;
+    await waitFor(() => expect(within(paused()).getByText("3")).toBeInTheDocument());
+    expect(within(screen.getByText("WhatsApp → DARIUS").closest("div")!.parentElement!).getByText("5")).toBeInTheDocument();
+
+    down = true; // the next poll fails: the old numbers are history, not the current state
+    await client.refetchQueries();
+    await waitFor(() => expect(within(paused()).getByText("indisponível")).toBeInTheDocument());
+    expect(within(paused()).queryByText("3")).not.toBeInTheDocument();
+    const whatsapp = screen.getByText("WhatsApp → DARIUS").closest("div")!.parentElement!;
+    expect(within(whatsapp).getByText("indisponível")).toBeInTheDocument();
+    const scopes = screen.getByText("Escopos suspensos").closest("div")!.parentElement!;
+    expect(within(scopes).getByText("indisponível")).toBeInTheDocument();
+  });
+});
 
 describe("Metrics", () => {
   it("shows what the runtime reported, and 'indisponível' (never 0) for what it did not", async () => {

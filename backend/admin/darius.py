@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -329,6 +329,15 @@ class PausedConversation(BaseModel):
     reason: str | None
     actor_id: int | None
     send_in_flight: bool
+
+    @field_validator("paused_since")
+    @classmethod
+    def _utc(cls, value: datetime | None) -> datetime | None:
+        # The audit timestamp comes from a raw SELECT, so a driver that does not type the column (SQLite) hands back
+        # a naive value. Every stored timestamp here is UTC; without an offset the browser would read it as local time.
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class PausedConversationPage(BaseModel):
