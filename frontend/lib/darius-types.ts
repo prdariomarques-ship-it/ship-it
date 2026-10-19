@@ -71,6 +71,49 @@ export interface DariusTaskResult {
   result?: string | null;
   error?: string | null;
   updatedAt: string;
+  /** Why a task ended/stalled. Absent on runtimes that predate the retry classification. */
+  failureClass?: DariusFailureClass | null;
+  /** Present only while a QUEUED task waits for its next automatic attempt. */
+  retry?: { attempts: number; nextAttemptAt: number | null } | null;
+}
+
+export type DariusFailureClass =
+  | "BEFORE_EFFECT_TRANSIENT"
+  | "BEFORE_EFFECT_PERMANENT"
+  | "EFFECT_UNKNOWN"
+  | "EFFECT_CONFIRMED"
+  | "RETRIES_EXHAUSTED";
+
+// --- Runtime metrics (GET /admin/darius/metrics). Open dictionaries on purpose: the engine adds counters
+// over time and the panel must keep working; a counter that is missing is shown as "indisponível". ---
+
+export interface RuntimeMetrics {
+  generatedAt: number;
+  scope: Record<string, unknown>;
+  tasks: { available?: boolean; total?: number; byStatus?: Record<string, number> } & Record<string, unknown>;
+  queue: { queued?: number; backingOff?: number; nextRetryAt?: number | null } & Record<string, unknown>;
+  engine: Record<string, unknown>;
+  scheduler: { enabled?: boolean } & Record<string, unknown>;
+}
+
+// --- Conversations a human took over (GET /admin/darius/paused-conversations). Phone is masked server-side. ---
+
+export interface PausedConversation {
+  contact_id: number;
+  contact_name: string | null;
+  phone_tail: string | null;
+  instance: string;
+  revision: number;
+  paused_since: string | null;
+  reason: string | null;
+  actor_id: number | null;
+  send_in_flight: boolean;
+}
+
+export interface PausedConversationPage {
+  items: PausedConversation[];
+  total: number;
+  next_offset: number | null;
 }
 
 export interface DariusDecisionAck {

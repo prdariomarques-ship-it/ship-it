@@ -10,6 +10,8 @@ import type {
   DariusDecision,
   DariusDecisionAck,
   DariusStatus,
+  PausedConversationPage,
+  RuntimeMetrics,
   DariusTaskPage,
   DariusTaskResult,
   DariusTaskState,
@@ -39,7 +41,38 @@ export const dariusKeys = {
   whatsapp: ["darius", "whatsapp"] as const,
   suspension: ["darius", "suspension"] as const,
   telegram: ["darius", "telegram"] as const,
+  metrics: ["darius", "metrics"] as const,
+  paused: ["darius", "paused"] as const,
 };
+
+export function useRuntimeMetrics() {
+  return useQuery({
+    queryKey: dariusKeys.metrics,
+    queryFn: () => apiFetch<RuntimeMetrics>("/admin/darius/metrics"),
+    refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
+
+export interface PausedConversationFilters {
+  instance?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function usePausedConversations(filters: PausedConversationFilters) {
+  return useQuery({
+    queryKey: [...dariusKeys.paused, filters],
+    queryFn: () =>
+      apiFetch<PausedConversationPage>(
+        `/admin/darius/paused-conversations${query({
+          instance: filters.instance,
+          limit: filters.limit ?? 25,
+          offset: filters.offset ?? 0,
+        })}`
+      ),
+    refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
 
 export function useDariusStatus() {
   return useQuery({

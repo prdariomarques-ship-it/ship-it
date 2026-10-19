@@ -7,7 +7,15 @@ import { LoadingRows } from "@/components/admin/LoadingGrid";
 import { Button } from "@/components/admin/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/admin/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/admin/ui/table";
-import { ErrorLine, FilterSelect, Pager, TaskStatusBadge, truncate } from "@/components/darius/common";
+import {
+  Banner,
+  ErrorLine,
+  FAILURE_CLASS_LABEL,
+  FilterSelect,
+  Pager,
+  TaskStatusBadge,
+  truncate,
+} from "@/components/darius/common";
 import { useDariusTaskDetail, useDariusTasks } from "@/lib/darius-api";
 import { DARIUS_TASK_STATUSES, type DariusTaskStatus } from "@/lib/darius-types";
 import { formatDateTime } from "@/lib/format";
@@ -46,6 +54,23 @@ function TaskDetail({ taskId, onClose }: { taskId: string; onClose: () => void }
                 </p>
               )}
             </div>
+            {data.result.failureClass ? (
+              <Banner tone={data.result.failureClass === "EFFECT_UNKNOWN" ? "warning" : "info"}>
+                <p className="font-medium">Classe da falha: {data.result.failureClass}</p>
+                <p className="mt-1 text-xs">
+                  {FAILURE_CLASS_LABEL[data.result.failureClass] ?? "classe não reconhecida por este painel"}
+                </p>
+              </Banner>
+            ) : null}
+            {data.result.retry ? (
+              <Banner tone="info">
+                Tentativa automática agendada: {data.result.retry.attempts} já feita(s); próxima em{" "}
+                {data.result.retry.nextAttemptAt === null
+                  ? "horário indisponível"
+                  : formatDateTime(new Date(data.result.retry.nextAttemptAt).toISOString())}
+                .
+              </Banner>
+            ) : null}
             <div>
               <h3 className="mb-1 font-medium">Trilha de execução</h3>
               {data.state.trace.length === 0 ? (

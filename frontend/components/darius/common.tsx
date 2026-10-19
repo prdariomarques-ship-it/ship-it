@@ -40,6 +40,15 @@ const TASK_LABEL: Record<string, string> = {
   PAUSED: "PAUSED (aguarda aprovação)",
 };
 
+/** What each class means for the operator: the decisive question is "may the action have happened?". */
+export const FAILURE_CLASS_LABEL: Record<string, string> = {
+  BEFORE_EFFECT_TRANSIENT: "falha transitória antes do efeito (nada foi feito; pode ser repetida)",
+  BEFORE_EFFECT_PERMANENT: "falha permanente antes do efeito (nada foi feito; não será repetida)",
+  EFFECT_UNKNOWN: "efeito desconhecido (a ação pode ter ocorrido; NÃO é repetida automaticamente)",
+  EFFECT_CONFIRMED: "efeito confirmado (a ação ocorreu)",
+  RETRIES_EXHAUSTED: "tentativas esgotadas (nada foi feito)",
+};
+
 export function TaskStatusBadge({ status }: { status: string }) {
   return <Badge variant={TASK_VARIANT[status] ?? "outline"}>{TASK_LABEL[status] ?? status}</Badge>;
 }

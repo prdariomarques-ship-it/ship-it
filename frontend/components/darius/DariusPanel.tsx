@@ -4,20 +4,33 @@ import { useState } from "react";
 
 import { ApprovalsTab } from "@/components/darius/ApprovalsTab";
 import { LogsTab } from "@/components/darius/LogsTab";
+import { MetricsTab } from "@/components/darius/MetricsTab";
 import { OverviewTab } from "@/components/darius/OverviewTab";
+import { PausedTab } from "@/components/darius/PausedTab";
 import { SuspensionTab } from "@/components/darius/SuspensionTab";
 import { TelegramTab } from "@/components/darius/TelegramTab";
 import { TasksTab } from "@/components/darius/TasksTab";
 import { WhatsAppTab } from "@/components/darius/WhatsAppTab";
 import { cn } from "@/lib/utils";
 
-export type DariusTabId = "overview" | "tasks" | "approvals" | "whatsapp" | "telegram" | "suspension" | "logs";
+export type DariusTabId =
+  | "overview"
+  | "tasks"
+  | "approvals"
+  | "metrics"
+  | "whatsapp"
+  | "paused"
+  | "telegram"
+  | "suspension"
+  | "logs";
 
 const TABS: Array<{ id: DariusTabId; label: string }> = [
   { id: "overview", label: "Visão geral" },
   { id: "tasks", label: "Tarefas" },
   { id: "approvals", label: "Aprovações" },
+  { id: "metrics", label: "Métricas" },
   { id: "whatsapp", label: "WhatsApp" },
+  { id: "paused", label: "Conversas pausadas" },
   { id: "telegram", label: "Telegram" },
   { id: "suspension", label: "Suspensão" },
   { id: "logs", label: "Logs" },
@@ -53,7 +66,9 @@ export function DariusPanel({ initialTab = "overview" }: { initialTab?: DariusTa
         {tab === "overview" ? <OverviewTab onOpen={setTab} /> : null}
         {tab === "tasks" ? <TasksTab /> : null}
         {tab === "approvals" ? <ApprovalsTab /> : null}
+        {tab === "metrics" ? <MetricsTab /> : null}
         {tab === "whatsapp" ? <WhatsAppTab /> : null}
+        {tab === "paused" ? <PausedTab /> : null}
         {tab === "telegram" ? <TelegramTab /> : null}
         {tab === "suspension" ? <SuspensionTab /> : null}
         {tab === "logs" ? <LogsTab /> : null}
