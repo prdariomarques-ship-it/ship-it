@@ -68,10 +68,22 @@ Regra: essas rotas serão implementadas **no DARIUS** (runtime canônico), com t
 - Autorizar, quando chegar a hora, testes com instância/número de teste da Evolution (nenhum envio real foi feito).
 - Localização do Monitor SCPX (o `spcx-monitor` do VPS foi descontinuado).
 
-## 7. Próxima ação concreta
+## 7. Ciclo 1 CONCLUÍDO (DARIUS) - evidência
 
-Criar branch no repo DARIUS a partir de `8f860d1` e implementar `POST /api/tasks/:id/approve|reject|cancel` e `GET /api/tasks/:id/result` com autorização por dono, 404 uniforme e testes HTTP.
+Repo `darius-rc2-prepush-gate`, branch `integration/darius-lifecycle-api`, commit `d983c93` (sobre `8f860d1`). Sem push.
 
-## 8. Log
+- Rotas novas: `POST /api/tasks/:id/approve|reject` (admin no modo isolado), `POST /api/tasks/:id/cancel` (dono ou admin), `GET /api/tasks/:id/result`; `GET /api/tasks` com `status/limit/offset` + `X-Total-Count/X-Next-Offset` (sem parâmetros = array inalterado); limites `DARIUS_MAX_BODY_BYTES` e `DARIUS_MAX_OBJECTIVE_CHARS`; erros 413/400 em JSON.
+- Engine: `resumeTask` retorna se a chamada venceu a transição; `noteDecision` grava `{decision, by, at, reason?}` em `metadata.decisions`. O teste pegou um bug real na minha primeira versão (o loop de execução sobrescrevia o registro); corrigido em `syncWithStore`.
+- Resultado: 18 testes HTTP novos; suíte completa **61 arquivos / 440 testes verdes**; `tsc` = 0; arquivos de concorrência/crash 3x = 56/56 em cada rodada; `test:gaps` exit 0. Três mutações (aprovar sem admin, sem isolamento por dono, loop apagando decisões) foram detectadas.
+- O sentinel `HITL GAP` de `webcontract.http.test.ts` (que afirmava 404) foi invertido para o novo contrato, de forma documentada.
+- Contrato documentado em `DARIUS_API_CONTRACTS.md` (DARIUS).
+- Não feito neste ciclo: retry/backoff do consumidor QUEUED, scheduler ligado ao `server.ts`, métricas por componente, stream de eventos, execução em container `--network none`.
+
+## 8. Próxima ação concreta
+
+Ciclo 2 (Dario OS, branch `integration/dario-os-darius`): inspecionar as convenções do backend (como outros clientes HTTP em `providers/` e `agents/tools/flowcore_tools.py` tratam timeout/retry/config) e criar o `DariusClient` + rota admin `/admin/darius/*`, com testes contra o servidor DARIUS real em processo. Nada disso foi iniciado.
+
+## 9. Log
 
 - 2026-10-19: Fase 0 concluída (somente leitura). Único artefato criado neste repo: este arquivo.
+- 2026-10-19: Ciclo 1 concluído no repo DARIUS (`d983c93`). Dario OS ainda sem alteração de código.
