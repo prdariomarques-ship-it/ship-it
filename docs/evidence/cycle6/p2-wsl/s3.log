@@ -1,0 +1,5 @@
+Plugins applied: finance@0.1.0
+DARIUS API Server is running on http://127.0.0.1:4130
+CORS allowlist: http://localhost:5173, http://localhost:4173, http://localhost:3000
+Configured Ollama URL: http://127.0.0.1:9
+scheduler: started (tick 100ms, 1 schedule(s) seeded)

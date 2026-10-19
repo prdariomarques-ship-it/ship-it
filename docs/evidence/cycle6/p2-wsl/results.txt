@@ -1,0 +1,14 @@
+S1.1 invalid config [DARIUS_SCHEDULER=maybe] | PASS | exit=1; REFUSING TO START: DARIUS_SCHEDULER must be "on" or "off" (got "maybe")
+S1.2 invalid config [DARIUS_SCHEDULER=on DARIUS_SCHEDULES=not-json] | PASS | exit=1; REFUSING TO START: DARIUS_SCHEDULES is not valid JSON
+S1.3 invalid config [DARIUS_SCHEDULER=on DARIUS_SCHEDULES=[{"id":"x","objective":"o","agentId":"agent-cli-1","intervalMs":10}]] | PASS | exit=1; REFUSING TO START: DARIUS_SCHEDULES[0].intervalMs must be an integer >= 1000
+S1.4 invalid config [DARIUS_SCHEDULER_TICK_MS=5] | PASS | exit=1; REFUSING TO START: DARIUS_SCHEDULER_TICK_MS must be an integer between 50 and 60000 (got "5")
+S1.5 invalid config [DARIUS_QUEUE_RETRY_MAX=99] | PASS | exit=1; REFUSING TO START: DARIUS_QUEUE_RETRY_MAX must be an integer between 0 and 20 (got "99")
+S2 default off (scheduler={"enabled":false}) | PASS | exit=0 ms=80; tasks={"n":0,"distinct":0,"keys":[]}
+S3 enabled: fires then SIGTERM graceful, nothing fires after exit | PASS | exit=0 ms=81; before={"n":4,"distinct":4,"keys":["schedule:p2:1792450908354","schedule:p2:1792450910354","schedule:p2:1792450912354","schedule:p2:1792450914354"]} after={"n":4,"distinct":4,"keys":["schedule:p2:1792450908354","schedule:p2:1792450910354","schedule:p2:1792450912354","schedule:p2:1792450914354"]}
+  s3 scheduler started lines: 1
+S4 restart same DB: unique slots; tasks created in first 1.5s after restart=2 (<=2 means no burst) | PASS | exit=0 ms=82; final={"n":9,"distinct":9,"keys":["schedule:p2:1792450908354","schedule:p2:1792450910354","schedule:p2:1792450912354","schedule:p2:1792450914354","schedule:p2:1792450916354","schedule:p2:1792450920354","schedule:p2:1792450922354","schedule:p2:1792450924354","schedule:p2:1792450926354"]}
+  a scheduler stats: {"enabled":true,"mode":"persistent","running":true,"tickMs":50,"ticks":186,"lastTickAt":1792450936772,"schedules":1,"dueNow":0,"slotsAdvanced":3,"slotsLost":1,"errors":0}
+  b scheduler stats: {"enabled":true,"mode":"persistent","running":true,"tickMs":50,"ticks":181,"lastTickAt":1792450936824,"schedules":1,"dueNow":0,"slotsAdvanced":2,"slotsLost":2,"errors":0}
+S5 two processes, one DB, 50ms ticks: exactly-once(5 slots) | PASS | a:exit=0 ms=79 b:exit=0 ms=331
+S6 kill -9 + restart: slots unique | PASS | exit=0 ms=-571; before={"n":7,"distinct":7,"keys":["schedule:p2:1792450927431","schedule:p2:1792450929431","schedule:p2:1792450931431","schedule:p2:1792450933431","schedule:p2:1792450935431","schedule:p2:1792450937431","schedule:p2:1792450939431"]} after={"n":10,"distinct":10,"keys":["schedule:p2:1792450927431","schedule:p2:1792450929431","schedule:p2:1792450931431","schedule:p2:1792450933431","schedule:p2:1792450935431","schedule:p2:1792450937431","schedule:p2:1792450939431","schedule:p2:1792450941431","schedule:p2:1792450947431","schedule:p2:1792450949431"]}
+DONE

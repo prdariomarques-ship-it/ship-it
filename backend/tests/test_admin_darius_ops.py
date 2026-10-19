@@ -187,3 +187,65 @@ async def test_the_listing_is_read_only(client, control_tables, admin_headers, s
     async with session_factory() as db:
         paused = (await db.execute(text("SELECT paused FROM conversation_controls"))).scalar_one()
     assert bool(paused) is True
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ReadTimeout("slow"),
+        httpx.ConnectTimeout("slow"),
+        httpx.RemoteProtocolError("reset"),
+        jr(500, {"e": 1}),
+        jr(503, {"e": 1}),
+    ],
+    ids=["read-timeout", "connect-timeout", "reset", "http-500", "http-503"],
+)
+async def test_metrics_dependency_failures_are_502_without_numbers(client, upstream_for, admin_headers, failure):
+    upstream_for(failure)
+    response = await client.get(PREFIX + "/metrics", headers=admin_headers)
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "DARIUS_UNAVAILABLE"
+    assert "tasks" not in response.text and "queue" not in response.text
+
+
+async def test_metrics_after_a_failure_is_not_served_from_the_previous_success(client, upstream_for, admin_headers):
+    """No cache and no last-known-good: the panel must see the outage, not yesterday's numbers as current."""
+    upstream_for(jr(200, METRICS), httpx.ConnectError("refused"))
+    first = await client.get(PREFIX + "/metrics", headers=admin_headers)
+    assert first.status_code == 200
+    upstream_for(httpx.ConnectError("refused"))
+    second = await client.get(PREFIX + "/metrics", headers=admin_headers)
+    assert second.status_code == 502 and "tasks" not in second.text
+
+
+async def test_metrics_not_configured_is_an_explicit_503(client, admin_headers):
+    from admin.darius import operator_client
+    from main import app
+    from services.darius_client import DariusClient
+
+    app.dependency_overrides[operator_client] = lambda: DariusClient("", "")
+    try:
+        response = await client.get(PREFIX + "/metrics", headers=admin_headers)
+    finally:
+        app.dependency_overrides.pop(operator_client, None)
+    assert response.status_code == 503 and response.json()["detail"]["code"] == "DARIUS_NOT_CONFIGURED"
+
+
+async def test_metrics_open_circuit_fails_fast_without_calling_the_runtime(client, upstream_for, admin_headers):
+    upstream = upstream_for(httpx.ConnectError("refused"))
+    for _ in range(6):                       # breaker threshold is 5 consecutive failures
+        assert (await client.get(PREFIX + "/metrics", headers=admin_headers)).status_code == 502
+    calls = len(upstream.requests)
+    response = await client.get(PREFIX + "/metrics", headers=admin_headers)
+    assert response.status_code == 502 and response.json()["detail"]["code"] == "CIRCUIT_OPEN"
+    assert len(upstream.requests) == calls   # failed fast: no request left the process
+
+
+async def test_metrics_indicators_stay_consistent_in_the_relay(client, upstream_for, admin_headers):
+    """The bridge relays; it must not break the invariants the runtime states."""
+    upstream_for(jr(200, METRICS))
+    body = (await client.get(PREFIX + "/metrics", headers=admin_headers)).json()
+    by_status = body["tasks"]["byStatus"]
+    assert body["tasks"]["total"] == sum(by_status.values())
+    assert body["queue"]["queued"] == by_status["QUEUED"]
+    assert 0 <= body["queue"]["backingOff"] <= body["queue"]["queued"]
