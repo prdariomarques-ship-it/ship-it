@@ -1,0 +1,254 @@
+{
+  "baseline_e64d2f7_backend_only_extract": {
+    "commit": "e64d2f7",
+    "junit_file": "full_base.xml",
+    "junit_sha256": "1e5eca2941b2cca0046d02a19f7f9d79b08562e7091ed3c6b10b36c051b7bc6f",
+    "tests": 1790,
+    "failures": 22,
+    "errors": 2,
+    "skipped": 26,
+    "time_s": 558.858,
+    "failing": [
+      {
+        "kind": "failure",
+        "id": "tests.test_auth::test_request_password_reset_enforces_a_minimum_response_time",
+        "message": "assert 0.09399999998277053 >= 0.1"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_ci_require_postgres::test_o_job_do_ci_liga_a_guarda_nos_dois_passos",
+        "message": "FileNotFoundError: [Errno 2] No such file or directory: 'C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\.github\\\\workflows\\\\ci.yml'"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x000001C32A682B10>)"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x000001C32A44BC50>)"
+      },
+      {
+        "kind": "error",
+        "id": "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "message": "failed on setup with \"ValueError: the environment variable is longer than 32767 characters\""
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestAlertmanagerConfiguration::test_alertmanager_file_exists",
+        "message": "AssertionError: alertmanager.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\t"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestAlertmanagerConfiguration::test_alertmanager_grouping_configured",
+        "message": "AssertionError: alertmanager.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\t"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestAlertmanagerConfiguration::test_alertmanager_has_routing_tree",
+        "message": "AssertionError: alertmanager.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\t"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestAlertmanagerConfiguration::test_alertmanager_receivers_configured",
+        "message": "AssertionError: alertmanager.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\t"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestDockerComposeConfiguration::test_alertmanager_service_defined",
+        "message": "AssertionError: docker-compose.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestDockerComposeConfiguration::test_grafana_service_defined",
+        "message": "AssertionError: docker-compose.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestDockerComposeConfiguration::test_monitoring_volumes_defined",
+        "message": "AssertionError: docker-compose.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestDockerComposeConfiguration::test_prometheus_service_defined",
+        "message": "AssertionError: docker-compose.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestDockerComposeConfiguration::test_services_use_internal_network",
+        "message": "AssertionError: docker-compose.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestEnvironmentVariables::test_monitoring_env_vars_in_example",
+        "message": "AssertionError: .env.example not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\tests"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestGrafanaProvisioning::test_grafana_dashboard_provider_exists",
+        "message": "AssertionError: Grafana dashboard provider not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestGrafanaProvisioning::test_grafana_datasource_points_to_prometheus",
+        "message": "AssertionError: Grafana datasource provisioning not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestGrafanaProvisioning::test_grafana_datasource_provisioning_exists",
+        "message": "AssertionError: Grafana datasource provisioning not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestGrafanaProvisioning::test_grafana_has_five_dashboards",
+        "message": "AssertionError: Dashboard 'system-health.json' not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestPrometheusConfiguration::test_alert_rules_define_required_alerts",
+        "message": "AssertionError: alert_rules.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\te"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestPrometheusConfiguration::test_alert_rules_file_exists",
+        "message": "AssertionError: alert_rules.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\te"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestPrometheusConfiguration::test_prometheus_retention_policy_configured",
+        "message": "AssertionError: docker-compose.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_monitoring_integration.TestPrometheusConfiguration::test_prometheus_scrape_interval_is_15_seconds",
+        "message": "AssertionError: prometheus.yml not found assert False + where False = <built-in function _path_exists>('C:\\\\Users\\\\dario\\\\.venvs\\\\baseline-e64d2f7\\\\backend\\\\tes"
+      }
+    ]
+  },
+  "baseline_e64d2f7_full_tree": {
+    "commit": "e64d2f7",
+    "junit_file": "full_base_tree.xml",
+    "junit_sha256": "c0bd91d2ff194cee23180a9ee420c51b62d7eb7ff44dce28167b4bb5d8acaa97",
+    "tests": 1790,
+    "failures": 2,
+    "errors": 2,
+    "skipped": 25,
+    "time_s": 556.542,
+    "failing": [
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x0000026390083F80>)"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x00000263900CB680>)"
+      },
+      {
+        "kind": "error",
+        "id": "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "message": "failed on setup with \"ValueError: the environment variable is longer than 32767 characters\""
+      }
+    ]
+  },
+  "head_0ee5074": {
+    "commit": "0ee5074",
+    "junit_file": "full_final.xml",
+    "junit_sha256": "4ce52ab7052b14adce87de12303548bbf0ff65d8e8043d6affedd591af630fdf",
+    "tests": 1915,
+    "failures": 2,
+    "errors": 2,
+    "skipped": 25,
+    "time_s": 498.601,
+    "failing": [
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x000001B934D59100>)"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x000001B93352AF60>)"
+      },
+      {
+        "kind": "error",
+        "id": "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "message": "failed on setup with \"ValueError: the environment variable is longer than 32767 characters\""
+      }
+    ]
+  },
+  "head_83c749e": {
+    "commit": "83c749e",
+    "junit_file": "full_final_83c749e.xml",
+    "junit_sha256": "6d78acd8d350e750729858aff8a69243a8e5d8c05a5389ec11358a0fefa6a19c",
+    "tests": 1926,
+    "failures": 3,
+    "errors": 2,
+    "skipped": 25,
+    "time_s": 551.128,
+    "failing": [
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x0000026FCBB6AF90>)"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x0000026FCE2E6A20>)"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_darius_whatsapp_contract::test_real_darius_idempotency_a_duplicate_message_does_not_create_a_second_task",
+        "message": "AssertionError: assert (1 == 1 and 2 == 1) + where 1 = len([<models.darius_whatsapp_task.DariusWhatsAppTask object at 0x0000026FCF751310>]) + and 2 = len([('551"
+      },
+      {
+        "kind": "error",
+        "id": "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "message": "failed on setup with \"ValueError: the environment variable is longer than 32767 characters\""
+      }
+    ]
+  },
+  "head_8aedd8a": {
+    "commit": "8aedd8a",
+    "junit_file": "full_final_8aedd8a.xml",
+    "junit_sha256": "1374bc5ecefa4aa516530ac61aa8123b60b16f49e799c52ba9769662eb5b54d0",
+    "tests": 1929,
+    "failures": 2,
+    "errors": 2,
+    "skipped": 25,
+    "time_s": 657.456,
+    "failing": [
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x00000224A4C2A8A0>)"
+      },
+      {
+        "kind": "failure",
+        "id": "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+        "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'} + where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x00000224A4F27DA0>)"
+      },
+      {
+        "kind": "error",
+        "id": "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "message": "failed on setup with \"ValueError: the environment variable is longer than 32767 characters\""
+      }
+    ]
+  },
+  "comparison": {
+    "failing_in_baseline_and_final": [
+      "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+      "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+      "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "failing_only_in_final (regressions)": [],
+    "failing_only_in_baseline (fixed)": [],
+    "baseline_zip_sha256": {
+      "baseline-full-e64d2f7.zip": "62e3f7a299111b5891ea6759fef52e3111c17b3abbcb43fdfc491110c65ceb41"
+    }
+  }
+}

@@ -5,6 +5,12 @@ on:
   schedule:
     - cron: "3/5 * * * *"
 
+# One consumer per bot token: Telegram answers a concurrent getUpdates with 409 and a run overlapping the
+# previous one could answer the same command twice. Never cancel a run that is mid-reply.
+concurrency:
+  group: telegram-commands
+  cancel-in-progress: false
+
 jobs:
   command-poller:
     runs-on: ubuntu-latest

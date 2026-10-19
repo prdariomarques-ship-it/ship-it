@@ -240,6 +240,11 @@ def main() -> int:
     if not token:
         log("Telegram comandos: poller ignorado - configure TELEGRAM_BOT_TOKEN nos secrets do repositorio.")
         return 0
+    if not allowed_chat:
+        # Fail closed: without an allow-listed chat any chat that finds the bot would get answers
+        # (and trigger outbound quote requests). Updates stay queued at Telegram (no offset is acknowledged).
+        log("Telegram comandos: poller ignorado - configure TELEGRAM_CHAT_ID (chat autorizado).")
+        return 0
 
     offset = read_offset()
     params = {"timeout": "0"}
@@ -263,7 +268,7 @@ def main() -> int:
         text = message.get("text") or ""
         if not chat_id or not text.startswith("/"):
             continue
-        if allowed_chat and str(chat_id) != str(allowed_chat):
+        if str(chat_id) != str(allowed_chat):
             continue
         response = route_command(text)
         if response:

@@ -15,6 +15,7 @@ import type {
   DariusTaskState,
   DariusTaskStatus,
   SuspensionState,
+  TelegramInventory,
   WhatsAppLinkPage,
   WhatsAppRouting,
 } from "@/lib/darius-types";
@@ -37,6 +38,7 @@ export const dariusKeys = {
   tasks: ["darius", "tasks"] as const,
   whatsapp: ["darius", "whatsapp"] as const,
   suspension: ["darius", "suspension"] as const,
+  telegram: ["darius", "telegram"] as const,
 };
 
 export function useDariusStatus() {
@@ -127,6 +129,15 @@ export function useWhatsAppRouting() {
     queryKey: [...dariusKeys.whatsapp, "routing"],
     queryFn: () => apiFetch<WhatsAppRouting>("/admin/darius/whatsapp-routing"),
     refetchInterval: LIVE_INTERVAL_MS,
+  });
+}
+
+/** Audited static inventory; it changes only with the code, so it is fetched once per visit. */
+export function useTelegramInventory() {
+  return useQuery({
+    queryKey: dariusKeys.telegram,
+    queryFn: () => apiFetch<TelegramInventory>("/admin/telegram/bots"),
+    staleTime: 5 * 60_000,
   });
 }
 

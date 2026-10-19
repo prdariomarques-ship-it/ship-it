@@ -162,3 +162,45 @@ export interface ApiErrorDetail {
   status?: string;
   outcome_unknown?: boolean;
 }
+
+// --- Telegram: audited, static inventory (GET /admin/telegram/bots). Never live state. ---
+
+export type TelegramRuntimeStatus = "ativo_evidenciado" | "sem_agendamento" | "nao_verificado" | "inconclusivo";
+
+export interface TelegramTrigger {
+  kind: "schedule" | "manual" | "continuous";
+  expression: string | null;
+  host: string;
+}
+
+export interface TelegramRuntime {
+  status: TelegramRuntimeStatus;
+  detail: string;
+  evidence: string | null;
+  as_of: string | null;
+}
+
+export interface TelegramBot {
+  id: string;
+  name: string;
+  scope: "ship-it" | "externo";
+  repository: string | null;
+  source_files: string[];
+  kind: "command_poller" | "push_report" | "gateway" | "unknown";
+  purpose: string;
+  commands: string[];
+  data_sources: string[];
+  /** Environment variable NAMES only. */
+  credentials: string[];
+  triggers: TelegramTrigger[];
+  runtime: TelegramRuntime;
+  risks: string[];
+}
+
+export interface TelegramInventory {
+  as_of: string;
+  live_state_available: boolean;
+  live_state_note: string;
+  bots: TelegramBot[];
+  counts_by_runtime_status: Record<string, number>;
+}

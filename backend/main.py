@@ -13,6 +13,7 @@ import jobs.line_watch_job  # noqa: F401 - register the lines.watch job handler
 import jobs.darius_whatsapp_jobs  # noqa: F401 - register the darius.whatsapp.poll job handler
 from admin.automation import router as admin_automation_router
 from admin.darius import router as admin_darius_router
+from admin.telegram import router as admin_telegram_router
 from admin.router import router as admin_router
 from agents.router import router as agents_router
 from database.session import async_session_factory
@@ -273,6 +274,7 @@ def create_app() -> FastAPI:
     app.include_router(gdrive_router, prefix=prefix)
     app.include_router(admin_router, prefix=prefix)
     app.include_router(admin_darius_router, prefix=prefix)
+    app.include_router(admin_telegram_router, prefix=prefix)
     app.include_router(admin_automation_router, prefix=prefix)
 
     return app
