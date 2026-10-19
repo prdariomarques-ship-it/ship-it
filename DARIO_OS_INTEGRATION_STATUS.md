@@ -1,6 +1,6 @@
 # DARIO OS x DARIUS OSS - Estado da missão de integração
 
-Atualizado: 2026-10-19 | Status: **CONCLUSÃO PARCIAL (Fase 0 concluída; nenhuma implementação ainda)**
+Atualizado: 2026-10-19 | Status: **CONCLUSÃO PARCIAL (Fase 0 e ciclos 1-2 concluídos; painel, suspensão, WhatsApp->DARIUS e Telegram pendentes)**
 Branch de trabalho: `integration/dario-os-darius` (criada a partir de `feat/vendedor-ativo-voz` @ `e64d2f7`). Sem push, sem deploy, sem mensagens reais.
 
 ## 1. Repositórios (Fase 0, somente leitura)
@@ -77,13 +77,31 @@ Repo `darius-rc2-prepush-gate`, branch `integration/darius-lifecycle-api`, commi
 - Resultado: 18 testes HTTP novos; suíte completa **61 arquivos / 440 testes verdes**; `tsc` = 0; arquivos de concorrência/crash 3x = 56/56 em cada rodada; `test:gaps` exit 0. Três mutações (aprovar sem admin, sem isolamento por dono, loop apagando decisões) foram detectadas.
 - O sentinel `HITL GAP` de `webcontract.http.test.ts` (que afirmava 404) foi invertido para o novo contrato, de forma documentada.
 - Contrato documentado em `DARIUS_API_CONTRACTS.md` (DARIUS).
+- Estado final do ciclo 1: cadeia `8f860d1 -> d983c93 -> 2d98c5f -> 5a72e24` (este último só com a evidência do gate). Gate `scripts/verify-all.ps1` em `2d98c5f` (Windows, Node v22.23.2): typecheck 0; suíte completa 61/440; repetição x5 do conjunto de concorrência/crash/idempotência/ciclo de vida = 221 testes verdes em todas as 5 rodadas; `test:gaps` exit 0; demos 11/11; workers órfãos 0; `allGreen=true`. Logs em `artifacts/verification/2d98c5f/windows/` (DARIUS).
 - Não feito neste ciclo: retry/backoff do consumidor QUEUED, scheduler ligado ao `server.ts`, métricas por componente, stream de eventos, execução em container `--network none`.
 
-## 8. Próxima ação concreta
+## 8. Ciclo 2 CONCLUÍDO (Dario OS: adaptador + ponte admin) - evidência
 
-Ciclo 2 (Dario OS, branch `integration/dario-os-darius`): inspecionar as convenções do backend (como outros clientes HTTP em `providers/` e `agents/tools/flowcore_tools.py` tratam timeout/retry/config) e criar o `DariusClient` + rota admin `/admin/darius/*`, com testes contra o servidor DARIUS real em processo. Nada disso foi iniciado.
+Repo `ship-it`, branch `integration/dario-os-darius`, commit `33896b0` (sobre `f9c9e68`). Sem push, sem deploy; `voice-service/.venv-ptbr/` continua sem versionar e intocado.
 
-## 9. Log
+- `backend/services/darius_client.py`: cliente HTTP puro (nunca lê o banco do DARIUS). Autenticação Bearer; **duas credenciais** (serviço = cria/lê tarefas do app; operador admin = decisões humanas e visão transversal). Retry/backoff apenas em GET e em `create_task` com `Idempotency-Key` obrigatória; **approve/reject/cancel são enviados uma única vez** e, se a resposta se perder, o erro carrega `outcome_unknown=True` (o chamador deve ler o estado, não repetir). Circuit breaker (abre após N falhas consecutivas de transporte/5xx; meia-abertura após cooldown; 4xx não conta). Respostas validadas com pydantic (campos extras ignorados); corpo inválido = `DariusInvalidResponse`, nunca valor presumido. Erros tipados (auth/404/409/4xx/indisponível/não configurado); mensagens nunca ecoam o corpo bruto; token fora de `repr` e de erros; `task_id` validado contra path traversal antes de sair do processo.
+- `backend/admin/darius.py` (`/api/admin/darius/*`, só admin): `status` (configurado/alcançável/latência/circuito/credenciais configuradas, sem segredos), `tasks` (filtro de status + paginação), `tasks/{id}`, `tasks/{id}/result`, `approve|reject|cancel`. Cada decisão é auditada em `LogEntry(source="darius_decision")` com o **usuário admin do Dario OS** (o DARIUS só conhece a credencial). Falhas do adaptador viram 502/503; credencial de serviço recusada pelo DARIUS vira 502 (`DARIUS_CREDENTIAL_REJECTED`), nunca 401/403 para o usuário do navegador.
+- `utils/config.py`: `darius_base_url` (vazio = integração desligada, estado "não configurado" explícito), `darius_api_token`, `darius_operator_token`, timeout/tentativas/backoff e parâmetros do circuito. Nenhum segredo no repositório.
+- Testes novos: 16 (adaptador, `httpx.MockTransport`), 34 (router: 401/403 sem chegar ao DARIUS, validação de query, erros mapeados, auditoria, decisão enviada uma vez mesmo com `max_attempts=2`), 7 de **contrato contra o servidor DARIUS real** (processo `node --import tsx src/server.ts` em porta livre, banco temporário, 3 credenciais): token inválido = 401, isolamento por dono (404 uniforme para outro cliente), visibilidade do operador, idempotência, cabeçalhos de paginação, aprovar/rejeitar = 403 para cliente não admin e 409 `NOT_AWAITING_APPROVAL` para admin em tarefa não pausada, cancelamento com um dos dois desfechos documentados. O teste de contrato é opt-in via `DARIUS_REPO_PATH` e **é ignorado com motivo explícito** quando a variável não existe (nunca conta como aprovado).
+- Resultado: 57/57 nos três arquivos; ruff limpo e mypy limpo nos arquivos novos; 0 processos `node` órfãos após o contrato. Duas mutações foram detectadas (retry em `approve` -> 2 testes falham; token no `repr` -> 1 teste falha).
+- Regressão completa do backend (Windows, venv fora do repo `C:\Users\dario\.venvs\shipit`): **1818 passed, 25 skipped, 2 failed, 2 errors**. Os mesmos 4 (`test_context_builder.py` x2, `test_groq_stt.py` x2, o último por nome de diretório temporário longo no Windows) falham de forma idêntica em uma extração limpa de `HEAD` (`f9c9e68`, sem minhas mudanças): **preexistentes, não causados por este ciclo**, e não corrigidos aqui (fora do escopo). `test_auth.py::...minimum_response_time` falhou uma vez por resolução de relógio no Windows e passou na execução completa (instável, preexistente). O Windows precisa de `tzdata` no venv (`store_timezone` America/Sao_Paulo).
+- Não feito: nenhum segredo real foi configurado (`DARIUS_*` vazios); a ponte ainda não está ligada a nenhum fluxo; sem frontend.
+
+## 9. Próxima ação concreta
+
+1. Documentar o frontend do Codex (caminho, branch `codex/marquescolor-evolution` @ `f6084df`, 80 arquivos modificados, como é servido em `localhost:3000` via Caddy) **antes de tocar nele**, e definir a operação segura (diff revisado, sem perda) para integrar as telas.
+2. Suspensão de automação por instância e global no backend (auditar `jobs/handlers.py`, `webhooks/router.py`, `services/conversation_control.py`, `services/rate_limit.py`, `whatsapp_agents_fix/`) com testes de que nenhuma resposta automática protegida sai após a suspensão.
+3. Fluxo WhatsApp -> tarefa DARIUS (`Idempotency-Key` = instância + `external_id`) com mocks; envio real à Evolution só em instância de teste isolada, após confirmar identidade da instância e do destinatário (senão `INCONCLUSIVO`).
+4. Telegram: auditar scripts/workflows; Monitor SCPX segue `INCONCLUSIVO`.
+5. Hardening do DARIUS: consumidor QUEUED com retry/backoff, scheduler no ciclo de vida do servidor, métricas por componente, shutdown/recuperação, `--network none`.
+
+## 10. Log
 
 - 2026-10-19: Fase 0 concluída (somente leitura). Único artefato criado neste repo: este arquivo.
-- 2026-10-19: Ciclo 1 concluído no repo DARIUS (`d983c93`). Dario OS ainda sem alteração de código.
+- 2026-10-19: Ciclo 1 concluído no repo DARIUS (`d983c93`; gate completo em `2d98c5f`, evidência em `5a72e24`).
+- 2026-10-19: Ciclo 2 concluído no Dario OS (`33896b0`): adaptador DARIUS + ponte admin + testes de contrato contra o servidor real. Pendente: painel/frontend, suspensão, fluxo WhatsApp, Telegram, hardening do DARIUS.
