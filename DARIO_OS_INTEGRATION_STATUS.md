@@ -92,16 +92,30 @@ Repo `ship-it`, branch `integration/dario-os-darius`, commit `33896b0` (sobre `f
 - Regressão completa do backend (Windows, venv fora do repo `C:\Users\dario\.venvs\shipit`): **1818 passed, 25 skipped, 2 failed, 2 errors**. Os mesmos 4 (`test_context_builder.py` x2, `test_groq_stt.py` x2, o último por nome de diretório temporário longo no Windows) falham de forma idêntica em uma extração limpa de `HEAD` (`f9c9e68`, sem minhas mudanças): **preexistentes, não causados por este ciclo**, e não corrigidos aqui (fora do escopo). `test_auth.py::...minimum_response_time` falhou uma vez por resolução de relógio no Windows e passou na execução completa (instável, preexistente). O Windows precisa de `tzdata` no venv (`store_timezone` America/Sao_Paulo).
 - Não feito: nenhum segredo real foi configurado (`DARIUS_*` vazios); a ponte ainda não está ligada a nenhum fluxo; sem frontend.
 
-## 9. Próxima ação concreta
+## 9. Ciclo 3 CONCLUÍDO (Codex documentado + suspensão de automação)
 
-1. Documentar o frontend do Codex (caminho, branch `codex/marquescolor-evolution` @ `f6084df`, 80 arquivos modificados, como é servido em `localhost:3000` via Caddy) **antes de tocar nele**, e definir a operação segura (diff revisado, sem perda) para integrar as telas.
-2. Suspensão de automação por instância e global no backend (auditar `jobs/handlers.py`, `webhooks/router.py`, `services/conversation_control.py`, `services/rate_limit.py`, `whatsapp_agents_fix/`) com testes de que nenhuma resposta automática protegida sai após a suspensão.
-3. Fluxo WhatsApp -> tarefa DARIUS (`Idempotency-Key` = instância + `external_id`) com mocks; envio real à Evolution só em instância de teste isolada, após confirmar identidade da instância e do destinatário (senão `INCONCLUSIVO`).
-4. Telegram: auditar scripts/workflows; Monitor SCPX segue `INCONCLUSIVO`.
-5. Hardening do DARIUS: consumidor QUEUED com retry/backoff, scheduler no ciclo de vida do servidor, métricas por componente, shutdown/recuperação, `--network none`.
+Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem push/deploy.
 
-## 10. Log
+**Árvore do Codex** (`DARIO_OS_CODEX_TREE_STATE.md`, somente leitura): clone separado, 40 arquivos modificados + 40 novos, **inclui backend** (instância dupla, PDV, STT, migrações). O `:3000` serve uma imagem já construída; o Caddy encaminha `/api` para o backend de **produção** (`admissaoazusa.com.br`). Snapshot de proteção fora da árvore: `C:\Users\dario\backups\codex-ship-it-20261019\` (patch com SHA-256 + 40/40 arquivos novos; `git status` da árvore idêntico antes/depois). Consequência: painel novo é desenvolvido contra o backend local desta branch, em arquivos novos.
+
+**Suspensão** (reuso do `app_settings`, sem sistema paralelo):
+- Achado: `auto_reply_enabled` só era checado ao ENFILEIRAR; o transporte (`send_whatsapp_text`) não tinha portão, então mensagens já na fila saíam após suspender; não havia suspensão por instância.
+- `services/automation_suspension.py` + 2 configurações persistidas (`automation_suspended`, `automation_suspended_instances`) que sobrevivem a reinício.
+- Portão no transporte, antes de qualquer reserva/cerca: job enfileirado ANTES da suspensão é retido, o job conclui (sem retry, não é liberado em rajada ao retomar) e nada fica em `needs_review`. Alertas ao dono (`_twin_alert_dedup_key`, `owner_alert` do vigia de linhas) e envios humanos do painel (`/api/whatsapp/send-*`, chamam o provider direto) não são afetados. `process_inbound` também pula a geração de resposta (apenas custo).
+- `/api/admin/automation/suspension` (GET) e `PUT .../global`, `PUT .../instances/{instance}`: só admin, motivo obrigatório (3-500), auditoria com o usuário admin.
+- 17 testes novos com o **worker real** e o handler real (só o transporte é falso). Mutações detectadas: portão desligado (6 testes caem) e alerta ao dono desprotegido (2 caem). Regressão: 198/198 nos arquivos afetados; suíte completa antes do ajuste dos 2 testes de catálogo = 1832 passed, falhas apenas as preexistentes (4) + `test_auth` (instável no Windows); os 2 testes de catálogo (`test_admin`, `test_app_settings`) foram atualizados e passam.
+- Limites: o motivo/estado por instância mora em uma lista CSV (duas edições simultâneas de instâncias diferentes podem competir; operação rara, processo único); nome de instância inexistente é aceito (typo é inócuo, não protege nada); `str` de instância é comparado exato (maiúsculas importam).
+
+## 10. Próxima ação concreta
+
+1. Fluxo WhatsApp -> tarefa DARIUS (`Idempotency-Key` = instância + `external_id`) com mocks; envio real à Evolution só em instância de teste isolada, após confirmar identidade da instância e do destinatário (senão `INCONCLUSIVO`).
+2. Frontend do painel (arquivos novos em `frontend/app/admin/darius`, `frontend/components/darius`, `frontend/lib/darius-types.ts`): visão geral/saúde, tarefas, aprovações, suspensão, estado explícito "indisponível". Testado contra o backend local, nunca contra o `:3000`.
+3. Telegram: auditar scripts/workflows; Monitor SCPX segue `INCONCLUSIVO`.
+4. Hardening do DARIUS: consumidor QUEUED com retry/backoff, scheduler no ciclo de vida do servidor, métricas por componente, shutdown/recuperação, `--network none`.
+
+## 11. Log
 
 - 2026-10-19: Fase 0 concluída (somente leitura). Único artefato criado neste repo: este arquivo.
 - 2026-10-19: Ciclo 1 concluído no repo DARIUS (`d983c93`; gate completo em `2d98c5f`, evidência em `5a72e24`).
 - 2026-10-19: Ciclo 2 concluído no Dario OS (`33896b0`): adaptador DARIUS + ponte admin + testes de contrato contra o servidor real. Pendente: painel/frontend, suspensão, fluxo WhatsApp, Telegram, hardening do DARIUS.
+- 2026-10-19: Ciclo 3 concluído: árvore do Codex documentada e protegida (`fd4c9b3`) + suspensão global/por instância no transporte (`e093d9c`). Pendente: fluxo WhatsApp->DARIUS, painel, Telegram, hardening do DARIUS.
