@@ -106,7 +106,7 @@ Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem p
 - 17 testes novos com o **worker real** e o handler real (só o transporte é falso). Mutações detectadas: portão desligado (6 testes caem) e alerta ao dono desprotegido (2 caem). Regressão: 198/198 nos arquivos afetados; suíte completa antes do ajuste dos 2 testes de catálogo = 1832 passed, falhas apenas as preexistentes (4) + `test_auth` (instável no Windows); os 2 testes de catálogo (`test_admin`, `test_app_settings`) foram atualizados e passam.
 - Limites: o motivo/estado por instância mora em uma lista CSV (duas edições simultâneas de instâncias diferentes podem competir; operação rara, processo único); nome de instância inexistente é aceito (typo é inócuo, não protege nada); `str` de instância é comparado exato (maiúsculas importam).
 
-## 10. Ciclo 4 (em andamento) - P1 regressão, P2 suspensão atômica, P3 WhatsApp -> DARIUS
+## 10. Ciclo 4 (em andamento) - P1 regressão, P2 suspensão atômica, P3 WhatsApp -> DARIUS, P4 painel
 
 ### P1 - suíte completa do backend (evidência)
 - **Commit**: `0ee5074271f64f9a9afaf691d8b63905420da1bf` (depois de todas as mudanças de código do ciclo 4 até P3).
@@ -130,6 +130,22 @@ Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem p
 - Testes: 31 com `FakeDarius` (dedup, criação, aprovação, falhas, expiração, suspensão, pausa/retomada, opt-out, antiloop, rota legada intocada) + testes de contrato opt-in contra o DARIUS real (Ollama simulado devolvendo `DONE: <resposta>`; Evolution simulado): tarefa real concluída, resposta enviada pelo Evolution simulado, duplicata = 1 tarefa, falha do modelo = nada enviado, expiração cancela a tarefa real.
 - **Nenhuma mensagem real foi enviada.** O Evolution é sempre simulado; a demonstração com instância de teste + número controlado segue `INCONCLUSIVO` (instância/número não confirmados pelo usuário).
 
+### P1 (re-execução final) - achado de at-most-once e suíte no commit `8aedd8a`
+- A execução completa em `83c749e` deu `3 failed, 1896 passed, 25 skipped, 2 errors`: as 4 pré-existentes **+ 1 defeito real meu**: `test_real_darius_idempotency_a_duplicate_message_does_not_create_a_second_task` (contrato contra o DARIUS real) mostrou **2 envios para 1 vínculo**.
+- **Causa**: o perdedor do `claim` retoma o vínculo em `SUBMITTING` (recuperação de crash), chega à mesma tarefa DARIUS pela `Idempotency-Key` e agendava um segundo poll; dois polls viam `COMPLETED` e `_queue_reply` (sem guarda atômica) enfileirava dois `whatsapp.send_text`. O teste com `FakeDarius` só passava por acaso de agendamento.
+- **Correção (`8aedd8a`)**: `repository.transition(expect, to)` = UPDATE condicional (compare-and-set). Só quem vence `SUBMITTING->SUBMITTED` agenda o poll; só quem vence `SUBMITTED->REPLY_QUEUED` enfileira o envio. 3 testes determinísticos (cópias obsoletas da linha); mutação (`won = True`) derruba os 3 e reproduz `assert 2 == 1`.
+- **Suíte completa em `8aedd8a`**: `python -m pytest -q ... --junitxml=full_final_8aedd8a.xml` em `backend/` (com `DARIUS_REPO_PATH`), `2 failed, 1900 passed, 25 skipped, 2 errors` em 662,62 s. As falhas são **exatamente as 4 pré-existentes** (`test_context_builder` x2, `test_groq_stt` x2). Nenhuma regressão. Commits posteriores a este são só documentação/frontend.
+- Risco residual conhecido: caminhos terminais (`_finish`) ainda não usam compare-and-set; dois workers com resultados *diferentes* do mesmo vínculo não ocorrem na prática (mesma tarefa, mesmo resultado), mas não há teste para isso.
+
+### P4 - painel DARIUS no frontend (endpoints `29ef291`, UI `83c749e`)
+- Backend (somente leitura): `GET /api/admin/darius/whatsapp-tasks` (paginado, filtro por status/instância) e `/whatsapp-routing` (flag, instâncias roteadas, estado de suspensão real). 11 testes.
+- Frontend (`frontend/app/admin/darius`, `components/darius`, `lib/darius-{api,types}.ts`): visão geral/saúde, tarefas, aprovações (aprovar/rejeitar com confirmação e motivo), WhatsApp (vínculos + roteamento), suspensão global/por instância, logs. Polling de 10 s; todo estado sem dado vira "indisponível" explícito, sem dados fictícios. Item de menu novo na sidebar; árvore do Codex e snapshot preservados.
+- `useApi`: `ApiError` tipado (status/detail); `detail` objeto não vira mais `[object Object]` (comportamento com string preservado).
+- Evidência: `tsc --noEmit` limpo, eslint limpo nos arquivos novos/alterados, vitest completo **52 arquivos / 371 testes verdes** (DariusPanel 26, useApi-errors 6). Mutações do painel detectadas.
+- Como rodar localmente: backend local (`uvicorn`) + `npm run dev` apontando `NEXT_PUBLIC_API_URL`/proxy para o backend **local** e abrir `/admin/darius`. Nunca validar rotas novas em `localhost:3000` se ele faz proxy de `/api` para produção.
+- **Não verificado**: renderização no navegador contra o backend local (`next build`/visual) - só jsdom.
+- **Conversas pausadas/humanas**: não há endpoint de listagem no backend; a seção aparece como **indisponível** (limitação declarada, não simulada).
+
 ### Limitações e INCONCLUSIVO deste ciclo
 - Instância roteada ao DARIUS **não** cai para o pipeline local se o DARIUS falhar (decisão deliberada: evita resposta duplicada/divergente); o cliente fica sem resposta automática e o vínculo registra `failed`/`expired` para atendimento humano.
 - Só texto nesta etapa (mídia/áudio não roteados).
@@ -139,9 +155,9 @@ Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem p
 
 ## 11. Próxima ação concreta
 
-1. Fluxo WhatsApp -> tarefa DARIUS (`Idempotency-Key` = instância + `external_id`) com mocks; envio real à Evolution só em instância de teste isolada, após confirmar identidade da instância e do destinatário (senão `INCONCLUSIVO`).
-2. Frontend do painel (arquivos novos em `frontend/app/admin/darius`, `frontend/components/darius`, `frontend/lib/darius-types.ts`): visão geral/saúde, tarefas, aprovações, suspensão, estado explícito "indisponível". Testado contra o backend local, nunca contra o `:3000`.
-3. Telegram: auditar scripts/workflows; Monitor SCPX segue `INCONCLUSIVO`.
+1. (feito) Fluxo WhatsApp -> DARIUS com mocks e contrato real; (feito) painel. Pendente: demonstração com instância de teste isolada + número controlado (precisa de confirmação do usuário; senão `INCONCLUSIVO`).
+2. Verificação visual do painel contra o backend local; listagem backend de conversas pausadas.
+3. Telegram: auditar scripts/workflows (`work/market_command_bot.py`, `send_fx_telegram.py`, `send_market_telegram.py`, workflows `telegram-*.yml`); Monitor SCPX segue `INCONCLUSIVO`.
 4. Hardening do DARIUS: consumidor QUEUED com retry/backoff, scheduler no ciclo de vida do servidor, métricas por componente, shutdown/recuperação, `--network none`.
 
 ## 12. Log
@@ -151,3 +167,4 @@ Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem p
 - 2026-10-19: Ciclo 2 concluído no Dario OS (`33896b0`): adaptador DARIUS + ponte admin + testes de contrato contra o servidor real. Pendente: painel/frontend, suspensão, fluxo WhatsApp, Telegram, hardening do DARIUS.
 - 2026-10-19: Ciclo 3 concluído: árvore do Codex documentada e protegida (`fd4c9b3`) + suspensão global/por instância no transporte (`e093d9c`). Pendente: fluxo WhatsApp->DARIUS, painel, Telegram, hardening do DARIUS.
 - 2026-10-19: Ciclo 4 (parcial): suspensão atômica (`959ade4`), adaptador WhatsApp->DARIUS (`060c1d1`; DARIUS `08d2b9c`), regressão de migrações corrigida (`0ee5074`); suíte completa em `0ee5074`: 2 failed + 2 errors = só as 4 pré-existentes. Pendente: painel (P4), Telegram/hardening (P5).
+- 2026-10-19: Ciclo 4 (P1/P4): painel DARIUS (`29ef291`, `83c749e`); defeito de resposta duplicada achado pela suíte completa e corrigido (`8aedd8a`); suíte completa em `8aedd8a`: 2 failed + 2 errors = só as 4 pré-existentes. Sem push, deploy ou envio real. Pendente: P5 (Telegram, hardening do DARIUS).
