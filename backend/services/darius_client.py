@@ -100,13 +100,34 @@ class TaskSummary(_M):
     updatedAt: str
 
 
+class RetryInfo(_M):
+    attempts: int
+    nextAttemptAt: int
+
+
 class TaskResult(_M):
     id: str
     status: TaskStatus
     done: bool
     result: str | None = None
     error: str | None = None
+    # What DARIUS knows about the external effect of a FAILED task (see DARIUS `FailureClass`) and, while a
+    # QUEUED task backs off after a transient failure, the retry schedule. Absent on older runtimes.
+    failureClass: str | None = None
+    retry: RetryInfo | None = None
     updatedAt: str
+
+
+class RuntimeMetrics(_M):
+    """`GET /api/admin/metrics` of the runtime. Sections stay open dicts: the runtime states what it cannot
+    know as null + reason, and the panel must show exactly that (never a made-up 0)."""
+
+    generatedAt: int
+    scope: dict[str, str] = {}
+    tasks: dict[str, Any]
+    queue: dict[str, Any]
+    engine: dict[str, Any]
+    scheduler: dict[str, Any]
 
 
 class TraceStep(_M):
@@ -366,6 +387,11 @@ class DariusClient:
         """Public task state: status, current step and the sanitized execution trace (no internal reasoning)."""
         response = await self._request("GET", f"/api/tasks/{self._safe_id(task_id)}", retry=True)
         return self._parse(TaskState, response)
+
+    async def get_runtime_metrics(self) -> RuntimeMetrics:
+        """Admin-only operator metrics (durable task counts + process counters). Needs the operator credential."""
+        response = await self._request("GET", "/api/admin/metrics", retry=True)
+        return self._parse(RuntimeMetrics, response)
 
     async def get_result(self, task_id: str) -> TaskResult:
         response = await self._request("GET", f"/api/tasks/{self._safe_id(task_id)}/result", retry=True)

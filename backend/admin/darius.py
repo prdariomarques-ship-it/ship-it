@@ -14,6 +14,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.permissions import require_admin
@@ -124,6 +125,15 @@ async def darius_status(client: Operator) -> DariusStatus:
     base.latency_ms = round((time.perf_counter() - started) * 1000, 1)
     base.circuit = client.breaker.state
     return base
+
+
+@router.get("/metrics", response_model=dc.RuntimeMetrics)
+async def runtime_metrics(client: Operator) -> dc.RuntimeMetrics:
+    """Relays the runtime's own operator metrics. Nothing is computed or defaulted here."""
+    try:
+        return await client.get_runtime_metrics()
+    except dc.DariusError as exc:
+        raise _raise(exc) from exc
 
 
 @router.get("/tasks", response_model=TaskPageOut)
@@ -306,4 +316,75 @@ async def whatsapp_routing(db: DbSession) -> WhatsAppRouting:
             for name in configured
         ],
         unknown_routed_instances=sorted(routed - set(configured)),
+    )
+
+
+class PausedConversation(BaseModel):
+    contact_id: int
+    contact_name: str | None
+    phone_tail: str | None  # last 4 digits only: enough to tell conversations apart, not enough to contact anyone
+    instance: str
+    revision: int
+    paused_since: datetime | None
+    reason: str | None
+    actor_id: int | None
+    send_in_flight: bool
+
+
+class PausedConversationPage(BaseModel):
+    items: list[PausedConversation]
+    total: int
+    next_offset: int | None
+
+
+_PAUSED_SELECT = """
+SELECT c.contact_id AS contact_id, c.instance AS instance, c.revision AS revision, c.inflight AS inflight,
+       ct.name AS contact_name, ct.phone AS phone,
+       (SELECT a.created_at FROM conversation_control_audit a
+         WHERE a.contact_id = c.contact_id AND a.instance = c.instance AND a.action = 'pause'
+         ORDER BY a.revision DESC LIMIT 1) AS paused_since,
+       (SELECT a.reason FROM conversation_control_audit a
+         WHERE a.contact_id = c.contact_id AND a.instance = c.instance AND a.action = 'pause'
+         ORDER BY a.revision DESC LIMIT 1) AS reason,
+       (SELECT a.actor_id FROM conversation_control_audit a
+         WHERE a.contact_id = c.contact_id AND a.instance = c.instance AND a.action = 'pause'
+         ORDER BY a.revision DESC LIMIT 1) AS actor_id
+  FROM conversation_controls c JOIN contacts ct ON ct.id = c.contact_id
+ WHERE c.paused = true {instance_filter}
+ ORDER BY paused_since DESC, c.contact_id, c.instance
+ LIMIT :limit OFFSET :offset
+"""
+
+
+@router.get("/paused-conversations", response_model=PausedConversationPage)
+async def paused_conversations(
+    db: DbSession,
+    instance: Annotated[str | None, Query(max_length=128)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0, le=10_000_000)] = 0,
+) -> PausedConversationPage:
+    """Conversations a human took over (`conversation_controls.paused`): automatic replies - DARIUS included -
+    are blocked for them until the owner resumes. Read-only; resuming stays in the conversation controls."""
+    params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
+    filter_sql = ""
+    count_sql = "SELECT COUNT(*) FROM conversation_controls c WHERE c.paused = true"
+    if instance:
+        params["instance"] = instance
+        filter_sql = "AND c.instance = :instance"
+        count_sql += " AND c.instance = :instance"
+    total = int((await db.execute(text(count_sql), params)).scalar_one())
+    rows = (await db.execute(text(_PAUSED_SELECT.format(instance_filter=filter_sql)), params)).mappings().all()
+    page, more = rows[:limit], len(rows) > limit
+    return PausedConversationPage(
+        items=[
+            PausedConversation(
+                contact_id=r["contact_id"], contact_name=r["contact_name"],
+                phone_tail=(r["phone"] or "")[-4:] or None, instance=r["instance"], revision=int(r["revision"]),
+                paused_since=r["paused_since"], reason=r["reason"], actor_id=r["actor_id"],
+                send_in_flight=r["inflight"] is not None,
+            )
+            for r in page
+        ],
+        total=total,
+        next_offset=offset + limit if more else None,
     )
