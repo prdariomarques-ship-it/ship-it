@@ -1,0 +1,215 @@
+# market-bots: the two bots. Edit this file (no code change) to add/remove instruments, schedules and alert rules.
+# Sources (no API key): Yahoo Finance chart endpoint, BCB SGS / Focus, AwesomeAPI (FX), CVM open data (filings).
+# Symbols come from the source: Yahoo tickers (^BVSP, PETR4.SA, GC=F ...), FX pairs (USD-BRL), SGS codes (1178 ...).
+timezone = "America/Sao_Paulo"
+
+# ======================================================================================================================
+# BOT 1 - MERCADO NACIONAL
+# Telegram credentials: MB_NATIONAL_BOT_TOKEN / MB_NATIONAL_CHAT_ID
+# ======================================================================================================================
+[profiles.national]
+title = "Mercado Brasil"
+schedule = ["10:20", "18:20"]            # local time, business days
+weekdays_only = true
+catchup_minutes = 30                     # a missed slot is sent only if the bot is back within 30 min (no stale burst)
+alert_interval_minutes = 15
+alert_window = ["10:00", "18:00"]
+
+[profiles.national.sections.indices]
+title = "Bolsa Brasil"
+instruments = [
+  { kind = "yahoo", symbol = "^BVSP",     name = "Ibovespa",            unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^IBX50",    name = "IBrX 50",             unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "SMAL11.SA", name = "Small caps (SMAL11)", unit = "R$" },
+  { kind = "yahoo", symbol = "DIVO11.SA", name = "Dividendos (DIVO11)", unit = "R$" },
+  { kind = "yahoo", symbol = "XFIX11.SA", name = "FIIs (XFIX11)",       unit = "R$" },
+  { kind = "yahoo", symbol = "IVVB11.SA", name = "S&P 500 em R$ (IVVB11)", unit = "R$" },
+]
+
+[profiles.national.sections.cambio]
+title = "Dólar x real e câmbio"
+instruments = [
+  { kind = "fx", symbol = "USD-BRL", name = "Dólar",  unit = "R$", decimals = 4 },
+  { kind = "fx", symbol = "EUR-BRL", name = "Euro",   unit = "R$", decimals = 4 },
+  { kind = "fx", symbol = "GBP-BRL", name = "Libra",  unit = "R$", decimals = 4 },
+  { kind = "fx", symbol = "CNY-BRL", name = "Yuan",   unit = "R$", decimals = 4 },
+  { kind = "fx", symbol = "JPY-BRL", name = "Iene",   unit = "R$", decimals = 4 },
+  { kind = "fx", symbol = "ARS-BRL", name = "Peso argentino", unit = "R$", decimals = 5 },
+  { kind = "yahoo", symbol = "DX-Y.NYB", name = "Índice dólar (DXY)", unit = "pts" },
+]
+
+[profiles.national.sections.ouro]
+title = "Ouro"
+instruments = [
+  { kind = "gold_brl", symbol = "",      name = "Ouro em reais (derivado)", unit = "R$/g" },
+  { kind = "yahoo", symbol = "GC=F",     name = "Ouro (COMEX)",            unit = "US$/oz" },
+  { kind = "yahoo", symbol = "GOLD11.SA", name = "Ouro na B3 (GOLD11)",    unit = "R$", decimals = 2 },
+]
+
+[profiles.national.sections.juros]
+title = "Juros e inflação"
+note = "Curva de juros (DI) ainda sem fonte gratuita estável: não é estimada nem exibida."
+instruments = [
+  { kind = "sgs",   symbol = "1178", name = "Selic (taxa over)",      unit = "% a.a." },
+  { kind = "sgs",   symbol = "4389", name = "CDI (anualizado)",       unit = "% a.a." },
+  { kind = "sgs",   symbol = "433",  name = "IPCA (último mês)",      unit = "% a.m." },
+  { kind = "sgs",   symbol = "189",  name = "IGP-M (último mês)",     unit = "% a.m." },
+  { kind = "focus", symbol = "Selic:2026", name = "Focus: Selic fim de 2026",  unit = "% a.a." },
+  { kind = "focus", symbol = "Selic:2027", name = "Focus: Selic fim de 2027",  unit = "% a.a." },
+  { kind = "focus", symbol = "IPCA:2026",  name = "Focus: IPCA 2026",          unit = "%" },
+  { kind = "focus", symbol = "IPCA:2027",  name = "Focus: IPCA 2027",          unit = "%" },
+  { kind = "focus", symbol = "Câmbio:2026", name = "Focus: dólar fim de 2026", unit = "R$", decimals = 2 },
+  { kind = "focus", symbol = "PIB Total:2026", name = "Focus: PIB 2026",       unit = "%" },
+  { kind = "yahoo", symbol = "^TNX", name = "Treasury 10 anos (EUA)", unit = "% a.a.", decimals = 3 },
+]
+
+[profiles.national.movers]
+title = "Maiores altas e quedas (Ibovespa e liquidez)"
+top = 5
+symbols = [
+  "PETR4.SA","PETR3.SA","VALE3.SA","ITUB4.SA","BBDC4.SA","BBAS3.SA","B3SA3.SA","ABEV3.SA","WEGE3.SA","RENT3.SA",
+  "SUZB3.SA","EQTL3.SA","RADL3.SA","RAIL3.SA","GGBR4.SA","CSNA3.SA","LREN3.SA","HAPV3.SA","RDOR3.SA","PRIO3.SA",
+  "CSAN3.SA","UGPA3.SA","VBBR3.SA","CMIG4.SA","SBSP3.SA","TOTS3.SA","ENEV3.SA","ASAI3.SA","BBSE3.SA","CMIN3.SA",
+  "KLBN11.SA","MULT3.SA","CYRE3.SA","MRVE3.SA","NATU3.SA","BPAC11.SA","SANB11.SA","ITSA4.SA","GOAU4.SA","USIM5.SA",
+  "TIMS3.SA","VIVT3.SA","BRAP4.SA","CPFE3.SA","EGIE3.SA","TAEE11.SA","ENGI11.SA","ALPA4.SA","YDUQ3.SA","COGN3.SA",
+  "FLRY3.SA","QUAL3.SA","HYPE3.SA","SMTO3.SA","SLCE3.SA","AURE3.SA","MGLU3.SA","CVCB3.SA","LWSA3.SA","RECV3.SA",
+  "BRKM5.SA","VAMO3.SA","MOVI3.SA","ALOS3.SA","CASH3.SA","DXCO3.SA","GMAT3.SA","KEPL3.SA","POMO4.SA","UNIP6.SA",
+  "VIVA3.SA","ISAE4.SA","LJQQ3.SA",
+]
+
+[profiles.national.filings]
+# Fatos relevantes published on CVM open data. Empty `companies` = every listed company.
+categories = ["Fato Relevante"]
+window_hours = 24
+max_items = 8
+companies = [
+  "petrobras","vale s.a","itau unibanco","bradesco","banco do brasil","b3 s.a","ambev","weg s.a","suzano",
+  "btg pactual","santander","eletrobras","embraer","localiza","rumo s.a","gerdau","prio s.a","sabesp",
+]
+
+[[profiles.national.alerts]]
+symbol = "^BVSP"
+min_abs_change_pct = 2.0
+label = "Ibovespa"
+
+[[profiles.national.alerts]]
+symbol = "USD-BRL"
+min_abs_change_pct = 1.5
+label = "Dólar"
+
+[[profiles.national.alerts]]
+symbol = "GC=F"
+min_abs_change_pct = 2.0
+label = "Ouro"
+
+# ======================================================================================================================
+# BOT 2 - MERCADO GLOBAL
+# Telegram credentials: MB_GLOBAL_BOT_TOKEN / MB_GLOBAL_CHAT_ID
+# ======================================================================================================================
+[profiles.global]
+title = "Mercado Global"
+schedule = ["08:30", "18:15"]
+weekdays_only = true
+catchup_minutes = 30
+alert_interval_minutes = 15
+alert_window = ["05:00", "18:30"]
+
+[profiles.global.sections.asia]
+title = "Ásia e Oceania"
+instruments = [
+  { kind = "yahoo", symbol = "^N225",     name = "Nikkei 225 (Japão)",     unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^HSI",      name = "Hang Seng (Hong Kong)",  unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "000001.SS", name = "Xangai Composite (China)", unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "399001.SZ", name = "Shenzhen (China)",       unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^KS11",     name = "Kospi (Coreia do Sul)",  unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^TWII",     name = "Taiex (Taiwan)",         unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^NSEI",     name = "Nifty 50 (Índia)",       unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^AXJO",     name = "ASX 200 (Austrália)",    unit = "pts", decimals = 0 },
+]
+
+[profiles.global.sections.europa]
+title = "Europa"
+instruments = [
+  { kind = "yahoo", symbol = "^FTSE",      name = "FTSE 100 (Reino Unido)", unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^GDAXI",     name = "DAX (Alemanha)",         unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^FCHI",      name = "CAC 40 (França)",        unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^STOXX50E",  name = "Euro Stoxx 50",          unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^IBEX",      name = "Ibex 35 (Espanha)",      unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "FTSEMIB.MI", name = "FTSE MIB (Itália)",      unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^SSMI",      name = "SMI (Suíça)",            unit = "pts", decimals = 0 },
+]
+
+[profiles.global.sections.eua]
+title = "Estados Unidos"
+instruments = [
+  { kind = "yahoo", symbol = "^GSPC", name = "S&P 500",       unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^IXIC", name = "Nasdaq",        unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^DJI",  name = "Dow Jones",     unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^RUT",  name = "Russell 2000",  unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^VIX",  name = "VIX (volatilidade)", unit = "pts" },
+  { kind = "yahoo", symbol = "SPCX",  name = "SPCX (Space Exploration Technologies)", unit = "US$" },
+]
+
+[profiles.global.sections.americas]
+title = "América do Sul, México e Centro"
+note = "América Central: sem índice gratuito confiável; Panamá aparece pela Copa Holdings (CPA) como referência. Colômbia e Peru por ETF, quando disponível."
+instruments = [
+  { kind = "yahoo", symbol = "^BVSP", name = "Ibovespa (Brasil)",     unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^MXX",  name = "IPC (México)",         unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "^MERV", name = "Merval (Argentina)",   unit = "pts", decimals = 0 },
+  { kind = "yahoo", symbol = "ECH",   name = "Chile (ETF ECH)",      unit = "US$" },
+  { kind = "yahoo", symbol = "EPU",   name = "Peru (ETF EPU)",       unit = "US$" },
+  { kind = "yahoo", symbol = "ILF",   name = "América Latina 40 (ETF ILF)", unit = "US$" },
+  { kind = "yahoo", symbol = "CPA",   name = "Panamá (Copa Holdings, CPA)", unit = "US$" },
+]
+
+[profiles.global.sections.macro]
+title = "Commodities, juros e moedas"
+instruments = [
+  { kind = "yahoo", symbol = "GC=F",     name = "Ouro",            unit = "US$/oz" },
+  { kind = "yahoo", symbol = "SI=F",     name = "Prata",           unit = "US$/oz" },
+  { kind = "yahoo", symbol = "CL=F",     name = "Petróleo WTI",    unit = "US$/bbl" },
+  { kind = "yahoo", symbol = "BZ=F",     name = "Petróleo Brent",  unit = "US$/bbl" },
+  { kind = "yahoo", symbol = "HG=F",     name = "Cobre",           unit = "US$/lb", decimals = 3 },
+  { kind = "yahoo", symbol = "DX-Y.NYB", name = "Índice dólar (DXY)", unit = "pts" },
+  { kind = "yahoo", symbol = "EURUSD=X", name = "Euro/dólar",      unit = "US$", decimals = 4 },
+  { kind = "yahoo", symbol = "^FVX",     name = "Treasury 5 anos", unit = "% a.a.", decimals = 3 },
+  { kind = "yahoo", symbol = "^TNX",     name = "Treasury 10 anos", unit = "% a.a.", decimals = 3 },
+  { kind = "yahoo", symbol = "^TYX",     name = "Treasury 30 anos", unit = "% a.a.", decimals = 3 },
+  { kind = "yahoo", symbol = "BTC-USD",  name = "Bitcoin",         unit = "US$", decimals = 0 },
+]
+
+[[profiles.global.alerts]]
+symbol = "^GSPC"
+min_abs_change_pct = 1.5
+label = "S&P 500"
+
+[[profiles.global.alerts]]
+symbol = "^IXIC"
+min_abs_change_pct = 2.0
+label = "Nasdaq"
+
+[[profiles.global.alerts]]
+symbol = "^VIX"
+min_abs_change_pct = 15.0
+label = "VIX"
+
+[[profiles.global.alerts]]
+symbol = "GC=F"
+min_abs_change_pct = 2.0
+label = "Ouro"
+
+[[profiles.global.alerts]]
+symbol = "CL=F"
+min_abs_change_pct = 4.0
+label = "Petróleo WTI"
+
+[[profiles.global.alerts]]
+symbol = "SPCX"
+min_abs_change_pct = 8.0
+label = "SPCX"
+
+[[profiles.global.alerts]]
+symbol = "BTC-USD"
+min_abs_change_pct = 6.0
+label = "Bitcoin"

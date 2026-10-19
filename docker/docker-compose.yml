@@ -292,7 +292,25 @@ services:
       timeout: 5s
       retries: 5
 
+  # Bots de mercado (Telegram): Mercado Brasil + Mercado Global. Stdlib-only, sem dependência dos demais serviços,
+  # então sobe igual no PC e na VPS. MB_SEND=off (padrão) = dry-run; ver market-bots/README.md.
+  market-bots:
+    build:
+      context: ../market-bots
+    restart: unless-stopped
+    environment:
+      MB_SEND: ${MB_SEND:-off}
+      MB_PROFILES: ${MB_PROFILES:-}
+      MB_NATIONAL_BOT_TOKEN: ${MB_NATIONAL_BOT_TOKEN:-}
+      MB_NATIONAL_CHAT_ID: ${MB_NATIONAL_CHAT_ID:-}
+      MB_GLOBAL_BOT_TOKEN: ${MB_GLOBAL_BOT_TOKEN:-}
+      MB_GLOBAL_CHAT_ID: ${MB_GLOBAL_CHAT_ID:-}
+    volumes:
+      - market_bots_data:/data
+    networks: [darioos]
+
 volumes:
+  market_bots_data:
   postgres_data:
   redis_data:
   qdrant_data:
