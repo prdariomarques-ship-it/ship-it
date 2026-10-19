@@ -353,6 +353,77 @@ async def test_losing_the_claim_race_does_not_expire_the_callers_session(session
         assert contact.id == cid and message.id == mid and message.content
 
 
+@pytest.mark.asyncio
+async def test_two_workers_holding_the_same_completed_link_queue_exactly_one_reply(sessions, provider, darius):
+    """Regression (found by the full-suite run against a real DARIUS): every poll of the same link sees
+    COMPLETED. The SUBMITTED -> REPLY_QUEUED transition must be won by exactly one worker, otherwise the
+    contact receives the answer twice. Both workers load the row BEFORE either acts (stale copies)."""
+    from repositories.darius_whatsapp_task import DariusWhatsAppTaskRepository
+
+    cid, mid = await _inbound(sessions)
+    await _enqueue_inbound(sessions, cid, mid)
+    await _drain()
+    (link,) = await _links(sessions)
+    assert link.status == "submitted"
+    darius.set(link.darius_task_id, "COMPLETED", REPLY)
+
+    async with sessions() as first, sessions() as second:
+        row_first = await DariusWhatsAppTaskRepository(first).get(link.id)
+        row_second = await DariusWhatsAppTaskRepository(second).get(link.id)
+        assert row_first.status == row_second.status == "submitted"
+        settings = get_settings()
+        await darius_whatsapp.poll_link(first, settings, row_first, client=darius.client)
+        await darius_whatsapp.poll_link(second, settings, row_second, client=darius.client)
+        assert row_first.status == row_second.status == "reply_queued"
+
+    await _drain()
+    assert len(await _jobs(sessions, "whatsapp.send_text")) == 1
+    assert len(provider.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_two_workers_submitting_the_same_link_schedule_a_single_poll(sessions, darius):
+    """A losing claimant resumes the SUBMITTING link (crash recovery). Both reach the same DARIUS task through
+    the shared Idempotency-Key; only one may move the link to SUBMITTED and schedule polling."""
+    from repositories.darius_whatsapp_task import DariusWhatsAppTaskRepository
+
+    cid, mid = await _inbound(sessions)
+    async with sessions() as db:
+        link, created = await DariusWhatsAppTaskRepository(db).claim(
+            dedupe_key="wa-submit-race", message_id=mid, contact_id=cid, instance=INSTANCE, control_revision=None
+        )
+        assert created and link.status == "submitting"
+
+    async with sessions() as first, sessions() as second:
+        row_first = await DariusWhatsAppTaskRepository(first).get(link.id)
+        row_second = await DariusWhatsAppTaskRepository(second).get(link.id)
+        settings = get_settings()
+        results = [
+            await darius_whatsapp.submit_link(first, settings, row_first, client=darius.client, content=TEXT),
+            await darius_whatsapp.submit_link(second, settings, row_second, client=darius.client, content=TEXT),
+        ]
+
+    assert sorted(r.outcome for r in results) == ["duplicate", "submitted"]
+    assert len(darius.tasks) == 1 and {c["key"] for c in darius.create_calls} == {"wa-submit-race"}
+    assert len(await _jobs(sessions, darius_whatsapp.POLL_JOB)) == 1
+
+
+@pytest.mark.asyncio
+async def test_transition_is_compare_and_set(sessions):
+    from repositories.darius_whatsapp_task import DariusWhatsAppTaskRepository
+
+    cid, mid = await _inbound(sessions)
+    async with sessions() as db:
+        repo = DariusWhatsAppTaskRepository(db)
+        link, _ = await repo.claim(
+            dedupe_key="wa-cas", message_id=mid, contact_id=cid, instance=INSTANCE, control_revision=None
+        )
+        assert await repo.transition(link, expect="submitting", to="submitted") is True
+        assert await repo.transition(link, expect="submitting", to="submitted") is False   # already moved
+        assert await repo.transition(link, expect="failed", to="reply_queued") is False    # wrong precondition
+        assert link.status == "submitted"
+
+
 # --- authorization (DARIUS-side approval) ------------------------------------------
 @pytest.mark.asyncio
 async def test_nothing_is_sent_while_the_task_awaits_approval(sessions, provider, darius):

@@ -183,12 +183,16 @@ async def submit_link(
         await _log(db, row, "DARIUS indisponível ao criar a tarefa; nova tentativa agendada (mesma Idempotency-Key)",
                    level="warning", reason=reason, retry_in_seconds=delay)
         return Dispatch("retry_scheduled", row.id)
+    repo = DariusWhatsAppTaskRepository(db)
     row.darius_task_id = summary.id
     row.darius_status = summary.status
-    row.status = SUBMITTED
     row.last_error = None
     _note(row, "submitted", darius_task_id=summary.id, darius_status=summary.status)
-    await DariusWhatsAppTaskRepository(db).save(row)
+    # Compare-and-set: a concurrent delivery of the same message resolves to the same DARIUS task
+    # (same Idempotency-Key) but only ONE caller may move SUBMITTING -> SUBMITTED and schedule polling.
+    if not await repo.transition(row, expect=SUBMITTING, to=SUBMITTED):
+        await _log(db, row, "Mensagem já submetida por outra execução (duplicata ignorada)")
+        return Dispatch("duplicate", row.id)
     await JobService(db).enqueue(POLL_JOB, {"link_id": row.id}, delay_seconds=settings.darius_whatsapp_poll_seconds)
     await _log(db, row, "Tarefa DARIUS criada para a mensagem do WhatsApp", darius_status=summary.status)
     return Dispatch("submitted", row.id)
@@ -257,8 +261,11 @@ async def _queue_reply(db: AsyncSession, row: DariusWhatsAppTask, reply: str) ->
     if contact is None or not contact.phone:
         await _finish(db, row, FAILED, "contact_without_phone", level="error")
         return
-    # At-most-once: persist the state change BEFORE enqueueing the send.
-    row.status = REPLY_QUEUED
+    # At-most-once: win the SUBMITTED -> REPLY_QUEUED transition (atomic, in the database) BEFORE
+    # enqueueing the send. Concurrent polls of the same link all see COMPLETED; exactly one proceeds.
+    if not await DariusWhatsAppTaskRepository(db).transition(row, expect=SUBMITTED, to=REPLY_QUEUED):
+        await _log(db, row, "Resposta já entregue à fila por outra execução (duplicata ignorada)")
+        return
     row.reply_chars = len(reply)
     row.reply_sha256 = hashlib.sha256(reply.encode()).hexdigest()
     row.finished_at = utcnow()

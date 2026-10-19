@@ -1,4 +1,4 @@
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from models.darius_whatsapp_task import DariusWhatsAppTask
@@ -36,6 +36,26 @@ class DariusWhatsAppTaskRepository(SQLAlchemyRepository[DariusWhatsAppTask]):
         await self.session.commit()
         await self.session.refresh(row)
         return row, True
+
+    async def transition(self, row: DariusWhatsAppTask, *, expect: str, to: str) -> bool:
+        """Atomically move the link `expect` -> `to`. True only for the single caller that did it.
+
+        Compare-and-set in the database (UPDATE ... WHERE status = :expect), so concurrent
+        workers holding stale copies of the row cannot both win. The winner alone may perform
+        the side effect that belongs to the transition (enqueue the poll / the WhatsApp send);
+        a loser returns with the row refreshed to the committed state. Pending attribute changes
+        on `row` are flushed by the same transaction.
+        """
+        result = await self.session.execute(
+            update(DariusWhatsAppTask)
+            .where(DariusWhatsAppTask.id == row.id, DariusWhatsAppTask.status == expect)
+            .values(status=to)
+            .execution_options(synchronize_session=False)
+        )
+        won = result.rowcount == 1
+        await self.session.commit()
+        await self.session.refresh(row)
+        return won
 
     async def save(self, row: DariusWhatsAppTask) -> DariusWhatsAppTask:
         await self.session.commit()
