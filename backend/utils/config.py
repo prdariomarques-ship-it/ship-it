@@ -206,6 +206,25 @@ class Settings(BaseSettings):
     flowcore_request_max_attempts: int = 3
     flowcore_request_backoff_seconds: float = 1.0
 
+    # DARIUS OSS (TypeScript multi-agent runtime) — the canonical task runtime.
+    # The panel talks to it ONLY through its authenticated HTTP API
+    # (`services/darius_client.py`); it never reads the DARIUS database.
+    # Empty `darius_base_url` disables the integration (every call then reports
+    # "not configured" instead of failing or inventing data).
+    #  - darius_api_token:      service client that creates/reads this app's tasks.
+    #  - darius_operator_token: admin credential, used ONLY for human decisions
+    #    (approve/reject) and the cross-client operator view.
+    darius_base_url: str = ""
+    darius_api_token: str = ""
+    darius_operator_token: str = ""
+    darius_request_timeout_seconds: float = 10.0
+    darius_request_max_attempts: int = 3
+    darius_request_backoff_seconds: float = 0.5
+    # Circuit breaker: after N consecutive transport/5xx failures calls fail fast
+    # for the cooldown instead of piling timeouts onto a dead runtime.
+    darius_circuit_failure_threshold: int = 5
+    darius_circuit_cooldown_seconds: float = 30.0
+
     official_api_base_url: str = "https://graph.facebook.com/v22.0"
     official_access_token: str = ""
     official_phone_number_id: str = ""
