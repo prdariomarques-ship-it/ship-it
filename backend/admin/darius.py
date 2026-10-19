@@ -18,7 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.permissions import require_admin
 from database.session import get_db
+from models.automation_suspension import SCOPE_GLOBAL, instance_scope
 from models.user import User
+from repositories.darius_whatsapp_task import DariusWhatsAppTaskRepository
+from services import automation_suspension, darius_whatsapp
 from services import darius_client as dc
 from services.audit import record_log
 from utils.config import get_settings
@@ -211,3 +214,96 @@ async def reject_task(
 @router.post("/tasks/{task_id}/cancel", response_model=dc.DecisionAck)
 async def cancel_task(task_id: str, client: Operator, db: DbSession, admin: AdminUser) -> dc.DecisionAck:
     return await _decide("cancel", task_id, db, admin, lambda: client.cancel(task_id))
+
+
+# --- WhatsApp -> DARIUS links (read-only; the audit trail lives in darius_whatsapp_tasks) -----------------------
+
+WhatsAppLinkStatus = Literal["submitting", "submitted", "reply_queued", "failed", "cancelled", "expired", "skipped"]
+
+
+class WhatsAppLinkOut(BaseModel):
+    """One inbound message -> one DARIUS task. Carries ids, sizes and states only: never message or reply text."""
+
+    id: int
+    instance: str
+    status: str
+    darius_task_id: str | None
+    darius_status: str | None
+    message_id: int
+    contact_id: int
+    attempts: int
+    last_error: str | None
+    reply_chars: int | None
+    history: list[dict[str, Any]]
+    created_at: datetime
+    finished_at: datetime | None
+
+
+class WhatsAppLinkPage(BaseModel):
+    items: list[WhatsAppLinkOut]
+    counts: dict[str, int]
+    next_offset: int | None
+
+
+class WhatsAppInstanceRouting(BaseModel):
+    instance: str
+    routed_to_darius: bool
+    suspended: bool
+    suspension_reason: str | None = None
+
+
+class WhatsAppRouting(BaseModel):
+    """What decides where an inbound WhatsApp message goes, straight from configuration and the suspension table."""
+
+    enabled: bool
+    darius_configured: bool
+    reply_timeout_seconds: int
+    global_suspended: bool
+    global_suspension_reason: str | None = None
+    instances: list[WhatsAppInstanceRouting]
+    unknown_routed_instances: list[str]
+
+
+@router.get("/whatsapp-tasks", response_model=WhatsAppLinkPage)
+async def list_whatsapp_links(
+    db: DbSession,
+    status: Annotated[WhatsAppLinkStatus | None, Query()] = None,
+    instance: Annotated[str | None, Query(max_length=128)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0, le=10_000_000)] = 0,
+) -> WhatsAppLinkPage:
+    repo = DariusWhatsAppTaskRepository(db)
+    rows = await repo.list_recent(status=status, instance=instance, limit=limit + 1, offset=offset)
+    page, more = rows[:limit], len(rows) > limit
+    return WhatsAppLinkPage(
+        items=[WhatsAppLinkOut.model_validate(row, from_attributes=True) for row in page],
+        counts=await repo.counts_by_status(),
+        next_offset=offset + limit if more else None,
+    )
+
+
+@router.get("/whatsapp-routing", response_model=WhatsAppRouting)
+async def whatsapp_routing(db: DbSession) -> WhatsAppRouting:
+    settings = get_settings()
+    suspension = await automation_suspension.state(db, settings)
+    reasons = {item["scope"]: item["reason"] for item in suspension["details"]}
+    suspended = set(suspension["suspended_instances"])
+    routed = darius_whatsapp.routed_instances(settings)
+    configured = suspension["configured_instances"]
+    return WhatsAppRouting(
+        enabled=settings.darius_whatsapp_enabled,
+        darius_configured=bool(settings.darius_base_url and settings.darius_api_token),
+        reply_timeout_seconds=settings.darius_whatsapp_reply_timeout_seconds,
+        global_suspended=suspension["global_suspended"],
+        global_suspension_reason=reasons.get(SCOPE_GLOBAL),
+        instances=[
+            WhatsAppInstanceRouting(
+                instance=name,
+                routed_to_darius=bool(settings.darius_whatsapp_enabled and name in routed),
+                suspended=name in suspended,
+                suspension_reason=reasons.get(instance_scope(name)),
+            )
+            for name in configured
+        ],
+        unknown_routed_instances=sorted(routed - set(configured)),
+    )

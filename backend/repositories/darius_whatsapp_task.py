@@ -43,11 +43,13 @@ class DariusWhatsAppTaskRepository(SQLAlchemyRepository[DariusWhatsAppTask]):
         return row
 
     async def list_recent(
-        self, *, status: str | None = None, limit: int = 50, offset: int = 0
+        self, *, status: str | None = None, instance: str | None = None, limit: int = 50, offset: int = 0
     ) -> list[DariusWhatsAppTask]:
         statement = select(DariusWhatsAppTask)
         if status:
             statement = statement.where(DariusWhatsAppTask.status == status)
+        if instance:
+            statement = statement.where(DariusWhatsAppTask.instance == instance)
         result = await self.session.execute(
             statement.order_by(DariusWhatsAppTask.id.desc()).limit(limit).offset(offset)
         )
