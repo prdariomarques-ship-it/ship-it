@@ -53,6 +53,31 @@ async function tryRefresh(): Promise<boolean> {
   return refreshInFlight;
 }
 
+/** Error carrying the HTTP status and the raw `detail` (string, or the bridge's `{message, code, ...}` object). */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail: unknown
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+// `detail` is a string for most endpoints, an object `{message, code, ...}` for the DARIUS bridge and an
+// array for FastAPI validation errors. Strings keep the previous behaviour; objects no longer degrade to
+// "[object Object]".
+function apiError(status: number, detail: unknown): ApiError {
+  let message = `Request failed: ${status}`;
+  if (typeof detail === "string" && detail) message = detail;
+  else if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const text = (detail as { message?: unknown }).message;
+    if (typeof text === "string" && text) message = text;
+  }
+  return new ApiError(message, status, detail);
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -78,7 +103,7 @@ export async function apiFetch<T>(
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail ?? `Request failed: ${response.status}`);
+    throw apiError(response.status, body.detail);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
