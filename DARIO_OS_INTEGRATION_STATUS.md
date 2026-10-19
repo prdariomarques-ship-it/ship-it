@@ -143,8 +143,7 @@ Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem p
 - `useApi`: `ApiError` tipado (status/detail); `detail` objeto não vira mais `[object Object]` (comportamento com string preservado).
 - Evidência: `tsc --noEmit` limpo, eslint limpo nos arquivos novos/alterados, vitest completo **52 arquivos / 371 testes verdes** (DariusPanel 26, useApi-errors 6). Mutações do painel detectadas.
 - Como rodar localmente: backend local (`uvicorn`) + `npm run dev` apontando `NEXT_PUBLIC_API_URL`/proxy para o backend **local** e abrir `/admin/darius`. Nunca validar rotas novas em `localhost:3000` se ele faz proxy de `/api` para produção.
-- **Não verificado**: renderização no navegador contra o backend local (`next build`/visual) - só jsdom.
-- **Conversas pausadas/humanas**: não há endpoint de listagem no backend; a seção aparece como **indisponível** (limitação declarada, não simulada).
+- ~~Não verificado: renderização no navegador~~ e ~~conversas pausadas indisponíveis~~: **superados no ciclo 5** (seção 13): validação em Chrome real contra stack isolado e endpoint `GET /admin/darius/paused-conversations` implementado.
 
 ### Limitações e INCONCLUSIVO deste ciclo
 - Instância roteada ao DARIUS **não** cai para o pipeline local se o DARIUS falhar (decisão deliberada: evita resposta duplicada/divergente); o cliente fica sem resposta automática e o vínculo registra `failed`/`expired` para atendimento humano.
@@ -155,10 +154,12 @@ Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem p
 
 ## 11. Próxima ação concreta
 
-1. (feito) Fluxo WhatsApp -> DARIUS com mocks e contrato real; (feito) painel. Pendente: demonstração com instância de teste isolada + número controlado (precisa de confirmação do usuário; senão `INCONCLUSIVO`).
-2. Verificação visual do painel contra o backend local; listagem backend de conversas pausadas.
-3. Telegram: auditar scripts/workflows (`work/market_command_bot.py`, `send_fx_telegram.py`, `send_market_telegram.py`, workflows `telegram-*.yml`); Monitor SCPX segue `INCONCLUSIVO`.
-4. Hardening do DARIUS: consumidor QUEUED com retry/backoff, scheduler no ciclo de vida do servidor, métricas por componente, shutdown/recuperação, `--network none`.
+Atualizado no ciclo 5. Itens 2 a 4 do plano anterior (painel no navegador, conversas pausadas, auditoria Telegram, retry/scheduler/métricas do DARIUS) estão feitos (seção 13). Resta, e depende de decisão do usuário:
+
+1. Demonstração WhatsApp->DARIUS com **instância de teste isolada + número controlado** (não confirmados; segue `INCONCLUSIVO`; nenhuma mensagem real foi enviada).
+2. Medir a conformidade do **modelo real** com o protocolo `DONE:` (hoje só com Ollama simulado e parser testado).
+3. Layout mobile do painel e cliques de aprovação/suspensão no navegador (ver limites na seção 13).
+4. Validar o painel contra PostgreSQL (o e2e usou SQLite) e, só com autorização explícita, push/deploy. Monitor SCPX segue `INCONCLUSIVO`.
 
 ## 12. Log
 
@@ -168,3 +169,54 @@ Commits `fd4c9b3` (documentação) e `e093d9c` (código), sobre `8a6921f`. Sem p
 - 2026-10-19: Ciclo 3 concluído: árvore do Codex documentada e protegida (`fd4c9b3`) + suspensão global/por instância no transporte (`e093d9c`). Pendente: fluxo WhatsApp->DARIUS, painel, Telegram, hardening do DARIUS.
 - 2026-10-19: Ciclo 4 (parcial): suspensão atômica (`959ade4`), adaptador WhatsApp->DARIUS (`060c1d1`; DARIUS `08d2b9c`), regressão de migrações corrigida (`0ee5074`); suíte completa em `0ee5074`: 2 failed + 2 errors = só as 4 pré-existentes. Pendente: painel (P4), Telegram/hardening (P5).
 - 2026-10-19: Ciclo 4 (P1/P4): painel DARIUS (`29ef291`, `83c749e`); defeito de resposta duplicada achado pela suíte completa e corrigido (`8aedd8a`); suíte completa em `8aedd8a`: 2 failed + 2 errors = só as 4 pré-existentes. Sem push, deploy ou envio real. Pendente: P5 (Telegram, hardening do DARIUS).
+- 2026-10-19: Ciclo 5 (P5 + hardening final): Telegram (`7a49b69`); DARIUS retry/backoff (`a94f197`), scheduler + métricas (`3620058`), protocolo `DONE:` (`c08077b`); Dario OS: testes de modelo/WhatsApp contra o runtime real (`0873881`), ponte de métricas + conversas pausadas (`14a44d8`), abas do painel (`9705cfe`), correções achadas no navegador (`015e5cd`). Suíte completa do backend em `015e5cd`: 2 failed + 2 errors = só as 4 pré-existentes. **CONCLUSÃO PARCIAL.** Sem push, deploy ou envio real.
+
+## 13. Ciclo 5 - P5 e hardening final (CONCLUSÃO PARCIAL)
+
+Sem push, deploy ou envio real de mensagem. Só os processos do stack de teste deste ciclo (portas 18000/18100/13100) foram iniciados e encerrados; nada do que já rodava foi tocado. O frontend do Codex não foi alterado por este ciclo (`git status` só mostra os artefatos deste ciclo e `voice-service/.venv-ptbr/`, não rastreado e deixado como estava) e o snapshot `C:\Users\dario\backups\codex-ship-it-20261019\` continua existindo.
+
+### Commits
+- **DARIUS** (`integration/darius-lifecycle-api`): `a94f197` retry/backoff do consumidor QUEUED; `3620058` scheduler durável no ciclo de vida do servidor + `GET /api/admin/metrics`; `c08077b` protocolo `DONE:` fixado por testes. Suíte: **519/519**, `tsc --noEmit` limpo (JSON em `docs/evidence/cycle5/darius/`).
+- **Dario OS** (`integration/dario-os-darius`): `7a49b69` Telegram (auditoria, poller fail-closed, inventário somente leitura); `0873881` testes de saída malformada, queda do provedor e escopo de suspensão contra o runtime real; `14a44d8` ponte de métricas + conversas pausadas; `9705cfe` abas Métricas e Conversas pausadas; `015e5cd` correções achadas no navegador.
+
+### Garantias do DARIUS (a confiabilidade mora nele; o TS segue canônico)
+- **Retry/backoff** (desligado por padrão; `DARIUS_QUEUE_RETRY_*`, valor inválido = recusa subir). Só `BEFORE_EFFECT_TRANSIENT` é repetida. `EFFECT_UNKNOWN`, `EFFECT_CONFIRMED` e `BEFORE_EFFECT_PERMANENT` **nunca** são repetidas; esgotadas viram `RETRIES_EXHAUSTED`. `TransientError{beforeEffect}` é atestado de quem lança; erro dentro do ACT sem esse atestado é `EFFECT_UNKNOWN`. A chave de efeito não avança ao reenfileirar. `/result` expõe só `failureClass` e `retry` (lista branca; metadado bruto e cadeia de raciocínio nunca cruzam a API).
+- **Scheduler** (desligado por padrão): dispara 1x; reinício não redispara; dois processos geram 1 tarefa (CAS + chave `schedule:<id>:<slot>`); configuração inválida recusa subir. Testado com processos `server.ts` reais.
+- **Métricas**: contagens duráveis vêm do armazenamento; contadores de processo zeram no reinício e dizem isso; o que não é lido é `null`, nunca 0.
+- **`DONE:`**: `parseDoneOutput` exportado; espaço antes do marcador tolerado; resultado vazio não conclui; verificado contra o runtime real.
+
+### Painel (validação em Chrome real; detalhes em `docs/evidence/cycle5/panel-e2e-20261019.md`)
+Stack isolado (backend 18000, DARIUS 18100, Next 13100, bancos SQLite descartáveis; nada na 3000). Verificados: navegação nas 9 abas, dados reais, polling de 10 s, tráfego só para o backend isolado, erro com DARIUS derrubado, recuperação automática, 403 na API e "Acesso restrito" na UI para usuário comum. A validação **achou 2 defeitos reais** (número anterior à queda exibido como atual; `paused_since` sem fuso), corrigidos com teste de regressão (o primeiro falha sem a correção).
+
+### Conversas pausadas/humanas
+Endpoint implementado (`GET /admin/darius/paused-conversations`, somente leitura, paginado, filtro por instância; telefone mascarado nos 4 últimos dígitos; motivo e autor da pausa mais recente). Retomar continua só dentro da conversa, com a checagem de revisão que protege envio em andamento.
+
+### Suíte completa do backend em `015e5cd`
+`python -m pytest -q ... --junitxml=full_final_015e5cd.xml` (com `DARIUS_REPO_PATH`): **1992 testes, 1963 passaram, 25 skips, 2 falhas + 2 erros em 674,8 s**. As 4 são exatamente as pré-existentes, com baseline comparável em `e64d2f7` (seção 10, P1): `test_context_builder` x2 e `test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede` x2 (variável de ambiente > 32767 caracteres no Windows). Os testes de duplicata/CAS do WhatsApp (`test_transition_is_compare_and_set`, `test_a_duplicated_inbound_job_creates_one_task_and_one_reply`, `test_a_create_whose_response_was_lost_does_not_duplicate_the_task`, `test_pause_and_resume_after_submission_still_blocks_the_stale_reply` e o de contrato real `test_real_darius_idempotency_a_duplicate_message_does_not_create_a_second_task`) estão presentes e passaram nesta execução; nenhum foi removido nem enfraquecido. Frontend: vitest **54 arquivos / 392 testes**, `tsc --noEmit` e eslint sem erro. O log bruto (209 MB, inflado pelo parâmetro gigante do teste groq) e o XML (26 MB) ficam fora do repositório.
+
+### Classificação
+| Requisito | Estado | Evidência / observação |
+|---|---|---|
+| Retry/backoff do consumidor QUEUED | COMPROVADO | Testes unitários e multiprocesso; só falha antes do efeito é repetida |
+| Scheduler no servidor real + métricas | COMPROVADO | Processos `server.ts` reais; ponte e painel exibem os mesmos números |
+| Protocolo `DONE:` com parser | COMPROVADO | Runtime real com Ollama simulado |
+| Fluxo WhatsApp->DARIUS até o adaptador de envio | COMPROVADO (mocks) | Evolution simulado; sem mensagem real |
+| Suspensão global/por instância, inclusive jobs já enfileirados | COMPROVADO | Job e worker reais, só o transporte é falso |
+| Painel no navegador real (desktop) | COMPROVADO | Seção acima |
+| Listagem de conversas pausadas | COMPROVADO | Backend + painel + 12 testes backend / 13 frontend |
+| Telegram: inventário e poller fail-closed | COMPROVADO (estático) | Estado em tempo real **indisponível** por desenho |
+| Layout mobile do painel | PARCIAL | Não verificado: o redimensionamento não alterou o viewport |
+| Aprovar/rejeitar/suspender no navegador, paginação | PARCIAL | Só vitest e testes da ponte; não clicados no navegador |
+| Datas do vínculo WhatsApp (`created_at`) | PARCIAL | 3 h adiantadas no SQLite (mesma causa do `paused_since`); PostgreSQL não verificado |
+| Desligamento gracioso (SIGTERM) | PARCIAL | Não provável no Windows (SIGTERM mata); testes usam kill forçado; recuperação de lease é a rede de segurança |
+| Painel contra PostgreSQL | PARCIAL | E2E usou SQLite |
+| Conformidade do modelo real com `DONE:` | INCONCLUSIVO | Sem medição com LLM real |
+| Demonstração WhatsApp real (instância de teste + número controlado) | INCONCLUSIVO | Instância e número não confirmados pelo usuário |
+| Monitor SCPX | INCONCLUSIVO | Localização/estado não verificados |
+| Qual backend serve o WhatsApp em produção; contrato FlowCore `/api/ask`; limiares do antiloop | INCONCLUSIVO | Não verificados |
+
+### Limites conhecidos (documentados, não corrigidos)
+- `listTasksByStatus` do DARIUS tem `LIMIT 100` ordenado por `updatedAt`: mais de 100 tarefas em espera podem atrasar as prontas do consumidor.
+- Retry e scheduler vêm **desligados** por padrão; ligar é decisão operacional explícita.
+- O stack e2e é reproduzível por `docs/evidence/cycle5/e2e/` (caminhos fixos desta máquina; valores de teste, nenhum segredo).
+
