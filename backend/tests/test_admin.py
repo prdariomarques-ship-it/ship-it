@@ -194,13 +194,8 @@ async def test_admin_settings_lists_the_behavior_catalog(client, admin_headers):
     response = await client.get("/api/admin/settings", headers=admin_headers)
     body = response.json()
     keys = {entry["key"] for entry in body}
-    assert keys == {
-        "auto_reply_enabled", "automation_suspended", "automation_suspended_instances",
-        "jobs_enabled", "environment",
-    }
+    assert keys == {"auto_reply_enabled", "jobs_enabled", "environment"}
     by_key = {entry["key"]: entry for entry in body}
-    assert by_key["automation_suspended"]["editable"] is True
-    assert by_key["automation_suspended_instances"]["editable"] is True
     assert by_key["auto_reply_enabled"]["editable"] is True
     assert by_key["jobs_enabled"]["editable"] is False
     assert by_key["environment"]["editable"] is False

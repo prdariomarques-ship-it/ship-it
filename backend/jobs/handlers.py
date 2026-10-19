@@ -167,7 +167,7 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
 
     if not automation_suspension.is_protected_from_suspension(payload):
         _scope = instance or getattr(get_whatsapp_provider(), 'default_instance', '') or ''
-        _suspended = automation_suspension.suspension_reason(_suspension_settings(), _scope)
+        _suspended = await automation_suspension.suspension_reason(db, _suspension_settings(), _scope)
         if _suspended:
             await record_log(
                 db, source='automation_suspension', level='info',
@@ -634,7 +634,7 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
     instance = str(payload.get("instance") or "")
     from services import automation_suspension as _suspension
 
-    _suspended = _suspension.suspension_reason(settings, instance)
+    _suspended = await _suspension.suspension_reason(db, settings, instance)
     if _suspended:
         # Cost/side-effect guard only: the transport chokepoint (send_whatsapp_text) is what guarantees nothing is sent.
         logger.info("Auto-reply skipped: automation suspended (%s) contact=%s", _suspended, contact_id)

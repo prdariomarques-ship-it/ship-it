@@ -81,13 +81,8 @@ async def test_list_settings_returns_every_catalog_entry(session_factory):
     async with session_factory() as session:
         entries = await app_settings_service.list_settings(session)
     keys = {entry["key"] for entry in entries}
-    assert keys == {
-        "auto_reply_enabled", "automation_suspended", "automation_suspended_instances",
-        "jobs_enabled", "environment",
-    }
+    assert keys == {"auto_reply_enabled", "jobs_enabled", "environment"}
     by_key = {entry["key"]: entry for entry in entries}
-    assert by_key["automation_suspended"]["editable"] is True
-    assert by_key["automation_suspended_instances"]["editable"] is True
     assert by_key["auto_reply_enabled"]["editable"] is True
     assert by_key["jobs_enabled"]["editable"] is False
     assert by_key["environment"]["editable"] is False

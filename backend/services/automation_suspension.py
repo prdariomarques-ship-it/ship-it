@@ -1,8 +1,10 @@
 """Suspension of automatic outbound WhatsApp (global and per Evolution instance).
 
-Built on the existing runtime-settings mechanism (`services/app_settings.py`):
-two editable entries are persisted in `app_settings`, layered over the
-`Settings` singleton, and re-applied at startup -- no parallel config system.
+State lives in the `automation_suspensions` table (one row per scope, primary
+key = scope), so suspend/resume are single-row INSERT/DELETE statements:
+atomic, persistent across restarts, and visible to every process reading the
+database. This replaces the earlier comma-separated `app_settings` value, whose
+read-modify-write could lose a concurrent edit of another instance.
 
 Enforcement lives at the ONE place every automatic send converges on, the
 `whatsapp.send_text` job handler (`jobs/handlers.py::send_whatsapp_text`), so a
@@ -11,46 +13,95 @@ completes (it is NOT retried): after a suspension, stale replies must never be
 released later in a burst. The suspension is checked before any reservation or
 fence is taken, so it leaves nothing stuck in `needs_review`.
 
+Explicit behaviour of the edit API:
+  - invalid input (bad name, reason outside 3..500 chars)  -> InvalidSuspensionRequest (HTTP 422);
+  - suspending an instance that is not configured          -> UnknownInstance (HTTP 404). The name
+    is matched case-insensitively and stored in its configured spelling;
+  - resuming an instance that is not configured            -> allowed (cleans a stale row), idempotent;
+  - repeating an edit (suspend a suspended scope, resume an active one) -> no error, `changed=False`;
+  - concurrent edits of different scopes never interfere; the same scope converges.
+
 What a suspension does NOT touch (by design):
   - owner alerts (`_twin_alert_dedup_key` from the loop guard / risk gate, and
     `owner_alert` from the line watch): the owner must still learn about the
     incident that caused the suspension;
   - human sends made from the dashboard (`/api/whatsapp/send-*` call the
     provider directly and never pass through the queue handler).
+
+`Settings.automation_suspended` (env `AUTOMATION_SUSPENDED=true`) remains as a
+static, restart-time kill switch that needs no database.
 """
 import re
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.app_settings import update_setting
+from models.automation_suspension import SCOPE_GLOBAL, SCOPE_INSTANCE_PREFIX, instance_scope
+from repositories.automation_suspension import AutomationSuspensionRepository
 from services.audit import record_log
 from utils.config import Settings
 
 INSTANCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-KEY_GLOBAL = "automation_suspended"
-KEY_INSTANCES = "automation_suspended_instances"
 MIN_REASON_CHARS = 3
 MAX_REASON_CHARS = 500
+# Instances the backend addresses by name without a dedicated setting (see
+# `process_inbound_whatsapp_message`'s extra agents).
+BUILTIN_AGENT_INSTANCES = ("b2b-sales", "azusa-church")
 
 
 class InvalidSuspensionRequest(ValueError):
     pass
 
 
-def parse_instances(raw: str | None) -> list[str]:
-    """Comma-separated names -> sorted unique list. Invalid tokens are dropped, never guessed."""
-    names = {token.strip() for token in (raw or "").split(",")}
-    return sorted(name for name in names if INSTANCE_RE.fullmatch(name))
+class UnknownInstance(LookupError):
+    pass
 
 
-def suspension_reason(settings: Settings, instance: str | None) -> str | None:
+@dataclass(frozen=True)
+class Change:
+    state: dict
+    changed: bool
+
+
+def _csv(raw: str | None) -> list[str]:
+    return [token.strip() for token in (raw or "").split(",") if token.strip()]
+
+
+def configured_instances(settings: Settings) -> list[str]:
+    """Every Evolution instance name this backend is configured to know, sorted and unique."""
+    names = {
+        settings.evolution_instance,
+        settings.evolution_personal_instance,
+        *_csv(settings.line_watch_instances),
+        *_csv(settings.evolution_media_extra_instances),
+        *BUILTIN_AGENT_INSTANCES,
+    }
+    return sorted(name for name in names if name and INSTANCE_RE.fullmatch(name))
+
+
+def canonical_instance(settings: Settings, instance: str) -> str:
+    """The configured spelling of `instance` (case-insensitive match), or raise."""
+    if not INSTANCE_RE.fullmatch(instance or ""):
+        raise InvalidSuspensionRequest("Nome de instância inválido.")
+    for name in configured_instances(settings):
+        if name.lower() == instance.lower():
+            return name
+    raise UnknownInstance(f"Instância não configurada: {instance}")
+
+
+async def suspension_reason(db: AsyncSession, settings: Settings, instance: str | None) -> str | None:
     """Why automatic sends are suspended for `instance` right now, or None.
 
-    Pure and cheap: it only reads the live (persisted-override-aware) settings.
+    Reads the database on every call (one indexed query), so a change made by
+    any process or after a restart is honoured immediately.
     """
     if settings.automation_suspended:
         return "global"
-    if instance and instance in parse_instances(settings.automation_suspended_instances):
+    scopes = [SCOPE_GLOBAL] + ([instance_scope(instance)] if instance else [])
+    active = await AutomationSuspensionRepository(db).scopes_in(scopes)
+    if SCOPE_GLOBAL in active:
+        return "global"
+    if active:
         return f"instance:{instance}"
     return None
 
@@ -69,50 +120,69 @@ def _validated_reason(reason: str | None) -> str:
     return text
 
 
-def state(settings: Settings) -> dict:
+async def state(db: AsyncSession, settings: Settings) -> dict:
+    rows = await AutomationSuspensionRepository(db).list_all()
+    by_scope = {row.scope: row for row in rows}
+    instances = sorted(
+        scope[len(SCOPE_INSTANCE_PREFIX):] for scope in by_scope if scope.startswith(SCOPE_INSTANCE_PREFIX)
+    )
+    glob = by_scope.get(SCOPE_GLOBAL)
     return {
-        "global_suspended": bool(settings.automation_suspended),
-        "suspended_instances": parse_instances(settings.automation_suspended_instances),
+        "global_suspended": bool(settings.automation_suspended or glob),
+        "global_forced_by_environment": bool(settings.automation_suspended),
+        "suspended_instances": instances,
+        "configured_instances": configured_instances(settings),
+        "details": [
+            {
+                "scope": row.scope,
+                "reason": row.reason,
+                "actor_id": row.actor_id,
+                "since": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ],
     }
 
 
-async def set_global(db: AsyncSession, suspended: bool, actor_id: int | None, reason: str | None) -> dict:
-    from utils.config import get_settings
-
-    text = _validated_reason(reason)
-    await update_setting(db, KEY_GLOBAL, suspended, actor_id)
+async def _apply(
+    db: AsyncSession, scope: str, suspended: bool, actor_id: int | None, reason: str, label: str
+) -> bool:
+    repo = AutomationSuspensionRepository(db)
+    changed = await repo.suspend(scope, reason, actor_id) if suspended else await repo.resume(scope)
     await record_log(
         db,
         source="automation_suspension",
         level="warning" if suspended else "info",
-        message=f"Automação {'SUSPENSA' if suspended else 'retomada'} (global)",
-        payload={"scope": "global", "suspended": suspended, "actor_id": actor_id, "reason": text},
+        message=f"Automação {'SUSPENSA' if suspended else 'retomada'} ({label})",
+        payload={
+            "scope": scope, "suspended": suspended, "changed": changed,
+            "actor_id": actor_id, "reason": reason,
+        },
     )
-    return state(get_settings())
+    return changed
+
+
+async def set_global(
+    db: AsyncSession, settings: Settings, suspended: bool, actor_id: int | None, reason: str | None
+) -> Change:
+    text = _validated_reason(reason)
+    changed = await _apply(db, SCOPE_GLOBAL, suspended, actor_id, text, "global")
+    return Change(await state(db, settings), changed)
 
 
 async def set_instance(
-    db: AsyncSession, instance: str, suspended: bool, actor_id: int | None, reason: str | None
-) -> dict:
-    from utils.config import get_settings
-
+    db: AsyncSession, settings: Settings, instance: str, suspended: bool, actor_id: int | None,
+    reason: str | None,
+) -> Change:
     if not INSTANCE_RE.fullmatch(instance or ""):
         raise InvalidSuspensionRequest("Nome de instância inválido.")
     text = _validated_reason(reason)
-    current = set(parse_instances(get_settings().automation_suspended_instances))
     if suspended:
-        current.add(instance)
+        name = canonical_instance(settings, instance)  # unknown -> UnknownInstance
     else:
-        current.discard(instance)
-    await update_setting(db, KEY_INSTANCES, ",".join(sorted(current)), actor_id)
-    await record_log(
-        db,
-        source="automation_suspension",
-        level="warning" if suspended else "info",
-        message=f"Automação {'SUSPENSA' if suspended else 'retomada'} na instância {instance}",
-        payload={
-            "scope": "instance", "instance": instance, "suspended": suspended,
-            "actor_id": actor_id, "reason": text,
-        },
-    )
-    return state(get_settings())
+        try:
+            name = canonical_instance(settings, instance)
+        except UnknownInstance:
+            name = instance  # allow cleaning up a stale row for an instance no longer configured
+    changed = await _apply(db, instance_scope(name), suspended, actor_id, text, f"instância {name}")
+    return Change(await state(db, settings), changed)

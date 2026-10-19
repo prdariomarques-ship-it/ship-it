@@ -1,4 +1,5 @@
 from models.app_setting import AppSetting
+from models.automation_suspension import AutomationSuspension
 from models.calendar import CalendarEvent
 from models.church import ChurchMember
 from models.contact import Contact
@@ -25,6 +26,7 @@ from models.user import User, UserRole
 
 __all__ = [
     "AppSetting",
+    "AutomationSuspension",
     "CalendarEvent",
     "ChurchMember",
     "Contact",
