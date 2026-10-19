@@ -631,6 +631,37 @@ async def test_a_suspension_after_submission_withholds_the_ready_reply(sessions,
 
 
 @pytest.mark.asyncio
+async def test_a_global_suspension_after_submission_withholds_the_ready_reply(sessions, provider, darius):
+    cid, mid = await _inbound(sessions)
+    await _enqueue_inbound(sessions, cid, mid)
+    await _drain()
+    async with sessions() as db:
+        await AutomationSuspensionRepository(db).suspend("global", "teste", None)
+    darius.set(darius.only_task_id(), "COMPLETED", REPLY)
+
+    await _drain()
+
+    assert provider.calls == []
+    (link,) = await _links(sessions)
+    assert link.status == "reply_queued"                            # DARIUS finished; only the transport was gated
+    assert any("retido" in e.message for e in await _logs(sessions, "automation_suspension"))
+
+
+@pytest.mark.asyncio
+async def test_suspending_another_instance_does_not_withhold_this_instances_reply(sessions, provider, darius):
+    cid, mid = await _inbound(sessions)
+    await _enqueue_inbound(sessions, cid, mid)
+    await _drain()
+    async with sessions() as db:
+        await AutomationSuspensionRepository(db).suspend("instance:personal", "teste", None)
+    darius.set(darius.only_task_id(), "COMPLETED", REPLY)
+
+    await _drain()
+
+    assert [c[1] for c in provider.calls] == [REPLY]
+
+
+@pytest.mark.asyncio
 async def test_a_human_pause_after_submission_blocks_the_reply(sessions, provider, darius):
     cid, mid = await _inbound(sessions)
     await _enqueue_inbound(sessions, cid, mid)

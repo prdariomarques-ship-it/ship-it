@@ -60,13 +60,27 @@ def _free_port() -> int:
 class _OllamaStub(BaseHTTPRequestHandler):
     calls: list[str] = []
     reply = STUB_REPLY
+    raw: str | None = None      # when set, the model answers EXACTLY this text (no DONE: framing added)
+    status = 200                # HTTP status of every answer (500 = provider outage)
+    delay = 0.0                 # seconds the model takes to answer (keeps a task in flight deterministically)
 
     def do_POST(self):  # noqa: N802
         body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
         type(self).calls.append(body.decode("utf-8", "replace")[:2000])
+        if type(self).delay:
+            time.sleep(type(self).delay)
+        if type(self).status != 200:
+            err = b'{"error":"model unavailable"}'
+            self.send_response(type(self).status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(err)))
+            self.end_headers()
+            self.wfile.write(err)
+            return
+        framed = f"DONE: {type(self).reply}" if type(self).reply else ""
+        text = type(self).raw if type(self).raw is not None else framed
         payload = json.dumps({
-            "response": f"DONE: {type(self).reply}" if type(self).reply else "", "done": True,
-                "done_reason": "stop", "eval_count": 12, "prompt_eval_count": 40,
+            "response": text, "done": True, "done_reason": "stop", "eval_count": 12, "prompt_eval_count": 40,
         }).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -198,18 +212,87 @@ async def test_real_darius_idempotency_a_duplicate_message_does_not_create_a_sec
     assert [t.id for t in (await real_client.list_tasks(limit=200)).items].count(link.darius_task_id) == 1
 
 
-async def test_real_darius_unreachable_model_ends_failed_and_nothing_is_sent(
-    sessions, provider, real_client, monkeypatch,
-):
-    monkeypatch.setattr(_OllamaStub, "reply", "")  # the stub answers with an empty completion
+_TERMINAL = ("reply_queued", "failed", "expired", "cancelled")
+
+
+@pytest.fixture(autouse=True)
+def _reset_stub():
+    """Every test starts from a well-behaved model, whatever the previous test did."""
+    _OllamaStub.calls.clear()
+    _OllamaStub.reply, _OllamaStub.raw, _OllamaStub.status, _OllamaStub.delay = STUB_REPLY, None, 200, 0.0
+    yield
+    _OllamaStub.reply, _OllamaStub.raw, _OllamaStub.status, _OllamaStub.delay = STUB_REPLY, None, 200, 0.0
+
+
+async def _run_to_end(sessions, real_client):
     cid, mid = await _inbound(sessions)
     await _enqueue_inbound(sessions, cid, mid)
+    link = await _settle(sessions, lambda row: row.status in _TERMINAL)
+    await _drain()
+    return (await _links(sessions))[0] if link else link
 
-    link = await _settle(sessions, lambda row: row.status in ("reply_queued", "failed", "expired", "cancelled"))
+
+@pytest.mark.parametrize("label,raw", [
+    ("empty completion", ""),
+    ("whitespace only", "   \n  "),
+    ("no DONE: prefix", "Claro! Para 3 latas o total é R$ 297,00."),
+    ("lowercase marker", "done: Claro!"),
+    ("marker only", "DONE:"),
+])
+async def test_real_darius_malformed_model_output_never_reaches_whatsapp(sessions, provider, real_client, label, raw):
+    _OllamaStub.raw = raw
+    link = await _run_to_end(sessions, real_client)
+
+    assert link.status == "failed", f"{label}: {link.status}/{link.last_error}"
+    assert provider.calls == []                                   # nothing was sent, ever
+    result = await real_client.get_result(link.darius_task_id)
+    assert result.status == "FAILED" and result.done
+    assert not (result.result or "").strip()                      # no partial text to leak either
+
+
+async def test_real_darius_tolerates_leading_whitespace_before_the_done_marker(sessions, provider, real_client):
+    _OllamaStub.raw = "\n  DONE: " + STUB_REPLY
+    link = await _run_to_end(sessions, real_client)
+
+    assert link.status == "reply_queued", f"{link.status}/{link.last_error}"
+    assert [c[1] for c in provider.calls] == [STUB_REPLY]
+
+
+async def test_real_darius_provider_outage_ends_failed_and_nothing_is_sent(sessions, provider, real_client):
+    _OllamaStub.status = 500
+    link = await _run_to_end(sessions, real_client)
+
+    assert link.status == "failed", f"{link.status}/{link.last_error}"
+    assert provider.calls == []
+    result = await real_client.get_result(link.darius_task_id)
+    assert result.status == "FAILED" and "500" in (result.error or "")
+    assert len(_OllamaStub.calls) >= 1
+
+
+async def test_real_darius_flow_stops_at_the_send_adapter_when_the_instance_is_suspended_mid_flight(
+    sessions, provider, real_client,
+):
+    """The task is really running in DARIUS (slow model); the owner suspends the instance; the reply is withheld."""
+    from repositories.automation_suspension import AutomationSuspensionRepository
+
+    _OllamaStub.delay = 1.5
+    cid, mid = await _inbound(sessions)
+    await _enqueue_inbound(sessions, cid, mid)
+    await _drain(rounds=6)
+    (submitted,) = await _links(sessions)
+    assert submitted.status == "submitted" and submitted.darius_task_id        # in flight in the real runtime
+    assert provider.calls == []
+
+    async with sessions() as db:
+        await AutomationSuspensionRepository(db).suspend(f"instance:{INSTANCE}", "teste real", None)
+    link = await _settle(sessions, lambda row: row.status in _TERMINAL, timeout=90.0)
     await _drain()
 
-    assert link.status != "reply_queued" or provider.calls == [] or provider.calls[0][1].strip() != ""
-    assert all(c[1].strip() for c in provider.calls)   # whatever happened, an empty message is never sent
+    result = await real_client.get_result(link.darius_task_id)
+    # DARIUS finished its work, the reply was handed to the send job, and the suspension gate withheld it.
+    assert result.status == "COMPLETED" and result.result == STUB_REPLY
+    assert link.status == "reply_queued"
+    assert provider.calls == []
 
 
 async def test_window_expiry_cancels_the_real_task(sessions, provider, real_client, monkeypatch):
