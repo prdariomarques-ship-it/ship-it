@@ -60,3 +60,20 @@ a auditoria foi feita lendo código e páginas públicas; os testes usam rede si
 | `@Dmarques_bot` e monitor de renda fixa em execução | INCONCLUSIVO |
 | Monitor SCPX | INCONCLUSIVO (nenhum código/serviço/especificação) |
 | Estado em tempo real no painel | AUSENTE (exigiria leitura do GitHub/Telegram; decisão do usuário) |
+
+
+## 7. Ciclo 6 - atualizacao (2026-10-19, API publica do GitHub, somente leitura)
+
+| Item | Evidencia | Classificacao |
+|---|---|---|
+| Poller de comandos | workflow 312778373 `active`, 1.412 execucoes, ultima 2026-10-19T21:42:59Z, `schedule`, `success` | COMPROVADO (o workflow roda e termina sem erro). Entrega efetiva no Telegram: INCONCLUSIVO (logs exigem autenticacao) |
+| Radar FX | 38 execucoes; as ultimas (2026-07-16/17, `schedule`) terminaram em `failure` no passo "Send FX radar"; hoje so `workflow_dispatch` | COMPROVADO que falhava; causa INCONCLUSIVA (sem log) |
+| Radar Market | 42 execucoes; as ultimas (2026-07-16/17, `schedule`) terminaram em `failure` | COMPROVADO que falhava; causa INCONCLUSIVA |
+| Monitor SCPX / Monitor Mercado | nada no repo, no Windows (nome e conteudo) nem nos workflows; rodavam no celular Z3 (Termux), fora do alcance | INCONCLUSIVO |
+
+Nada foi reativado e nenhuma mensagem foi enviada.
+
+### Decisao do usuario (2026-10-19, 20:10)
+SCPX e Monitor Mercado nao serao ressuscitados. Serao criados **dois bots novos**: Mercado Nacional e Mercado Internacional.
+Pre-requisitos que dependem do usuario: criar os bots no @BotFather (tokens como secrets, nunca no chat), informar os chat_ids e escolher onde rodam (recomendado: GitHub Actions com schedule). Construcao em modo dry-run por padrao; envio real somente com autorizacao explicita.
+Verificacao no Z3 (quando ligado): `ps`, `crontab -l`, `ls ~/.termux/boot`.
