@@ -33,6 +33,7 @@ static, restart-time kill switch that needs no database.
 """
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,6 +121,13 @@ def _validated_reason(reason: str | None) -> str:
     return text
 
 
+def _utc_iso(value: datetime | None) -> str | None:
+    # Stored as UTC; SQLite returns it naive and the browser would read it as local time. PostgreSQL returns it aware.
+    if value is None:
+        return None
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
+
+
 async def state(db: AsyncSession, settings: Settings) -> dict:
     rows = await AutomationSuspensionRepository(db).list_all()
     by_scope = {row.scope: row for row in rows}
@@ -137,7 +145,7 @@ async def state(db: AsyncSession, settings: Settings) -> dict:
                 "scope": row.scope,
                 "reason": row.reason,
                 "actor_id": row.actor_id,
-                "since": row.created_at.isoformat() if row.created_at else None,
+                "since": _utc_iso(row.created_at),
             }
             for row in rows
         ],

@@ -519,3 +519,16 @@ def test_migration_creates_the_table_and_downgrade_refuses_while_suspensions_are
         with Operations.context(MigrationContext.configure(conn)):
             migration.downgrade()
         assert "automation_suspensions" not in sa.inspect(conn).get_table_names()
+
+
+@pytest.mark.asyncio
+async def test_suspension_since_is_timezone_aware_even_when_the_driver_drops_tzinfo(client, users):
+    from datetime import datetime
+
+    h = _headers(users[UserRole.ADMIN])
+    body = {"suspended": True, "reason": "motivo valido"}
+    await client.put(API + "/suspension/instances/store", headers=h, json=body)
+    details = (await client.get(API + "/suspension", headers=h)).json()["details"]
+    assert details and all(d["since"] for d in details)
+    for d in details:
+        assert datetime.fromisoformat(d["since"]).utcoffset() is not None

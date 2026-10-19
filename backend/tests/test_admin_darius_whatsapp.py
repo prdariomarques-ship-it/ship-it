@@ -129,3 +129,16 @@ async def test_routing_is_all_off_when_the_flag_is_off_and_reports_global_suspen
     assert body["enabled"] is False and body["darius_configured"] is False
     assert not any(i["routed_to_darius"] for i in body["instances"])
     assert body["global_suspended"] is True and body["global_suspension_reason"] == "incidente"
+
+
+async def test_link_timestamps_are_timezone_aware_even_when_the_driver_drops_tzinfo(
+    client, admin_headers, session_factory,  # noqa: F811
+):
+    """SQLite hands back naive datetimes for timestamptz columns; the browser would read them as local time."""
+    from datetime import datetime
+
+    await _seed(session_factory)
+    items = (await client.get(PREFIX + "/whatsapp-tasks", headers=admin_headers)).json()["items"]
+    assert items
+    for item in items:
+        assert datetime.fromisoformat(item["created_at"].replace("Z", "+00:00")).utcoffset() is not None

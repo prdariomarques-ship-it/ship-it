@@ -231,6 +231,14 @@ async def cancel_task(task_id: str, client: Operator, db: DbSession, admin: Admi
 WhatsAppLinkStatus = Literal["submitting", "submitted", "reply_queued", "failed", "cancelled", "expired", "skipped"]
 
 
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Stored timestamps are UTC. A driver that does not type the column (SQLite) hands back a naive value, which the
+    browser would read as local time (3 h off in Brasilia); PostgreSQL already returns it aware."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
 class WhatsAppLinkOut(BaseModel):
     """One inbound message -> one DARIUS task. Carries ids, sizes and states only: never message or reply text."""
 
@@ -247,6 +255,11 @@ class WhatsAppLinkOut(BaseModel):
     history: list[dict[str, Any]]
     created_at: datetime
     finished_at: datetime | None
+
+    @field_validator("created_at", "finished_at")
+    @classmethod
+    def _utc(cls, value: datetime | None) -> datetime | None:
+        return _as_utc(value)
 
 
 class WhatsAppLinkPage(BaseModel):
@@ -333,11 +346,8 @@ class PausedConversation(BaseModel):
     @field_validator("paused_since")
     @classmethod
     def _utc(cls, value: datetime | None) -> datetime | None:
-        # The audit timestamp comes from a raw SELECT, so a driver that does not type the column (SQLite) hands back
-        # a naive value. Every stored timestamp here is UTC; without an offset the browser would read it as local time.
-        if value is not None and value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value
+        # Raw SELECT: the driver may not type the column (see _as_utc).
+        return _as_utc(value)
 
 
 class PausedConversationPage(BaseModel):
