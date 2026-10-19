@@ -37,7 +37,10 @@ async def _run_round(db: AsyncSession, settings, jobs: JobService) -> None:
                                    "sent_via": sender if sent else None, "no_phone": not phone, "no_open_line": sender is None},
         )
         if sent:
-            await jobs.enqueue("whatsapp.send_text", {"to": phone, "content": text, "instance": sender})
+            # owner_alert: a line-down alert must still reach the owner while automation is suspended.
+            await jobs.enqueue(
+                "whatsapp.send_text", {"to": phone, "content": text, "instance": sender, "owner_alert": True}
+            )
 
 
 @job_handler(JOB_NAME)

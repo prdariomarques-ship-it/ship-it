@@ -288,6 +288,15 @@ class Settings(BaseSettings):
     # Disable if an external automation (e.g. n8n) should own replies instead,
     # to avoid the contact receiving two answers to the same message.
     auto_reply_enabled: bool = True
+    # Suspension of ALL automatic outbound WhatsApp (kill switch), enforced at the
+    # single transport chokepoint (`jobs/handlers.py::send_whatsapp_text`) so that
+    # messages queued BEFORE the suspension are also withheld. Owner alerts and
+    # dashboard-initiated human sends are never affected. Both are persisted through
+    # `app_settings` (admin-editable) and survive a restart.
+    #  - automation_suspended:           global switch.
+    #  - automation_suspended_instances: comma-separated Evolution instance names.
+    automation_suspended: bool = False
+    automation_suspended_instances: str = ""
     # Loop/flood breaker: max automatic replies per contact per minute.
     auto_reply_max_per_contact_per_minute: int = 6
 

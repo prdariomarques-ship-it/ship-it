@@ -158,6 +158,23 @@ async def send_whatsapp_text(db: AsyncSession, payload: dict) -> None:
     to = str(payload['to'])
     content = str(payload['content'])
     instance = payload.get('instance') or None
+    # Suspension kill switch (global / per instance). Checked first -- before any
+    # reservation or fence -- and on EVERY execution, so a job queued before the
+    # suspension is withheld too. The job completes (no retry): stale automatic
+    # replies must not be released in a burst once the suspension is lifted.
+    from services import automation_suspension
+    from utils.config import get_settings as _suspension_settings
+
+    if not automation_suspension.is_protected_from_suspension(payload):
+        _scope = instance or getattr(get_whatsapp_provider(), 'default_instance', '') or ''
+        _suspended = automation_suspension.suspension_reason(_suspension_settings(), _scope)
+        if _suspended:
+            await record_log(
+                db, source='automation_suspension', level='info',
+                message=f'Envio automático retido: automação suspensa ({_suspended})',
+                payload={'to_last4': to[-4:], 'instance': _scope, 'scope': _suspended, 'job_id': payload.get('_job_id')},
+            )
+            return
     if not await _owner_audio_send_guard(db, payload, to, instance):
         return
     # Last point before transport -- see services/output_safety.py's module
@@ -615,6 +632,13 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
 
     settings = get_settings()
     instance = str(payload.get("instance") or "")
+    from services import automation_suspension as _suspension
+
+    _suspended = _suspension.suspension_reason(settings, instance)
+    if _suspended:
+        # Cost/side-effect guard only: the transport chokepoint (send_whatsapp_text) is what guarantees nothing is sent.
+        logger.info("Auto-reply skipped: automation suspended (%s) contact=%s", _suspended, contact_id)
+        return
     control_revision = await _control_revision(db, contact_id, instance)
     extra_agents = {"b2b-sales": "b2b", "azusa-church": "azusa_intake"}
     if instance in extra_agents:

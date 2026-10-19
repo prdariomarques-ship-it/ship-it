@@ -10,6 +10,7 @@ import jobs.handlers  # noqa: F401 - register the built-in job handlers
 import jobs.style_job  # noqa: F401 - register the darius.distill_style job handler
 import observation.scheduler  # noqa: F401 - register the observation.tick job handler
 import jobs.line_watch_job  # noqa: F401 - register the lines.watch job handler
+from admin.automation import router as admin_automation_router
 from admin.darius import router as admin_darius_router
 from admin.router import router as admin_router
 from agents.router import router as agents_router
@@ -271,6 +272,7 @@ def create_app() -> FastAPI:
     app.include_router(gdrive_router, prefix=prefix)
     app.include_router(admin_router, prefix=prefix)
     app.include_router(admin_darius_router, prefix=prefix)
+    app.include_router(admin_automation_router, prefix=prefix)
 
     return app
 

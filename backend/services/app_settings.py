@@ -57,6 +57,28 @@ SETTINGS_CATALOG: list[SettingDef] = [
         value_type="bool",
     ),
     SettingDef(
+        key="automation_suspended",
+        attr="automation_suspended",
+        description=(
+            "Suspensão global: nenhuma resposta/mensagem automática é transmitida pelo "
+            "WhatsApp (alertas ao dono e envios humanos do painel não são afetados)."
+        ),
+        category="behavior",
+        editable=True,
+        value_type="bool",
+    ),
+    SettingDef(
+        key="automation_suspended_instances",
+        attr="automation_suspended_instances",
+        description=(
+            "Instâncias Evolution com a automação suspensa (nomes separados por vírgula). "
+            "Gerencie por /admin/automation/suspension."
+        ),
+        category="behavior",
+        editable=True,
+        value_type="str",
+    ),
+    SettingDef(
         key="jobs_enabled",
         attr="jobs_enabled",
         description=(
