@@ -3,6 +3,7 @@ from models.automation_suspension import AutomationSuspension
 from models.calendar import CalendarEvent
 from models.church import ChurchMember
 from models.contact import Contact
+from models.darius_whatsapp_task import DariusWhatsAppTask
 from models.email_account import EmailAccount
 from models.embedding import Embedding
 from models.gcalendar_account import GoogleCalendarAccount
@@ -30,6 +31,7 @@ __all__ = [
     "CalendarEvent",
     "ChurchMember",
     "Contact",
+    "DariusWhatsAppTask",
     "EmailAccount",
     "Embedding",
     "GoogleCalendarAccount",

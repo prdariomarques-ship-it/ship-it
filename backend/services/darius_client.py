@@ -316,13 +316,26 @@ class DariusClient:
             raise DariusInvalidResponse("DARIUS returned an invalid health body")
         return body
 
-    async def create_task(self, objective: str, *, idempotency_key: str, model_name: str | None = None) -> TaskSummary:
-        """Creates a task. The Idempotency-Key is mandatory here so a retry can never create a second one."""
+    async def create_task(
+        self,
+        objective: str,
+        *,
+        idempotency_key: str,
+        model_name: str | None = None,
+        completion: Literal["non_empty"] | None = None,
+    ) -> TaskSummary:
+        """Creates a task. The Idempotency-Key is mandatory here so a retry can never create a second one.
+
+        ``completion="non_empty"`` asks DARIUS to accept any non-empty answer as success (free-text
+        replies); omitted keeps the legacy contract (the result must contain "done").
+        """
         if not idempotency_key or not idempotency_key.strip():
             raise ValueError("idempotency_key is required")
         body: dict[str, Any] = {"objective": objective}
         if model_name:
             body["modelName"] = model_name
+        if completion:
+            body["completion"] = completion
         response = await self._request(
             "POST", "/api/tasks", json_body=body, headers={"Idempotency-Key": idempotency_key.strip()}, retry=True
         )

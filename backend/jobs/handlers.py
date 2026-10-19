@@ -595,6 +595,55 @@ async def _loop_guard_or_alert(db: AsyncSession, settings, jobs: 'JobService', i
     return True
 
 
+async def _route_inbound_to_darius(db: AsyncSession, settings, contact, message, instance: str,
+                                   control_revision: int | None) -> None:
+    """Opt-in WhatsApp -> DARIUS routing (services/darius_whatsapp.py) for an instance listed in
+    `darius_whatsapp_instances`. Runs the SAME guards the local flows run, in the same order of
+    precedence -- consent/opt-out first, then human pause, age and the loop guard -- and only then
+    creates the DARIUS task. The reply is NOT generated here: it arrives later through the poll job and
+    leaves through `whatsapp.send_text` (suspension, pause revision and output safety all still apply)."""
+    from services import darius_whatsapp
+
+    if getattr(message, "whatsapp_instance", None) not in (None, instance):
+        logger.warning("DARIUS WhatsApp: instancia da mensagem divergente")
+        return
+    if getattr(message.media_type, "value", message.media_type) != "text":
+        logger.info("DARIUS WhatsApp: somente texto nesta etapa (instancia %s)", instance)
+        return
+    is_personal = bool(settings.evolution_personal_instance) and instance == settings.evolution_personal_instance
+    if settings.store_whatsapp_enabled and not is_personal:
+        from services import store_optout
+
+        optout_reply = await store_optout.handle_inbound(db, contact, message)
+        if optout_reply is not None:
+            await JobService(db).enqueue("whatsapp.send_text", {"to": contact.phone, "content": optout_reply, "instance": instance})
+            return
+        try:
+            from services.store_aftercare import is_stop_request, stop_followups
+        except ImportError:  # post-sale module is not part of every code line
+            is_stop_request = None
+        if is_stop_request is not None and is_stop_request(message.content):
+            await stop_followups(db, contact)
+            await JobService(db).enqueue("whatsapp.send_text", {
+                "to": contact.phone,
+                "content": "Pronto: seus acompanhamentos automaticos de pos-venda foram cancelados. Voce pode continuar falando com a loja por aqui.",
+                "instance": instance,
+            })
+            return
+    if await _conversation_paused(db, contact.id, instance):
+        logger.info("DARIUS WhatsApp: conversa em atendimento humano; sem tarefa (contato %s)", contact.id)
+        return
+    if _message_too_old(settings, message):
+        logger.info("DARIUS WhatsApp: mensagem antiga demais; sem tarefa (contato %s)", contact.id)
+        return
+    if await _loop_guard_or_alert(db, settings, JobService(db), instance, contact, message):
+        return
+    dispatch = await darius_whatsapp.dispatch_inbound(
+        db, settings, contact=contact, message=message, instance=instance, control_revision=control_revision,
+    )
+    logger.info("DARIUS WhatsApp: %s (link %s, contato %s)", dispatch.outcome, dispatch.link_id, contact.id)
+
+
 @job_handler("whatsapp.process_inbound")
 async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> None:
     """The automatic end-to-end reply: the Cognitive Pipeline (Fase 4.2)
@@ -640,6 +689,11 @@ async def process_inbound_whatsapp_message(db: AsyncSession, payload: dict) -> N
         logger.info("Auto-reply skipped: automation suspended (%s) contact=%s", _suspended, contact_id)
         return
     control_revision = await _control_revision(db, contact_id, instance)
+    from services import darius_whatsapp as _darius_whatsapp
+
+    if _darius_whatsapp.is_enabled_for(settings, instance):
+        await _route_inbound_to_darius(db, settings, contact, message, instance, control_revision)
+        return
     extra_agents = {"b2b-sales": "b2b", "azusa-church": "azusa_intake"}
     if instance in extra_agents:
         if not settings.auto_reply_enabled:

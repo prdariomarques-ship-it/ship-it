@@ -159,6 +159,15 @@ async def test_create_task_requires_an_idempotency_key_and_replays_the_same_key_
     assert json.loads(rec.requests[1].content) == {"objective": "do it", "modelName": "m"}
 
 
+async def test_create_task_sends_completion_only_when_asked():
+    rec = Recorder(jr(200, TASK), jr(200, TASK))
+    client = make(rec)
+    await client.create_task("a", idempotency_key="k1")
+    await client.create_task("b", idempotency_key="k2", completion="non_empty")
+    assert json.loads(rec.requests[0].content) == {"objective": "a"}
+    assert json.loads(rec.requests[1].content) == {"objective": "b", "completion": "non_empty"}
+
+
 async def test_list_tasks_parses_the_page_headers_and_validates_arguments():
     rec = Recorder(jr(200, [TASK], {"X-Total-Count": "7", "X-Next-Offset": "1"}))
     client = make(rec)

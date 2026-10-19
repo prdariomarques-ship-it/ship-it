@@ -10,6 +10,7 @@ import jobs.handlers  # noqa: F401 - register the built-in job handlers
 import jobs.style_job  # noqa: F401 - register the darius.distill_style job handler
 import observation.scheduler  # noqa: F401 - register the observation.tick job handler
 import jobs.line_watch_job  # noqa: F401 - register the lines.watch job handler
+import jobs.darius_whatsapp_jobs  # noqa: F401 - register the darius.whatsapp.poll job handler
 from admin.automation import router as admin_automation_router
 from admin.darius import router as admin_darius_router
 from admin.router import router as admin_router

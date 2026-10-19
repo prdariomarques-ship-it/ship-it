@@ -224,6 +224,16 @@ class Settings(BaseSettings):
     # for the cooldown instead of piling timeouts onto a dead runtime.
     darius_circuit_failure_threshold: int = 5
     darius_circuit_cooldown_seconds: float = 30.0
+    # WhatsApp -> DARIUS task flow (services/darius_whatsapp.py). OFF by default: the legacy
+    # local pipeline answers unless an instance is EXPLICITLY listed here AND the flag is on.
+    #  - darius_whatsapp_instances: comma-separated Evolution instance names routed to DARIUS.
+    #  - darius_whatsapp_reply_timeout_seconds: no result inside this window -> the link
+    #    expires and NOTHING is sent late.
+    darius_whatsapp_enabled: bool = False
+    darius_whatsapp_instances: str = ""
+    darius_whatsapp_reply_timeout_seconds: int = 900
+    darius_whatsapp_poll_seconds: float = 5.0
+    darius_whatsapp_max_objective_chars: int = 3500
 
     official_api_base_url: str = "https://graph.facebook.com/v22.0"
     official_access_token: str = ""
