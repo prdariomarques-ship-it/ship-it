@@ -59,10 +59,12 @@ async def schema(url):
 
 def test_grafo_tem_uma_cabeca_e_a_ordem_historica_real():
     script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert script.get_heads() == [HEAD]
-    chain = [r.revision for r in script.walk_revisions(base="base", head=HEAD)][::-1]          # do mais antigo ao mais novo
+    heads = script.get_heads()
+    assert len(heads) == 1                                      # uma unica cabeca; revisoes posteriores a HEAD sao permitidas
+    chain = [r.revision for r in script.walk_revisions(base="base", head=heads[0])][::-1]       # do mais antigo ao mais novo
     positions = [chain.index(r) for r in HISTORY]
-    assert positions == sorted(positions) and chain[chain.index(BASELINE) + 1:] == ["e610080001", "e610080002", "e610080003", HEAD]
+    assert positions == sorted(positions)
+    assert chain[chain.index(BASELINE) + 1:chain.index(HEAD) + 1] == ["e610080001", "e610080002", "e610080003", HEAD]
     store_pos = script.get_revision(BASELINE)
     assert store_pos.down_revision == "7d31a9b4e2c1" and "store_pos_orders" in Path(store_pos.path).read_text()   # não é mais o marcador vazio
     assert script.get_revision("f4c18a2d9e10").down_revision == ("6f32d7549a9a", "2cc4e7d820a6")

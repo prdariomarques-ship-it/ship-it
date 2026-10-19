@@ -33,12 +33,19 @@ def _cols(db: Path, table: str) -> dict[str, tuple[str, int]]:
 @pytest.fixture
 def migrated(tmp_path):
     db = tmp_path / "m.db"
-    up = _alembic(db, "upgrade", "head")
+    up = _alembic(db, "upgrade", REV)          # a migracao sob teste, independente das revisoes posteriores
     assert up.returncode == 0, up.stderr[-800:]
     return db
 
 
-def test_a_cabeca_e_a_migracao_nova(migrated):
+def test_a_migracao_pertence_a_cadeia_de_cabeca_unica(migrated):
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+    heads = script.get_heads()
+    assert len(heads) == 1
+    assert REV in [r.revision for r in script.walk_revisions(base="base", head=heads[0])]
     assert REV in _alembic(migrated, "current").stdout
 
 
