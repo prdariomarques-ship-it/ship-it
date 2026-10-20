@@ -1,0 +1,17 @@
+[
+ {
+  "name": "Métricas: real figures are back (137 tasks) and no error text",
+  "ok": true,
+  "detail": "Gerado pelo DARIUS em 19/10/2026, 22:18:42. Contagens de tarefas vêm do armazenamento durável. Os contadores do processo (consumidor, recuperação, retry) zeram quando o DARIUS reinicia. Tarefas TOTAL 137 PENDING 0 QUEUED"
+ },
+ {
+  "name": "Visão geral: recovered without reloading the page",
+  "ok": true,
+  "detail": "Estado do serviço DARIUS acessível Endereço http://127.0.0.1:18100 Integração configurada sim Circuito (disjuntor) closed Latência do health 711.5 ms Credencial de serviço sim Credencial de operador sim Verificado em 19/"
+ },
+ {
+  "name": "Aprovações: recovered (no error text)",
+  "ok": true,
+  "detail": "Nada aguardando aprovação Nenhuma tarefa está em PAUSED no DARIUS."
+ }
+]

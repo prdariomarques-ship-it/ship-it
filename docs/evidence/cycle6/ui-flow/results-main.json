@@ -1,0 +1,132 @@
+[
+ {
+  "name": "admin login via API",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "API pagination: total and disjoint pages",
+  "ok": true,
+  "detail": "total=137 next_offset=25"
+ },
+ {
+  "name": "UI page 1 lists exactly the API's first 25",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "UI Próxima shows the API's items 26-50",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "UI Anterior returns to page 1",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "last page disables Próxima",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "two tasks await approval",
+  "ok": true,
+  "detail": "count=2"
+ },
+ {
+  "name": "confirmation required (nothing sent yet)",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "Voltar cancels without effect",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "approve: task left PAUSED in DARIUS",
+  "ok": true,
+  "detail": "status=RUNNING"
+ },
+ {
+  "name": "re-approving a decided task is refused",
+  "ok": true,
+  "detail": "http=409"
+ },
+ {
+  "name": "reject (mobile): task FAILED in DARIUS",
+  "ok": true,
+  "detail": "status=FAILED"
+ },
+ {
+  "name": "reject reason persisted",
+  "ok": true,
+  "detail": "http=200"
+ },
+ {
+  "name": "no horizontal overflow on mobile Aprovações",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "Confirmar disabled without reason",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "suspend persisted in backend",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "resume persisted in backend",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "regular user logs in",
+  "ok": true,
+  "detail": ""
+ },
+ {
+  "name": "regular user 403 on /admin/darius/status",
+  "ok": true,
+  "detail": "http=403"
+ },
+ {
+  "name": "regular user 403 on /admin/darius/metrics",
+  "ok": true,
+  "detail": "http=403"
+ },
+ {
+  "name": "regular user 403 on /admin/darius/tasks",
+  "ok": true,
+  "detail": "http=403"
+ },
+ {
+  "name": "regular user 403 on /admin/darius/paused-conversations",
+  "ok": true,
+  "detail": "http=403"
+ },
+ {
+  "name": "regular user 403 on /admin/automation/suspension",
+  "ok": true,
+  "detail": "http=403"
+ },
+ {
+  "name": "regular user cannot approve (403)",
+  "ok": true,
+  "detail": "http=403"
+ },
+ {
+  "name": "anonymous gets 401/403",
+  "ok": true,
+  "detail": "http=401"
+ },
+ {
+  "name": "regular user sees 'Acesso restrito' and no approve buttons",
+  "ok": true,
+  "detail": ""
+ }
+]

@@ -1,0 +1,14 @@
+{
+ "head": "8c3a5e8",
+ "vitest": {
+  "files": 54,
+  "tests": 392,
+  "passed": 392,
+  "failed": 0,
+  "pending": 0
+ },
+ "tsc_exit": 0,
+ "eslint_exit": 0,
+ "eslint_output_bytes": 0,
+ "tsc_output_bytes": 0
+}

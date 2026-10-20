@@ -1,0 +1,28 @@
+   Ô£ô characterization (current behavior, green) > C1: kill -9 during ACT + recoverAndResume -> FAILED 'CRASH RECOVERY ... human reconciliation', exactly 1 ACT  3760ms
+   Ô£ô characterization (current behavior, green) > C4: rejectTask after a restart -> FAILED 'REJECTED: <motivo>' (persisted)  5452ms
+   Ô£ô Phase 3: effect idempotency key survives kill -9 > kill -9 in ACT -> sweeper FAILED -> human re-execution in a NEW process uses the SAME effect key  7487ms
+   Ô£ô what the model returns -> what Dario OS may send (task.result) > provider that never answers: the execution timeout ends the task FAILED, never COMPLETED  306ms
+   Ô£ô Phase 2: lease expiry and recovery without anyone calling recoverAndResume > G6: kill -9 in ACT -> sweeper moves the task out of RUNNING to FAILED (human reconciliation); the ACT is never repeated  8119ms
+   Ô£ô QUEUED consumer across processes > kill -9 of the consumer during the ACT: outcome unknown -> FAILED for human reconciliation; no process ever repeats the ACT  5588ms
+   Ô£ô QUEUED retry across processes (transient failure before the effect) > without a retry policy the same transient failure ends FAILED (no hidden retries) and no process repeats it  3013ms
+ FAIL  src/api/idempotency.http.test.ts [ src/api/idempotency.http.test.ts ]
+Error: Hook timed out in 10000ms.
+ FAIL  src/api/isolation.http.test.ts [ src/api/isolation.http.test.ts ]
+Error: Hook timed out in 10000ms.
+ FAIL  src/api/isolation.http.test.ts [ src/api/isolation.http.test.ts ]
+ FAIL  src/api/lifecycle.http.test.ts [ src/api/lifecycle.http.test.ts ]
+Error: Hook timed out in 10000ms.
+ FAIL  src/api/lifecycle.http.test.ts [ src/api/lifecycle.http.test.ts ]
+ FAIL  src/api/nocot.http.test.ts [ src/api/nocot.http.test.ts ]
+Error: Hook timed out in 10000ms.
+ FAIL  src/api/nocot.http.test.ts [ src/api/nocot.http.test.ts ]
+Error: Hook timed out in 10000ms.
+ FAIL  src/api/quota.http.test.ts [ src/api/quota.http.test.ts ]
+Error: Hook timed out in 10000ms.
+ FAIL  src/api/quota.http.test.ts [ src/api/quota.http.test.ts ]
+ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ» Failed Tests 2 ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»ÔÄ»
+ FAIL  src/core/queue.starvation.test.ts > QUEUED consumer starvation (sqlite) > 
+ Test Files  6 failed | 61 passed (67)
+      Tests  2 failed | 476 passed | 52 skipped (530)
+   Duration  82.76s (transform 24.27s, setup 5.50s, collect 34.83s, tests 470.44s, environment 26ms, prepare 37.39s)
+ FAIL  src/core/queue.starvation.test.ts > QUEUED consumer starvation (sqlite) > 

@@ -220,3 +220,96 @@ Endpoint implementado (`GET /admin/darius/paused-conversations`, somente leitura
 - Retry e scheduler vêm **desligados** por padrão; ligar é decisão operacional explícita.
 - O stack e2e é reproduzível por `docs/evidence/cycle5/e2e/` (caminhos fixos desta máquina; valores de teste, nenhum segredo).
 
+
+
+## 14. Ciclo 6 - ajuste de escopo (P0-P6) - ENCERRAMENTO
+
+Sem push, deploy, release ou envio real de mensagem (WhatsApp ou Telegram). Os quatro agentes de WhatsApp, Evolution API, OCR, leitor de áudio e Celis não foram tocados. A curva DI foi **adiada por decisão do usuário** (Yahoo Finance e Google Finance não têm; nenhuma fonte foi integrada). O frontend do Codex e o snapshot `C:\Users\dario\backups\codex-ship-it-20261019\` não foram alterados. Só processos de teste (portas 13100/18000/18001/18100 e o contêiner descartável `c6-pg-tz` na 15432) foram iniciados, por porta/nome exatos, e encerrados.
+
+### Commits
+- **DARIUS** (`integration/darius-lifecycle-api`): `f7d0069` seleção QUEUED consciente de elegibilidade (sem fome atrás de 100 linhas inelegíveis; `listQueuedReady` opcional no store, em memória e SQLite).
+- **Dario OS** (`integration/dario-os-darius`): `4d098b2` varredura de autorização sobre todas as rotas `/api/admin`; `d46e320` modos de falha da ponte de métricas + evidência WSL do ciclo de vida; `f1f954b` evidência do Telegram e decisão de construir dois bots novos; `0d78de1` timestamps UTC explícitos no painel (SQLite devolvia valores sem fuso); `8c3a5e8` bots de mercado `market-bots/` + serviço no compose.
+- Arquivos novos não versionados antes deste fechamento: `docs/evidence/cycle6/{suites,ui-flow,timezone,e2e}/` (commit do fechamento). `docs/evidence/cycle6/mobile/` e `voice-service/.venv-ptbr/` estavam não rastreados; o segundo foi deixado como estava.
+
+### Suítes (cabeça `8c3a5e8` no Dario OS, `f7d0069` no DARIUS)
+| Suíte | Resultado |
+|---|---|
+| DARIUS Vitest completo, **sem paralelismo de arquivos** | **67 arquivos, 530/530 passaram** (261 s) |
+| DARIUS `tsc --noEmit` | limpo |
+| DARIUS Vitest completo **em paralelo** | 5 arquivos falharam por `Hook timed out in 10000ms` sob carga (suítes HTTP com processos reais + `queue.starvation`); as mesmas suítes sem paralelismo: 10 arquivos / 105 testes passam. Classificação: **timeout sob carga**, não falha de lógica |
+| Backend Dario OS completo | **2074 testes: 2045 passaram, 2 falhas, 2 erros, 25 ignorados** (720 s) |
+| Frontend Vitest | 54 arquivos / **392/392** |
+| Frontend `tsc --noEmit` e ESLint | saída 0 nos dois |
+
+**Comparação com a baseline `e64d2f7`** (árvore completa: 1790 testes, 2 falhas, 2 erros, 25 skips): as falhas são **as mesmas 3 identidades**, 0 regressões e 0 corrigidas: `test_context_builder::test_awaiting_approval_goals_are_excluded_from_context`, `test_context_builder::test_goal_lookup_failure_does_not_block_context_building` (lógica preexistente) e `test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede` (erro de setup: variável de ambiente > 32767 caracteres no Windows; artefato do teste). Resumos estruturados em `docs/evidence/cycle6/suites/`; o XML bruto (26 MB, inflado pelo parâmetro gigante do teste groq) fica fora do repositório (SHA-256 no JSON).
+
+### P0 - integridade e segurança
+Varredura automática (71 testes) enumera todas as rotas `/api/admin` via OpenAPI e exige 401 sem token e 403 para usuário comum. Nenhuma rota admin aberta; nenhum runtime/scheduler concorrente encontrado. No navegador: usuário comum recebe 403 em `status`, `metrics`, `tasks`, `paused-conversations` e `automation/suspension` e **não consegue aprovar** (403); anônimo recebe 401; a UI mostra "Acesso restrito" sem botões de decisão.
+
+### P1 - consumidor QUEUED
+Defeito corrigido: com mais de 100 linhas QUEUED inelegíveis (em backoff ou de agente não registrado) o consumidor não via as prontas. A elegibilidade agora é filtro do store aplicado antes do LIMIT. 11 testes (memória e SQLite): 130 tarefas drenam exatamente uma vez; dois motores sobre um SQLite processam 120 tarefas exatamente uma vez.
+
+### P2 - ciclo de vida do servidor (WSL Ubuntu; `docs/evidence/cycle6/p2-wsl/`)
+Configuração inválida recusa subir ("REFUSING TO START", saída 1) em 5 variantes; padrão desligado; scheduler dispara, SIGTERM encerra graciosamente e nada dispara depois; reinício no mesmo banco não duplica nem rajada; dois processos no mesmo banco: slots exatamente-uma-vez; `kill -9` + reinício: slots únicos. **PARCIAL:** SIGTERM com um ACT em andamento no nível do servidor completo não foi provado (no Windows SIGTERM mata o processo).
+
+### P3 - métricas
+Modos de falha da ponte testados (DARIUS fora, circuito aberto, sem números velhos, invariantes). O painel mostra "indisponível" com motivo; nunca zero inventado.
+
+### P4 - Telegram
+Radares antigos: agendas removidas (apenas `workflow_dispatch`), execuções antigas falharam por causa **não determinada**; o Poller roda e termina com sucesso no GitHub, mas **entrega real não comprovada**. Monitor SCPX: **INCONCLUSIVO** (não localizado). Decisão do usuário: dois bots novos.
+**`market-bots/`** (`8c3a5e8`): bots **Mercado Brasil** e **Mercado Global**, Python stdlib, `profiles.toml`, Docker e serviço `market-bots` no compose (dry-run por padrão, volume próprio, usuário não-root). 58 testes, ruff limpo; contêiner descartável: `healthy` e boletim real da Ásia só em leitura. Limites: entrega real no Telegram não testada (faltam tokens do BotFather no `.env`); download real do zip da CVM não testado (aguarda autorização); sem curva DI; América Central só via ETF `CPA` (Panamá); Colômbia sem fonte; alguns tickers B3 inexistentes no Yahoo ficaram fora dos maiores altas/baixas.
+
+### P5 - painel no navegador (Chrome real com Playwright; stack isolado 13100/18000/18100; nada na 3000; evidência em `docs/evidence/cycle6/ui-flow/` e `e2e/ui_flow.mjs`)
+**26/26 verificações** do fluxo principal, mais 6/6 de erro e recuperação:
+- Paginação (137 tarefas, 25 por página): página 1 = itens 1-25 da API; "Próxima" = itens 26-50; "Anterior" volta; última página desabilita "Próxima".
+- Aprovar (desktop): confirmação obrigatória; "Voltar" não tem efeito; confirmar tira a tarefa de PAUSED no DARIUS; segunda aprovação da mesma tarefa recusada (409). Observação: a tarefa aprovada foi para RUNNING no DARIUS isolado (Ollama inalcançável de propósito); nenhuma ação externa.
+- Rejeitar (**emulação móvel real**, 390x844, toque, DSF 3): tarefa vira FAILED no DARIUS e o motivo é persistido.
+- Suspender/retomar instância `store`: "Confirmar" desabilitado sem motivo; suspensão e retomada persistem no backend.
+- DARIUS derrubado: Métricas, Visão geral e Aprovações mostram indisponibilidade (circuito aberto) sem números e sem botões de aprovar; DARIUS religado: os números reais (137 tarefas) voltam. A recuperação **sem recarregar a página** foi observada no ciclo 5 (`panel-e2e-20261019.md`); neste ciclo cada fase abriu uma sessão nova.
+- Mobile real (`docs/evidence/cycle6/mobile/`): 9 abas em 390x844 e 360x640 sem overflow horizontal do documento. Tabelas de 454-598 px ficam contidas na página; **não verificado** se o conteúdo cortado é alcançável por rolagem interna.
+
+Defeito do **meu teste** (não do painel), corrigido: a paginação da tela é de 25 e mostra os 8 primeiros caracteres do id; a primeira execução comparava páginas de 10 e ids completos (2 falsas falhas). Rodada nova, stack recriado do zero: 26/26.
+
+### Timezone com PostgreSQL 16 descartável (porta 15432, servidor em `Asia/Tokyo` de propósito; `docs/evidence/cycle6/timezone/`)
+Comparação persistido x API x interface (navegador em `America/Sao_Paulo`):
+| Campo | Persistido (sessão Tóquio / UTC) | API | Interface (BRT) |
+|---|---|---|---|
+| `darius_whatsapp_tasks.created_at` | `2026-10-20 10:19:37.045677+09` / `01:19:37.045677` | `2026-10-20T01:19:37.045677Z` | `19/10/2026, 22:19:37` |
+| `conversation_control_audit.created_at` (paused_since) | `10:19:36.939098+09` / `01:19:36.939098` | `...01:19:36.939098Z` | `19/10/2026, 22:19:36` |
+| `automation_suspensions.created_at` (since) | `10:20:06.230967+09` / `01:20:06.230967` | `...01:20:06.230967+00:00` | `19/10/2026, 22:20:06` |
+Todos `timestamptz`, mesmo instante nas três camadas, API sempre com offset. **Nenhum defeito reproduzido em PostgreSQL**, portanto nenhum código alterado. O defeito de SQLite (valores sem fuso) já estava corrigido em `0d78de1`. Limite: a UI foi servida pelo Next isolado com as chamadas `/api` redirecionadas (interceptação do navegador) ao backend PostgreSQL; `GET /api/admin/logs` continua devolvendo valores sem fuso **em SQLite** (preexistente, fora do painel DARIUS; em PostgreSQL saiu com fuso).
+
+### Mapa de lacunas do dashboard "Hub de agentes"
+`claude/hub_gap_map.md` (Projeto "Hub de agentes"): cards, fila, aprovações e status têm dado real hoje; séries históricas, uso por cliente, recursos do sistema e tempo real (SSE) **faltam** no backend; Hermes/FlowCore sem endpoint no bridge.
+
+### Classificação final
+| Item | Estado | Observação |
+|---|---|---|
+| Autorização de todas as rotas admin | COMPROVADO | 71 testes + navegador/API |
+| Consumidor QUEUED sem fome | COMPROVADO | testes memória+SQLite, multiprocesso |
+| Scheduler/ciclo de vida (config inválida, 1x, reinício, 2 processos, kill -9) | COMPROVADO | WSL, processos reais |
+| Desligamento gracioso com ACT em andamento | PARCIAL | só com scheduler; ACT em voo no servidor completo não provado |
+| Métricas e modos de falha da ponte | COMPROVADO | testes + painel |
+| Painel: paginação, aprovar, rejeitar, suspender, permissões, erro/recuperação | COMPROVADO (stack isolado) | seção P5 |
+| Layout mobile real | COMPROVADO (sem overflow do documento) / PARCIAL (rolagem interna das tabelas) | emulação Playwright com toque |
+| Timezone em PostgreSQL (3 campos) | COMPROVADO | seção própria |
+| Suíte completa sem regressão vs `e64d2f7` | COMPROVADO | mesmas 3 falhas preexistentes |
+| Estabilidade da suíte DARIUS em paralelo | PARCIAL | 5 suítes estouram o timeout de 10 s sob carga; sequencial 530/530 |
+| Bots de mercado: build, healthcheck, boletim real somente leitura | COMPROVADO | contêiner descartável |
+| Bots de mercado: entrega no Telegram, CVM real, curva DI, América Central | INCONCLUSIVO / NÃO FEITO | tokens, autorização e fonte pendentes |
+| Radares antigos (causa das falhas) e Monitor SCPX | INCONCLUSIVO | |
+| Conformidade de um LLM real com `DONE:`; demonstração WhatsApp real; backend de produção do WhatsApp; contrato FlowCore `/api/ask` | INCONCLUSIVO | sem medição/confirmação |
+| Nenhum teste local equivale a comprovação em produção | - | Evolution, Ollama e Telegram foram simulados ou desligados |
+
+### Riscos residuais
+1. Produção não foi exercida: retry e scheduler vêm **desligados** por padrão; ligar é decisão operacional explícita com monitoramento.
+2. O ACT em voo durante SIGTERM do servidor completo não foi provado; a rede de segurança é a recuperação de lease (`EFFECT_UNKNOWN` vai para conciliação humana).
+3. A suíte DARIUS paralela é sensível à carga (timeouts de hook de 10 s); no CI usar paralelismo reduzido ou aumentar o `hookTimeout`.
+4. Os bots de mercado dependem de fontes públicas não contratuais (Yahoo chart, AwesomeAPI, BCB); sem SLA. Um token de bot deve rodar em um só lugar (409).
+5. `/api/admin/logs` sem fuso em SQLite (dev/test).
+6. Três falhas de teste preexistentes do backend continuam abertas (`test_context_builder` x2, `test_groq_stt`).
+
+### Recomendação GO/NO-GO
+- **GO** para publicar as duas branches de integração (push + revisão por pull request), porque: sem regressão contra `e64d2f7`, painel e autorização comprovados em stack isolado, defeitos achados foram corrigidos com teste, e os padrões continuam desligados.
+- **NO-GO** para deploy em produção e para ligar retry/scheduler/fluxo WhatsApp->DARIUS real **até** haver: demonstração com instância de teste e número controlado, medição com o modelo real do protocolo `DONE:`, decisão sobre o SIGTERM em voo, e (para os bots) tokens e uma execução real validada.
+- **Aguardando autorização explícita do usuário** para qualquer push ou deploy.

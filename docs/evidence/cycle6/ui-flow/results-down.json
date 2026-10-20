@@ -1,0 +1,17 @@
+[
+ {
+  "name": "Métricas: explicit unavailability, no figures",
+  "ok": true,
+  "detail": "DARIUS circuit open: failing fast"
+ },
+ {
+  "name": "Visão geral: no stale task numbers presented as current",
+  "ok": true,
+  "detail": "Estado do serviço DARIUS indisponível DARIUS configurado, mas sem resposta (CIRCUIT_OPEN). Os dados de tarefas ficam indisponíveis até o serviço voltar. Endereço http://127.0.0.1:18100 Integração configurada sim Circuito"
+ },
+ {
+  "name": "Aprovações: error/circuit message, no approve buttons",
+  "ok": true,
+  "detail": "DARIUS circuit open: failing fast"
+ }
+]

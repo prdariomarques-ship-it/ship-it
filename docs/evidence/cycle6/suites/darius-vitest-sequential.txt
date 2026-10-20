@@ -1,0 +1,11 @@
+ Ô£ô src/context/engine.test.ts (5 tests) 8ms
+ Ô£ô src/planner/planner.test.ts (5 tests) 7ms
+ Ô£ô src/observability/engine.test.ts (1 test) 7ms
+ Ô£ô src/skills/engine.test.ts (3 tests) 5ms
+ Ô£ô src/core/security.test.ts (1 test) 7ms
+ Ô£ô src/access.test.ts (3 tests) 5ms
+
+ Test Files  67 passed (67)
+      Tests  530 passed (530)
+   Start at  21:20:43
+   Duration  261.38s (transform 1.58s, setup 1.74s, collect 6.20s, tests 220.39s, environment 21ms, prepare 14.47s)

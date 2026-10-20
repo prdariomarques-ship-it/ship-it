@@ -1,0 +1,37 @@
+{
+ "log": [
+  "postgres server timezone: Asia/Tokyo"
+ ],
+ "rows": [
+  {
+   "field": "darius_whatsapp_tasks.created_at",
+   "persisted_pg_session_tz_tokyo": "2026-10-20 10:19:37.045677+09",
+   "persisted_utc": "2026-10-20T01:19:37.045677",
+   "api": "2026-10-20T01:19:37.045677Z",
+   "api_equals_persisted_instant": true,
+   "api_has_offset": true,
+   "ui_expected_brt": "19/10/2026, 22:19:37",
+   "ui_shows_it": true
+  },
+  {
+   "field": "conversation_control_audit.created_at (paused_since)",
+   "persisted_pg_session_tz_tokyo": "2026-10-20 10:19:36.939098+09",
+   "persisted_utc": "2026-10-20T01:19:36.939098",
+   "api": "2026-10-20T01:19:36.939098Z",
+   "api_equals_persisted_instant": true,
+   "api_has_offset": true,
+   "ui_expected_brt": "19/10/2026, 22:19:36",
+   "ui_shows_it": true
+  },
+  {
+   "field": "automation_suspensions (since)",
+   "persisted_pg_session_tz_tokyo": "2026-10-20 10:20:06.230967+09",
+   "persisted_utc": "2026-10-20T01:20:06.230967",
+   "api": "2026-10-20T01:20:06.230967+00:00",
+   "api_equals_persisted_instant": true,
+   "api_has_offset": true,
+   "ui_expected_brt": "19/10/2026, 22:20:06",
+   "ui_shows_it": true
+  }
+ ]
+}

@@ -1,0 +1,228 @@
+[
+ {
+  "profile": "iphone-390x844",
+  "tab": "Visão geral",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "Tarefas",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:468",
+   "thead.[&_tr]:border-b [&_tr]:border-border:468",
+   "tr.border-b border-border transition-colors:468",
+   "th.h-10 px-3 align-middle text-xs font-medi:468",
+   "tbody.[&_tr:last-child]:border-0:468"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "Aprovações",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "Métricas",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "WhatsApp",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:598",
+   "thead.[&_tr]:border-b [&_tr]:border-border:598",
+   "tr.border-b border-border transition-colors:598",
+   "th.h-10 px-3 text-left align-middle text-xs:428",
+   "th.h-10 px-3 text-left align-middle text-xs:522"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "Conversas pausadas",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:454",
+   "thead.[&_tr]:border-b [&_tr]:border-border:454",
+   "tr.border-b border-border transition-colors:454",
+   "th.h-10 px-3 text-left align-middle text-xs:454",
+   "tbody.[&_tr:last-child]:border-0:454"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "Telegram",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "Suspensão",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "Logs",
+  "innerWidth": 390,
+  "scrollWidth": 390,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:483",
+   "thead.[&_tr]:border-b [&_tr]:border-border:483",
+   "tr.border-b border-border transition-colors:483",
+   "th.h-10 px-3 text-left align-middle text-xs:483",
+   "tbody.[&_tr:last-child]:border-0:483"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "iphone-390x844",
+  "tab": "SuspensÃ£o-text",
+  "text": [
+   "DARIUS",
+   ""
+  ]
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Visão geral",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Tarefas",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:468",
+   "thead.[&_tr]:border-b [&_tr]:border-border:468",
+   "tr.border-b border-border transition-colors:468",
+   "th.h-10 px-3 align-middle text-xs font-medi:468",
+   "tbody.[&_tr:last-child]:border-0:468"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Aprovações",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Métricas",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "WhatsApp",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:598",
+   "thead.[&_tr]:border-b [&_tr]:border-border:598",
+   "tr.border-b border-border transition-colors:598",
+   "th.h-10 px-3 text-left align-middle text-xs:428",
+   "th.h-10 px-3 text-left align-middle text-xs:522"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Conversas pausadas",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:454",
+   "thead.[&_tr]:border-b [&_tr]:border-border:454",
+   "tr.border-b border-border transition-colors:454",
+   "th.h-10 px-3 text-left align-middle text-xs:385",
+   "th.h-10 px-3 text-left align-middle text-xs:454"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Telegram",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Suspensão",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "Logs",
+  "innerWidth": 360,
+  "scrollWidth": 360,
+  "overflowX": false,
+  "wide": [
+   "table.w-full caption-bottom text-sm:483",
+   "thead.[&_tr]:border-b [&_tr]:border-border:483",
+   "tr.border-b border-border transition-colors:483",
+   "th.h-10 px-3 text-left align-middle text-xs:367",
+   "th.h-10 px-3 text-left align-middle text-xs:483"
+  ],
+  "tabFullyVisible": true
+ },
+ {
+  "profile": "small-360x640",
+  "tab": "SuspensÃ£o-text",
+  "text": [
+   "DARIUS",
+   ""
+  ]
+ }
+]

@@ -1,0 +1,36 @@
+{
+ "head": "8c3a5e8",
+ "baseline": "e64d2f7 (full tree: 1790 tests, 2 failures, 2 errors, 25 skipped)",
+ "tests": 2074,
+ "failures": 2,
+ "errors": 2,
+ "skipped": 25,
+ "seconds": 720.18,
+ "passed": 2045,
+ "failing_identities": [
+  "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+  "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+  "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede"
+ ],
+ "same_as_baseline": true,
+ "regressions": [],
+ "fixed_vs_baseline": [],
+ "details": [
+  {
+   "kind": "failure",
+   "test": "tests.test_context_builder::test_awaiting_approval_goals_are_excluded_from_context",
+   "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'}  +  where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x00000149969C2E10>)"
+  },
+  {
+   "kind": "failure",
+   "test": "tests.test_context_builder::test_goal_lookup_failure_does_not_block_context_building",
+   "message": "AssertionError: assert 'goal' not in {'goal', 'whatsapp'}  +  where {'goal', 'whatsapp'} = _sources(<orchestrator.context.Context object at 0x0000014997036780>)"
+  },
+  {
+   "kind": "error",
+   "test": "tests.test_groq_stt::test_audio_vazio_ou_grande_demais_nem_chega_a_rede[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "message": "failed on setup with \"ValueError: the environment variable is longer than 32767 characters\""
+  }
+ ],
+ "junit_sha256": "39aa28817446d96b707f7db8966479c622850cf0a8209ffc3bdb6f049bd31421"
+}
