@@ -158,6 +158,7 @@ class Settings(BaseSettings):
     # WhatsApp number: off by default (old, global-reply behavior
     # unchanged) -- see webhooks/router.py's use_twin computation.
     whatsapp_twin_mode_enabled: bool = False
+    twin_role_guard_enabled: bool = True  # rede de seguranca de papeis do Gemeo (agents/darius_twin_roles.py); False = so remove marcadores [Dario]/[Gemeo]
     # How long the Twin waits for the real owner to reply before the
     # autopilot check job considers taking over (webhooks/router.py
     # enqueues whatsapp.twin_autopilot_check with this delay). 300s (5
@@ -307,6 +308,7 @@ class Settings(BaseSettings):
     style_include_financial: bool = False  # classify_text "financeiro" fica fora do corpus
     style_instances: str = ""  # instancias a aprender, separadas por virgula (vazio = a pessoal)
     style_excluded_texts: str = ""  # textos automaticos (separados por "|") que nao sao o dono
+    style_allowed_names: str = ""  # nomes proprios (separados por "|") que NAO contam como terceiro ao destilar estilo (alem de Dario, Marquescolor etc.)
     style_examples_limit: int = 3
     style_min_score: float = 0.0  # calibrar com dados reais antes de subir
 

@@ -20,6 +20,7 @@ Os dois suspeitos da sua hipótese são reais e se somam; nenhum dos dois está 
 | `backend/jobs/handlers.py:846` | a lista inline vira `build_twin_history(history, content_of=_owner_audio_history_content, exclude_id=message_id)` (conteúdo e filtros iguais; só acrescenta o rótulo) |
 | `backend/agents/darius_twin.py` | `load_persona_prompt` termina com `ROLE_RULES`; a linha do contato diz "NÃO é o Dário"; a resposta passa por `guard_role_inversion` |
 | `backend/services/style_context.py` | o cabeçalho dos exemplos diz que são de OUTRA conversa; só no Gêmeo, exceção expressa para fatos do próprio dono |
+| `backend/services/style_distill.py`, `utils/config.py` | filtro `terceiro_citado` (só instância pessoal), `STYLE_ALLOWED_NAMES`, `TWIN_ROLE_GUARD_ENABLED` |
 
 Compatibilidade preservada: mesma ordem e contagem de mensagens de sistema (o teste existente `test_twin_recebe_os_blocos_extras_como_mensagens_de_sistema` continua igual), `HEADER_RULES` intacto, assinatura de `generate_darius_reply` intacta, histórico de entrada igual. Sem coluna nova, sem migration.
 
@@ -30,14 +31,17 @@ Compatibilidade preservada: mesma ordem e contagem de mensagens de sistema (o te
 - Não cobre outras inversões (ex.: "Que bom que você melhorou!" dito pelo Gêmeo). Essas dependem do prompt, que agora tem a regra, mas sem garantia determinística.
 - O LLM real não foi chamado; os testes provam o contexto montado e o tratamento da resposta.
 
-## Privacidade (NÃO implementado — aguardo seu aval)
-Fatos sobre **terceiros** vindos de outra conversa não devem aparecer para outro contato. Hoje o único canal é o exemplo de estilo (cabeçalho manda não repetir nomes/dados, mas é só instrução). Opções para decidir:
-- **A.** Só reforçar a instrução (já feito no cabeçalho). Barato, sem garantia.
-- **B.** Filtro na destilação (`style_distill`): não guardar pares cuja Resposta cite nome/telefone/valor de terceiro. Garantia melhor, perde alguns exemplos; exige reindexar.
-- **C.** Filtro na hora de usar: descartar exemplos com entidades que não pertencem ao contato atual. Mais preciso, mais código e mais falsos descartes.
-Recomendo B + A. Fatos do próprio dono continuam permitidos em qualquer opção.
+## Privacidade — implementada (decisão do dono: "opte pela melhor" → B + A)
+Fatos sobre **terceiros** vindos de outra conversa não devem aparecer para outro contato; fatos do **próprio dono** continuam permitidos.
+- **A (instrução):** o cabeçalho dos exemplos já diz que são de outra conversa e que nada neles descreve o interlocutor atual (acima).
+- **B (filtro na destilação, `services/style_distill.py`):** novo motivo de recusa `terceiro_citado` (pergunta ou resposta que cita pessoa pelo nome: palavra capitalizada fora de início de frase). Vale **só na instância pessoal** (a do Gêmeo): na loja, nomes de produto ("Coral") seriam falsos positivos. Lista de permitidos embutida (Dário, Deus, Senhor, Marquescolor…) + `STYLE_ALLOWED_NAMES` (separados por `|`). O fato do dono sem nome ("Ainda não, tô na mesma. Febre não baixou…") continua entrando.
+- **Limite:** a heurística é conservadora (prefere recusar um exemplo a vazar). **Só afeta pares novos**: pares já indexados no Qdrant continuam lá até reindexar; isso exige sua autorização e não foi feito.
+- **Ajuste a um teste existente:** `test_texto_automatico_exato_configurado_fica_fora` usava "…contato, Paulo." só para provar "exclusão por igualdade exata"; com a nova regra um nome é recusado, então troquei por "…contato, tudo bem." (mesma intenção do teste).
+
+## Interruptor
+`TWIN_ROLE_GUARD_ENABLED` (padrão `true`). `false` desliga só a remoção da pergunta de saúde; a remoção de marcadores `[Dário]`/`[Gêmeo]` continua sempre (eles só existem por causa dos rótulos). Sem redeploy do código, só variável de ambiente e reinício.
 
 ## Rollback
 - Nada está aplicado; o rollback do código é `git revert` do(s) commit(s) da branch (ou simplesmente não mesclar).
 - Para a VPS (futuro, só com seu aval): usar o padrão já adotado — backup dos 4 arquivos no container, cópia atômica, reinício, verificação, volta automática se falhar. Restaurar = recolocar os originais e reiniciar. Sem migration, nada a reverter no banco.
-- Interruptor rápido, se preferir (não incluído; diga se quer): variável de ambiente que desliga só a rede de segurança sem redeploy.
+- Interruptor rápido: `TWIN_ROLE_GUARD_ENABLED=false` (ver acima). Para o filtro de privacidade, o rollback é remover a regra (ou liberar nomes via `STYLE_ALLOWED_NAMES`); exemplos já indexados não foram alterados por ele.

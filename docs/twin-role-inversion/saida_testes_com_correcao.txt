@@ -26,4 +26,50 @@ tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_h
 tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[Estou \xf3timo, obrigado-False] PASSED
 tests/test_twin_role_inversion.py::test_end_to_end_libina_case_through_the_real_handler PASSED
 tests/test_twin_role_inversion.py::test_end_to_end_negative_control_sick_contact_gets_the_question PASSED
-============================== 28 passed in 0.58s ==============================
+tests/test_twin_role_inversion.py::test_kill_switch_turns_off_only_the_health_question_removal PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[-vazio] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[Oi! Aqui \xe9 o assistente autom\xe1tico do D\xe1rio \u2014 ele viu sua mensagem e prefiro que ele mesmo te responda-texto_automatico] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[Aqui \xe9 a Chroma, da Oficina das Tintas Ribeir\xe3o Pires-texto_automatico] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[Aqui \xe9 o Twin, assistente do D\xe1rio.-texto_automatico] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[k-curto] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-longo] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[me manda em dariomneto@hotmail.com-dado_pessoal_ou_valor] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[olha https://exemplo.com/a-dado_pessoal_ou_valor] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[meu zap 11 98258-9350-dado_pessoal_ou_valor] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[fica R$ 150,00 a lata-dado_pessoal_ou_valor] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[quero morrer-assunto_de_risco] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[vou vender a empresa-assunto_de_risco] PASSED
+tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[vou investir em tesouro direto-assunto_de_risco] PASSED
+tests/test_style_distill.py::test_texto_normal_de_conversa_passa[Vou sim, pode deixar] PASSED
+tests/test_style_distill.py::test_texto_normal_de_conversa_passa[Chegou?] PASSED
+tests/test_style_distill.py::test_texto_normal_de_conversa_passa[Paz do Senhor, tudo bem?] PASSED
+tests/test_style_distill.py::test_texto_normal_de_conversa_passa[kkk tmj] PASSED
+tests/test_style_distill.py::test_financeiro_so_entra_se_a_chave_permitir PASSED
+tests/test_style_distill.py::test_texto_automatico_exato_configurado_fica_fora PASSED
+tests/test_style_distill.py::test_audio_curto_ou_inventado_e_suspeito_mas_texto_curto_nao PASSED
+tests/test_style_distill.py::test_exemplo_tem_pergunta_e_resposta PASSED
+tests/test_style_distill.py::test_resposta_humana_vira_exemplo_com_chave_e_origem_da_instancia PASSED
+tests/test_style_distill.py::test_so_aprende_do_que_uma_pessoa_escreveu_na_instancia_certa PASSED
+tests/test_style_distill.py::test_so_a_primeira_resposta_depois_da_pergunta_forma_par PASSED
+tests/test_style_distill.py::test_audio_do_cliente_curto_nao_vira_pergunta PASSED
+tests/test_style_distill.py::test_repetir_o_lote_substitui_e_o_cursor_pula_o_ja_visto PASSED
+tests/test_style_distill.py::test_sem_instancia_configurada_nao_aprende_nada PASSED
+tests/test_style_distill.py::test_texto_automatico_da_loja_configurado_fica_fora PASSED
+tests/test_style_distill.py::test_job_processa_e_se_reagenda_com_o_cursor PASSED
+tests/test_style_distill.py::test_job_desligado_nao_aprende_mas_mantem_a_corrente_sem_perder_o_cursor PASSED
+tests/test_style_distill.py::test_semente_so_existe_com_a_chave_ligada_e_nao_duplica_a_corrente PASSED
+tests/test_style_distill.py::test_busca_usa_so_a_origem_da_instancia_e_respeita_o_limiar PASSED
+tests/test_style_distill.py::test_bloco_so_existe_com_a_chave_ligada_e_diz_que_sao_exemplos_nao_fatos PASSED
+tests/test_style_distill.py::test_instancia_fora_da_lista_nao_consulta_nem_recebe_exemplos PASSED
+tests/test_style_distill.py::test_falha_na_busca_de_estilo_nao_impede_o_agente PASSED
+tests/test_style_distill.py::test_planner_anexa_o_bloco_ao_prompt_do_sistema_e_sem_bloco_nada_muda PASSED
+tests/test_style_distill.py::test_twin_recebe_os_blocos_extras_como_mensagens_de_sistema PASSED
+tests/test_style_distill.py::test_pares_que_citam_terceiro_pelo_nome_ficam_fora[Bom dia, Maria! Tudo certo?] PASSED
+tests/test_style_distill.py::test_pares_que_citam_terceiro_pelo_nome_ficam_fora[O Jo\xe3o t\xe1 internado desde ontem] PASSED
+tests/test_style_distill.py::test_pares_que_citam_terceiro_pelo_nome_ficam_fora[Fala com a Luciana que ela resolve] PASSED
+tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Ainda n\xe3o, t\xf4 na mesma. Febre n\xe3o baixou ontem \xe0 noite, t\xe1 ruim de engolir tamb\xe9m.] PASSED
+tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Vou falar com o D\xe1rio depois] PASSED
+tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Fechado. Chegou? Sim, saiu ontem.] PASSED
+tests/test_style_distill.py::test_nome_liberado_na_configuracao_nao_conta_como_terceiro PASSED
+tests/test_style_distill.py::test_lote_pessoal_recusa_terceiro_mas_guarda_fato_do_dono_e_a_loja_nao_e_filtrada PASSED
+============================== 74 passed in 3.42s ==============================

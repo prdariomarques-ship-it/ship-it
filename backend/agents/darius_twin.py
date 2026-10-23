@@ -85,7 +85,9 @@ async def generate_darius_reply(
     # Rede de segurança dos papéis (agents/darius_twin_roles.py): o contato perguntou pelo dono e nunca disse estar doente -> a pergunta de
     # saúde devolvida a ele sai da resposta. Se não sobrar nada, é "sem resposta utilizável" (retenção neutra), nunca um texto invertido.
     contact_texts = [m.content for m in history if m.role == "user"]
-    guarded = guard_role_inversion(reply, message, contact_texts)
+    guarded = guard_role_inversion(
+        reply, message, contact_texts, drop_health_question=get_settings().twin_role_guard_enabled
+    )
     if guarded != reply:
         logger.warning("Twin reply adjusted by the role-inversion guard")
     if not guarded:

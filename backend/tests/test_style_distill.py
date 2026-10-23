@@ -76,7 +76,7 @@ def test_financeiro_so_entra_se_a_chave_permitir():
 def test_texto_automatico_exato_configurado_fica_fora():
     excluded = frozenset({style_distill.normalize_text("Olá! Obrigado por entrar em contato.")})
     assert _check("Olá! Obrigado por entrar em contato.", excluded=excluded) == "texto_automatico"
-    assert _check("Olá! Obrigado por entrar em contato, Paulo.", excluded=excluded) is None  # so igualdade exata
+    assert _check("Olá! Obrigado por entrar em contato, tudo bem.", excluded=excluded) is None  # so igualdade exata (sem nome de pessoa: nomes saem por `terceiro_citado`)
 
 
 def test_audio_curto_ou_inventado_e_suspeito_mas_texto_curto_nao():
@@ -335,3 +335,44 @@ async def test_twin_recebe_os_blocos_extras_como_mensagens_de_sistema(monkeypatc
     # sem extra_system o comportamento anterior e identico
     await darius_twin.generate_darius_reply([], "vai hoje?", contact_name="Paulo")
     assert [m.role for m in captured["messages"]].count("system") == 2
+
+
+# --- privacidade: fatos de TERCEIROS nao vazam de uma conversa para outra; fatos do proprio dono continuam -----------------------------------
+
+@pytest.mark.parametrize("text", [
+    "Bom dia, Maria! Tudo certo?", "O João tá internado desde ontem", "Fala com a Luciana que ela resolve",
+])
+def test_pares_que_citam_terceiro_pelo_nome_ficam_fora(text):
+    assert style_distill.mentions_third_party(text) is True
+    assert style_distill.check_text(text, from_audio=False, max_chars=400, min_chars=2, excluded=frozenset(), min_audio_words=8,
+                                    include_financial=False) == "terceiro_citado"
+
+
+@pytest.mark.parametrize("text", [
+    "Ainda não, tô na mesma. Febre não baixou ontem à noite, tá ruim de engolir também.",   # fato do PROPRIO dono (caso LIBINA)
+    "Vou falar com o Dário depois", "Fechado. Chegou? Sim, saiu ontem.",
+])
+def test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando(text):
+    assert style_distill.mentions_third_party(text) is False
+    assert style_distill.check_text(text, from_audio=False, max_chars=400, min_chars=2, excluded=frozenset(), min_audio_words=8,
+                                    include_financial=False) is None
+
+
+def test_nome_liberado_na_configuracao_nao_conta_como_terceiro():
+    assert style_distill.mentions_third_party("Fala com a Luciana") is True
+    assert style_distill.mentions_third_party("Fala com a Luciana", frozenset({"luciana"})) is False
+
+
+async def test_lote_pessoal_recusa_terceiro_mas_guarda_fato_do_dono_e_a_loja_nao_e_filtrada(world, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "style_instances", "pessoal,MARQUESCOLOR")
+    await _msg(world, IN, "O João disse que você está doente?")                       # terceiro na PERGUNTA
+    await _msg(world, OUT, "Estou, febre desde ontem.", human=True)
+    await _msg(world, IN, "Melhorou?")
+    await _msg(world, OUT, "Ainda não, tô na mesma. Febre não baixou.", human=True)   # fato do PROPRIO dono, sem terceiro
+    await _msg(world, IN, "Quanto custa a Coral branca?", instance="MARQUESCOLOR")
+    await _msg(world, OUT, "A Coral branca sai a 90, vem buscar.", human=True, instance="MARQUESCOLOR")
+    stats = await _run(world)
+    assert stats.rejected == {"pergunta_terceiro_citado": 1}                        # só o par com "João" saiu
+    sources = sorted(row.source for row in await _examples(world))
+    assert sources == ["style_example:MARQUESCOLOR", "style_example:pessoal"]       # fato do dono (pessoal) e a loja (sem filtro) ficaram

@@ -10,7 +10,9 @@ Por que filtra tanto: um corpus de estilo contaminado ensina o erro. Os filtros 
 - a mensagem de espera do proprio robo foi gravada como "humana" (id 11394) -> textos automaticos conhecidos ficam fora;
 - a transcricao inventou texto em audio curto ("Devemos outro bem.", id 11393) -> audio so entra com texto longo o bastante;
 - e-mail, telefone, valor e link de terceiros nao podem vazar de um exemplo para outra conversa;
-- assuntos de risco (crise, negocio, financeiro) seguem a MESMA classificacao do portao de risco (`classify_text`).
+- assuntos de risco (crise, negocio, financeiro) seguem a MESMA classificacao do portao de risco (`classify_text`);
+- fatos de TERCEIROS nao podem vazar para outro contato: pares que citam uma pessoa pelo nome ficam fora (`terceiro_citado`). Fatos do
+  proprio dono (ex.: como ele esta de saude) nao citam terceiro e continuam entrando.
 """
 
 from __future__ import annotations
@@ -60,6 +62,13 @@ _EMAIL = re.compile(r"\S+@\S+\.\S+")
 _LINK = re.compile(r"https?://|www\.", re.IGNORECASE)
 _LONG_NUMBER = re.compile(r"(?:\d[\s.\-()]*){8,}")  # telefone, CPF/CNPJ, conta, chave PIX numerica
 _MONEY = re.compile(r"r\$\s*\d|\d+[\d.,]*\s*(?:reais|mil\b)", re.IGNORECASE)
+# Palavra capitalizada fora do inicio de frase = provavel nome proprio. Heuristica conservadora: errar para o lado de recusar custa so um exemplo.
+_SENTENCE_START = re.compile(r"(?:^|[.!?…\n]\s*)[^\w]*$")
+_CAPITALIZED = re.compile(r"\b[A-ZÁÂÃÀÉÊÍÓÔÕÚÇ][a-záâãàéêíóôõúç]{1,}\b")
+# Nomes que nao sao terceiros: o proprio dono, a empresa e termos comuns.
+_ALWAYS_ALLOWED_NAMES = frozenset(
+    normalize_text(name) for name in ("Dário", "Dario", "Deus", "Jesus", "Cristo", "Senhor", "Espírito", "Santo", "Marquescolor", "WhatsApp", "Pix", "Brasil", "Obrigado", "Amém")
+)
 
 
 @dataclass
@@ -101,6 +110,17 @@ def _looks_like_stt_noise(text: str, min_words: int) -> bool:
     return len(set(words)) / len(words) < 0.4  # repeticao em laco, tipica de alucinacao
 
 
+def mentions_third_party(text: str, allowed_names: frozenset[str] = frozenset()) -> bool:
+    """True se o texto cita alguem pelo nome (palavra capitalizada que nao abre frase e nao esta na lista de permitidos)."""
+    allowed = _ALWAYS_ALLOWED_NAMES | allowed_names
+    for match in _CAPITALIZED.finditer(text):
+        if _SENTENCE_START.search(text[: match.start()]):
+            continue
+        if normalize_text(match.group()) not in allowed:
+            return True
+    return False
+
+
 def check_text(
     text: str,
     *,
@@ -110,6 +130,8 @@ def check_text(
     excluded: frozenset[str],
     min_audio_words: int,
     include_financial: bool,
+    allowed_names: frozenset[str] = frozenset(),
+    reject_third_parties: bool = True,
 ) -> str | None:
     """Motivo da recusa ou None se o texto pode virar exemplo."""
     text = (text or "").strip()
@@ -126,6 +148,8 @@ def check_text(
         return "audio_suspeito"
     if _EMAIL.search(text) or _LINK.search(text) or _LONG_NUMBER.search(text) or _MONEY.search(text):
         return "dado_pessoal_ou_valor"
+    if reject_third_parties and mentions_third_party(text, allowed_names):
+        return "terceiro_citado"
     risk = classify_text(text)
     if risk is not None and not (include_financial and risk[0] == "financeiro"):
         return "assunto_de_risco"
@@ -190,8 +214,9 @@ async def distill_batch(db: AsyncSession, *, after_id: int = 0) -> DistillStats:
         .limit(settings.style_distill_batch_size)
     )
     excluded = excluded_texts()
+    allowed = frozenset(normalize_text(name) for name in _split_setting(settings.style_allowed_names, "|"))
 
-    def problem(text: str, *, audio: bool, max_chars: int) -> str | None:
+    def problem(text: str, *, audio: bool, max_chars: int, personal: bool) -> str | None:
         return check_text(
             text,
             from_audio=audio,
@@ -200,12 +225,15 @@ async def distill_batch(db: AsyncSession, *, after_id: int = 0) -> DistillStats:
             excluded=excluded,
             min_audio_words=settings.style_audio_min_words,
             include_financial=settings.style_include_financial,
+            allowed_names=allowed,
+            reject_third_parties=personal,
         )
 
     for message in (await db.execute(statement)).scalars().all():
         stats.scanned += 1
         stats.last_id = message.id
-        reply_problem = problem(message.content, audio=_is_audio(message), max_chars=MAX_REPLY_CHARS)
+        personal = message.whatsapp_instance == settings.evolution_personal_instance      # nomes de produto da loja nao sao terceiros
+        reply_problem = problem(message.content, audio=_is_audio(message), max_chars=MAX_REPLY_CHARS, personal=personal)
         if reply_problem:
             stats.reject(f"resposta_{reply_problem}")
             continue
@@ -213,7 +241,7 @@ async def distill_batch(db: AsyncSession, *, after_id: int = 0) -> DistillStats:
         if question is None:
             stats.reject("sem_pergunta_anterior")
             continue
-        question_problem = problem(question.content, audio=_is_audio(question), max_chars=MAX_QUESTION_CHARS)
+        question_problem = problem(question.content, audio=_is_audio(question), max_chars=MAX_QUESTION_CHARS, personal=personal)
         if question_problem:
             stats.reject(f"pergunta_{question_problem}")
             continue

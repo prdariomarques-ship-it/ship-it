@@ -248,3 +248,10 @@ async def test_end_to_end_negative_control_sick_contact_gets_the_question(world)
         await db.commit()
     await _run_handler(world)
     assert await _sent_texts(world) == [BUGGY_REPLY]
+
+
+async def test_kill_switch_turns_off_only_the_health_question_removal(twin, monkeypatch):
+    monkeypatch.setattr(get_settings(), "twin_role_guard_enabled", False, raising=False)
+    assert await twin.module.generate_darius_reply([], "Bom dia, melhorou?", contact_name="X") == BUGGY_REPLY
+    twin.reply = "[Gêmeo] Tô na mesma."
+    assert await twin.module.generate_darius_reply([], "Bom dia, melhorou?", contact_name="X") == "Tô na mesma."   # marcador sai sempre

@@ -117,10 +117,10 @@ def drop_health_boomerang(reply: str) -> str:
     return "".join(kept).strip()
 
 
-def guard_role_inversion(reply: str, inbound_text: str, contact_texts: Iterable[str]) -> str:
+def guard_role_inversion(reply: str, inbound_text: str, contact_texts: Iterable[str], *, drop_health_question: bool = True) -> str:
     """Resposta final do Gêmeo. Só age quando o interlocutor perguntou pela saúde do dono E nunca disse estar doente
     (nem na mensagem atual nem no histórico). Se sobrar nada, devolve "" e o chamador usa a retenção neutra."""
     reply = strip_author_markers(reply)
-    if asks_about_owner_health(inbound_text) and not says_they_are_sick([inbound_text, *contact_texts]):
+    if drop_health_question and asks_about_owner_health(inbound_text) and not says_they_are_sick([inbound_text, *contact_texts]):
         return drop_health_boomerang(reply)
     return reply

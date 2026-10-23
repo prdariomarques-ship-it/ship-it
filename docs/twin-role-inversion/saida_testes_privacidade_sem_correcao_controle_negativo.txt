@@ -1,0 +1,9 @@
+FAILED tests/test_style_distill.py::test_pares_que_citam_terceiro_pelo_nome_ficam_fora[Bom dia, Maria! Tudo certo?]
+FAILED tests/test_style_distill.py::test_pares_que_citam_terceiro_pelo_nome_ficam_fora[O Jo\xe3o t\xe1 internado desde ontem]
+FAILED tests/test_style_distill.py::test_pares_que_citam_terceiro_pelo_nome_ficam_fora[Fala com a Luciana que ela resolve]
+FAILED tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Ainda n\xe3o, t\xf4 na mesma. Febre n\xe
+FAILED tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Vou falar com o D\xe1rio depois]
+FAILED tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Fechado. Chegou? Sim, saiu ontem.]
+FAILED tests/test_style_distill.py::test_nome_liberado_na_configuracao_nao_conta_como_terceiro
+FAILED tests/test_style_distill.py::test_lote_pessoal_recusa_terceiro_mas_guarda_fato_do_dono_e_a_loja_nao_e_filtrada
+8 failed, 37 passed in 2.98s
