@@ -27,6 +27,7 @@ tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_h
 tests/test_twin_role_inversion.py::test_end_to_end_libina_case_through_the_real_handler PASSED
 tests/test_twin_role_inversion.py::test_end_to_end_negative_control_sick_contact_gets_the_question PASSED
 tests/test_twin_role_inversion.py::test_kill_switch_turns_off_only_the_health_question_removal PASSED
+tests/test_twin_role_inversion.py::test_regression_exact_libina_screen_three_inbound_messages_and_blank_line_before_the_question PASSED
 tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[-vazio] PASSED
 tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[Oi! Aqui \xe9 o assistente autom\xe1tico do D\xe1rio \u2014 ele viu sua mensagem e prefiro que ele mesmo te responda-texto_automatico] PASSED
 tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[Aqui \xe9 a Chroma, da Oficina das Tintas Ribeir\xe3o Pires-texto_automatico] PASSED
@@ -72,4 +73,4 @@ tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_contin
 tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Fechado. Chegou? Sim, saiu ontem.] PASSED
 tests/test_style_distill.py::test_nome_liberado_na_configuracao_nao_conta_como_terceiro PASSED
 tests/test_style_distill.py::test_lote_pessoal_recusa_terceiro_mas_guarda_fato_do_dono_e_a_loja_nao_e_filtrada PASSED
-============================== 74 passed in 3.42s ==============================
+============================== 75 passed in 3.76s ==============================

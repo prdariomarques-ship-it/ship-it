@@ -7,6 +7,9 @@ Branch `fix/twin-role-inversion` (a partir de `feat/vendedor-ativo-voz`; o `mast
 - `handlers.py:388` é a numeração do arquivo de **produção**. No repositório o mesmo trecho está em `backend/jobs/handlers.py:846` (função `twin_autopilot_check`). `agents/darius_twin.py` daqui não tem o mesmo hash do de produção; qualquer aplicação deve ser por edições ancoradas no arquivo de produção, não por cópia.
 - Não tenho a mensagem 15424 nem o que o Gêmeo recebeu naquela hora (texto exato do contato, exemplos de estilo recuperados). Os exemplos recuperados não são registrados em log. **A causa abaixo é demonstrada no código e no contexto montado; não foi reproduzida com o LLM real.**
 
+## Evidência do caso real (print do WhatsApp, 23/10 13:04–13:06)
+O contato mandou **três mensagens seguidas** ("Oi Netinho" / "Melhorou?" / "Como vc está?") e a resposta veio com **linha em branco** antes de "Vc tá melhorando aí?". Ela chama o dono de "Netinho": o interlocutor fala COM o dono. A resposta foi enviada 1 min depois e lida (✔✔ azul). Um minuto depois saiu "Oi Jane" (origem não confirmada). O teste `test_regression_exact_libina_screen_...` reproduz exatamente esse formato.
+
 ## Causa raiz
 Os dois suspeitos da sua hipótese são reais e se somam; nenhum dos dois está sozinho comprovado como "o" gatilho do dia 15424:
 1. **Histórico sem autoria** — `backend/jobs/handlers.py:846` (antes): `role='user' if INBOUND else 'assistant'`. Toda saída (o que o dono digitou, o que o próprio Gêmeo respondeu, qualquer outra) virava `assistant`. O Gêmeo não distinguia o que "ele" disse do que o dono disse.

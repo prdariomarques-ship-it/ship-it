@@ -255,3 +255,16 @@ async def test_kill_switch_turns_off_only_the_health_question_removal(twin, monk
     assert await twin.module.generate_darius_reply([], "Bom dia, melhorou?", contact_name="X") == BUGGY_REPLY
     twin.reply = "[Gêmeo] Tô na mesma."
     assert await twin.module.generate_darius_reply([], "Bom dia, melhorou?", contact_name="X") == "Tô na mesma."   # marcador sai sempre
+
+
+async def test_regression_exact_libina_screen_three_inbound_messages_and_blank_line_before_the_question(twin):
+    """Print real (13:04-13:05): "Oi Netinho" / "Melhorou?" / "Como vc está?" e a resposta com linha em branco antes de "Vc tá melhorando aí?"."""
+    twin.reply = (
+        "Ainda não, tô na mesma. Febre não baixou ontem à noite, tá ruim de engolir também.\n\nVc tá melhorando aí?"
+    )
+    history = [ChatMessage(role="user", content="Oi Netinho"), ChatMessage(role="user", content="Melhorou?")]
+    reply = await twin.module.generate_darius_reply(history, "Como vc está?", contact_name="Gerente LIBINA")
+    assert reply == "Ainda não, tô na mesma. Febre não baixou ontem à noite, tá ruim de engolir também."
+    # controle negativo na mesma forma: se ela tivesse dito que estava doente, a pergunta voltaria intacta
+    history.append(ChatMessage(role="user", content="Eu também tô com gripe"))
+    assert await twin.module.generate_darius_reply(history, "Como vc está?", contact_name="Gerente LIBINA") == twin.reply
