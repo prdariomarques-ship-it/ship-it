@@ -12,6 +12,7 @@ import re
 import time
 from pathlib import Path
 
+from agents.darius_twin_roles import CONTACT_NOT_OWNER, ROLE_RULES, guard_role_inversion
 from providers.llm.base import STUB_REPLY, ChatMessage
 # `chat_with_fallback` (Qwen -> DeepSeek) existe na fabrica de LLM de PRODUCAO; a candidata ainda nao a tem (ver quadro, G02/E01).
 from providers.llm.factory import chat_with_fallback  # type: ignore[attr-defined]
@@ -41,7 +42,7 @@ class TwinReplyUnavailable(RuntimeError):
 def load_persona_prompt() -> str:
     text = _PROMPT_PATH.read_text(encoding="utf-8")
     conversation = _CONVERSATION_PATH.read_text(encoding="utf-8")
-    return _HTML_COMMENT.sub("", text).strip() + "\n\n" + conversation.strip()
+    return _HTML_COMMENT.sub("", text).strip() + "\n\n" + conversation.strip() + "\n\n" + ROLE_RULES
 
 
 async def generate_darius_reply(
@@ -67,7 +68,7 @@ async def generate_darius_reply(
         messages.append(
             ChatMessage(
                 role="system",
-                content=f"Você está respondendo, pelo WhatsApp, para: {contact_name}.",
+                content=f"Você está respondendo, pelo WhatsApp, para: {contact_name}." + CONTACT_NOT_OWNER,
             )
         )
     for block in extra_system or []:
@@ -81,7 +82,15 @@ async def generate_darius_reply(
         reply = await _retry_once_after_empty(messages, started)
     if not reply or reply == STUB_REPLY or reply.startswith("[IA indispon"):
         raise TwinReplyUnavailable("LLM returned no usable reply")
-    return reply
+    # Rede de segurança dos papéis (agents/darius_twin_roles.py): o contato perguntou pelo dono e nunca disse estar doente -> a pergunta de
+    # saúde devolvida a ele sai da resposta. Se não sobrar nada, é "sem resposta utilizável" (retenção neutra), nunca um texto invertido.
+    contact_texts = [m.content for m in history if m.role == "user"]
+    guarded = guard_role_inversion(reply, message, contact_texts)
+    if guarded != reply:
+        logger.warning("Twin reply adjusted by the role-inversion guard")
+    if not guarded:
+        raise TwinReplyUnavailable("reply was only a health question returned to the contact")
+    return guarded
 
 
 async def _retry_once_after_empty(messages: list[ChatMessage], started: float) -> str:

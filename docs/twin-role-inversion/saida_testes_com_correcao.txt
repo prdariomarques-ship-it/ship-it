@@ -1,0 +1,29 @@
+tests/test_twin_role_inversion.py::test_history_labels_owner_and_twin_and_leaves_unknown_and_inbound_untouched PASSED
+tests/test_twin_role_inversion.py::test_autopilot_wins_over_human_flag_like_the_handlers_own_author_rule PASSED
+tests/test_twin_role_inversion.py::test_markers_echoed_by_the_model_never_reach_the_contact PASSED
+tests/test_twin_role_inversion.py::test_persona_prompt_carries_the_role_rules PASSED
+tests/test_twin_role_inversion.py::test_contact_line_says_the_contact_is_not_the_owner_and_old_layout_is_kept PASSED
+tests/test_twin_role_inversion.py::test_style_block_says_examples_are_other_conversations_and_owner_facts_stay_allowed_for_the_twin PASSED
+tests/test_twin_role_inversion.py::test_regression_libina_health_question_is_not_returned_but_the_owners_own_state_is_kept PASSED
+tests/test_twin_role_inversion.py::test_negative_control_a_contact_who_says_he_is_sick_may_get_the_question_back PASSED
+tests/test_twin_role_inversion.py::test_owner_fact_from_another_conversation_is_still_used PASSED
+tests/test_twin_role_inversion.py::test_guard_leaves_unrelated_questions_and_other_conversations_alone PASSED
+tests/test_twin_role_inversion.py::test_reply_that_is_only_the_returned_health_question_becomes_unavailable_not_inverted PASSED
+tests/test_twin_role_inversion.py::test_marker_copied_by_the_model_is_stripped_from_the_final_reply PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_a_question_about_the_owners_health[Bom dia, melhorou?-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_a_question_about_the_owners_health[Como voc\xea t\xe1?-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_a_question_about_the_owners_health[Melhoras!-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_a_question_about_the_owners_health[J\xe1 passou a febre?-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_a_question_about_the_owners_health[T\xe1 bem?-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_a_question_about_the_owners_health[Preciso do or\xe7amento-False] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_a_question_about_the_owners_health[Que horas abre?-False] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[T\xf4 gripado-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[eu tamb\xe9m estou doente-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[peguei covid-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[minha febre n\xe3o passa-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[T\xf4 com dor de garganta-True] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[Melhorou?-False] PASSED
+tests/test_twin_role_inversion.py::test_what_counts_as_the_interlocutor_saying_he_is_sick[Estou \xf3timo, obrigado-False] PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_libina_case_through_the_real_handler PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_negative_control_sick_contact_gets_the_question PASSED
+============================== 28 passed in 0.58s ==============================

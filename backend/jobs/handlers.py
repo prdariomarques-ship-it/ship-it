@@ -770,9 +770,9 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
     the send, because the revision captured here will no longer match by
     the time claim_send runs."""
     from agents.darius_twin import TwinReplyUnavailable, generate_darius_reply
+    from agents.darius_twin_roles import build_twin_history
     from orchestrator.incident_dedup import decide_owner_alert
     from orchestrator.twin_risk_gate import HistoryEntry, MessageAuthor, RiskEvidence, is_high_risk_for_impersonation
-    from providers.llm.base import ChatMessage
     from services import conversation_control
     from utils.config import get_settings
     settings = get_settings()
@@ -843,7 +843,7 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
             )
     reply = ''
     if not is_risky:
-        chat_history = [ChatMessage(role='user' if m.direction == MessageDirection.INBOUND else 'assistant', content=_owner_audio_history_content(m)) for m in history if _owner_audio_history_content(m) and m.id != message_id]
+        chat_history = build_twin_history(history, content_of=_owner_audio_history_content, exclude_id=message_id)
         try:
             from services.style_context import build_style_blocks
             extra_system = await build_style_blocks(message.content, instance)

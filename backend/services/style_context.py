@@ -22,7 +22,10 @@ def author_label(instance: str) -> str:
 
 
 def format_style_block(examples: list[str], instance: str) -> str:
-    header = f"Exemplos reais de como {author_label(instance)} respondeu a mensagens parecidas. {HEADER_RULES}"
+    from agents.darius_twin_roles import OTHER_CONVERSATION_NOTE, OWNER_FACTS_NOTE
+
+    notes = OTHER_CONVERSATION_NOTE + (OWNER_FACTS_NOTE if instance == get_settings().evolution_personal_instance else "")
+    header = f"Exemplos reais de como {author_label(instance)} respondeu a mensagens parecidas. {HEADER_RULES} {notes}"
     return header + "\n\n" + "\n\n".join(f"Exemplo {number}:\n{text}" for number, text in enumerate(examples, 1))
 
 
