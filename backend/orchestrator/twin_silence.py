@@ -10,9 +10,20 @@ Regras (todas conservadoras; errar para o lado de calar custa uma resposta que o
   3. alerta do próprio sistema ("[Gêmeo Darius]", "A linha X está FORA DO AR", "Teste do vigia", "não responda").
 """
 
+import os
 import re
+import unicodedata
 
-from orchestrator.twin_risk_gate import normalize_text
+
+def normalize_text(text: str) -> str:
+    """minusculas, sem acento, espacos colapsados (local de proposito: o modulo nao depende de nenhum outro do Gemeo)."""
+    stripped = "".join(c for c in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(c)).lower()
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def silence_enabled() -> bool:
+    """Interruptor por ambiente, como os guardas de producao: TWIN_SILENCE=0 desliga."""
+    return os.environ.get("TWIN_SILENCE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 _CLOSING_WORDS = frozenset(
     "ate mais logo proxima valeu obrigado obrigada brigado tmj abraco abracos amem tchau blz ok certo show combinado fechado "

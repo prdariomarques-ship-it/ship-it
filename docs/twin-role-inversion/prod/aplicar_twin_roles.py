@@ -2,9 +2,10 @@
 """Gera as versoes corrigidas de darius_twin.py e handlers.py DE PRODUCAO (somente leitura dos originais; escreve em --saida).
 
 Edicoes ancoradas: cada ancora tem de aparecer EXATAMENTE uma vez, senao aborta sem escrever nada. O hash dos originais e conferido.
-So a parte aditiva e de baixo risco: rotulos de autoria no historico ([Dario]/[Gemeo]), regra de papeis no prompt, remocao do apelido do dono
-usado como vocativo e da pergunta de saude devolvida. NAO inclui silencio/robo/dinheiro/compromisso: a producao ja tem seus proprios guardas
-(twin_policy, twin_autoreply_gate, twin_finance_guard, twin_commitment_guard).
+Parte aditiva: rotulos de autoria no historico ([Dario]/[Gemeo]), regra de papeis no prompt, remocao do apelido do dono usado como vocativo e da pergunta
+de saude devolvida; e, DEPOIS dos guardas que a producao ja tem (twin_autoreply_gate, twin_finance_guard, twin_commitment_guard), dois blocos novos:
+silencio (robo/menu/alerta do proprio sistema/despedida pura) e ato proibido (autorizar, pedir CPF/conta, cobrar, confirmar deposito, prazo, acao inventada).
+Os 223 envios reais de 16-23/10 passam por TODOS os guardas de producao atuais (financeiro 0, compromisso 0, contraparte automatica 2).
 
 Uso: python3 aplicar_twin_roles.py --origem DIR_COM_ORIGINAIS --saida DIR_DE_SAIDA
 """
@@ -43,6 +44,40 @@ HANDLERS_EDITS = [
     ("import",
      "    from agents.darius_twin import TwinReplyUnavailable, generate_darius_reply\n",
      "    from agents.darius_twin import TwinReplyUnavailable, generate_darius_reply\n    from agents.darius_twin_roles import build_twin_history\n"),
+    ("silencio",
+     "    is_risky, reason = is_high_risk_for_impersonation(message.content, risk_history_texts(history, message_id))\n",
+     "    from orchestrator import twin_silence\n"
+     "    _quiet = twin_silence.silence_reason(\n"
+     "        message.content or '', has_prior_outbound=any(m.direction == MessageDirection.OUTBOUND for m in history if m.id != message_id)\n"
+     "    ) if twin_silence.silence_enabled() else None\n"
+     "    if _quiet:\n"
+     "        # robo/menu/fila, alerta do proprio sistema ou despedida pura: sem resposta, sem retencao e sem alerta (orchestrator/twin_silence.py)\n"
+     "        await _owner_audio_clear_pending(db, contact, _twin_pending_snapshot, instance)\n"
+     "        await db.commit()\n"
+     "        await record_log(db, source='twin_autopilot', level='info',\n"
+     "                         message=f'Sem resposta automática — {_quiet}', payload={'contact_id': contact_id, 'instance': instance})\n"
+     "        return\n"
+     "    is_risky, reason = is_high_risk_for_impersonation(message.content, risk_history_texts(history, message_id))\n"),
+    ("ato_proibido",
+     "        from orchestrator.twin_commitment_guard import reply_makes_commitment\n"
+     "        _commit = None if is_risky else reply_makes_commitment(reply)\n"
+     "        if _commit:\n"
+     "            _blocked_draft = reply\n"
+     "            is_risky, reason = (True, f'compromisso: {_commit}')\n"
+     "            reply = ''\n",
+     "        from orchestrator.twin_commitment_guard import reply_makes_commitment\n"
+     "        _commit = None if is_risky else reply_makes_commitment(reply)\n"
+     "        if _commit:\n"
+     "            _blocked_draft = reply\n"
+     "            is_risky, reason = (True, f'compromisso: {_commit}')\n"
+     "            reply = ''\n"
+     "        from agents.darius_twin_actions import action_guard_enabled, blocked_action\n"
+     "        _act = blocked_action(reply) if (not is_risky and action_guard_enabled()) else None\n"
+     "        if _act:\n"
+     "            # autorizar/emitir, pedir agencia-conta-CPF, cobrar, confirmar deposito, prazo, 'ja segui': ato que o Gemeo nunca pratica\n"
+     "            _blocked_draft = reply\n"
+     "            is_risky, reason = (True, f'ato proibido ao Gêmeo: {_act.category}')\n"
+     "            reply = ''\n"),
     ("historico_com_autoria",
      "        chat_history = [ChatMessage(role='user' if m.direction == MessageDirection.INBOUND else 'assistant', content=twin_history_content(m, _owner_audio_history_content(m))) for m in history if twin_history_content(m, _owner_audio_history_content(m)) and m.id != message_id]\n",
      "        chat_history = build_twin_history(history, content_of=lambda m: twin_history_content(m, _owner_audio_history_content(m)), exclude_id=message_id)\n"),

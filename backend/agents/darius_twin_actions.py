@@ -8,10 +8,21 @@ Isto NÃO bloqueia assunto (o portão de risco decidiu que "financeiro" é tema,
 confirmar dinheiro, prometer entrega com prazo, afirmar que fez algo que um robô não faz. Na dúvida, a resposta vira a retenção neutra + alerta ao dono.
 """
 
+import os
 import re
+import unicodedata
 from typing import NamedTuple
 
-from orchestrator.twin_risk_gate import normalize_text
+
+def normalize_text(text: str) -> str:
+    """minusculas, sem acento, espacos colapsados (local de proposito: o modulo nao depende de nenhum outro do Gemeo)."""
+    stripped = "".join(c for c in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(c)).lower()
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def action_guard_enabled() -> bool:
+    """Interruptor por ambiente, como os guardas de producao: TWIN_ACTION_GUARD=0 desliga."""
+    return os.environ.get("TWIN_ACTION_GUARD", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 class Blocked(NamedTuple):

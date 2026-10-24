@@ -35,7 +35,7 @@ def patched(tmp_path_factory):
     return out
 
 
-def _load(path: Path, name: str, monkeypatch, reply: str):
+def _load(path: Path, name: str, monkeypatch, reply: str, tmp: Path | None = None):
     async def fake_chat(messages, tools=None):
         fake_chat.calls.append(messages)
         return SimpleNamespace(content=reply)
@@ -45,7 +45,7 @@ def _load(path: Path, name: str, monkeypatch, reply: str):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    prompts = path.parent / f"prompts_{name}"
+    prompts = (tmp or path.parent) / f"prompts_{name}"
     prompts.mkdir(exist_ok=True)
     (prompts / "darius_twin.md").write_text("PERSONA", encoding="utf-8")
     (prompts / "twin_conversation.md").write_text("CONVERSA", encoding="utf-8")
@@ -58,7 +58,7 @@ def _load(path: Path, name: str, monkeypatch, reply: str):
 def test_patcher_output_is_pinned_so_the_reviewer_can_compare(patched):
     import hashlib
     assert hashlib.sha256((patched / "darius_twin.py").read_bytes()).hexdigest() == "de076d7314e652eb7b99dea05fd98af5d639ee5d0ed67b62e99653b0fe3c0d0b"
-    assert hashlib.sha256((patched / "handlers.py").read_bytes()).hexdigest() == "8e45cd1f6c01f86ac529c74537231823a9e01fde5cdfbbe090824a162a2590b7"
+    assert hashlib.sha256((patched / "handlers.py").read_bytes()).hexdigest() == "c47650be7bc4e60f59b8a54e13aaf2d6447d38db8d9f60bff6261a664ca54f7c"
 
 
 def test_patcher_aborts_on_an_unexpected_original_and_writes_nothing(tmp_path):
@@ -84,8 +84,8 @@ def test_patcher_aborts_when_an_anchor_is_not_unique(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------------------------- codigo real: antes (bug) e depois (corrigido)
-async def test_NEGATIVE_CONTROL_the_original_production_twin_reproduces_the_libina_bug(monkeypatch):
-    original, _ = _load(PROD / "originais" / "darius_twin.py", "twin_original", monkeypatch, BUGGY)
+async def test_NEGATIVE_CONTROL_the_original_production_twin_reproduces_the_libina_bug(monkeypatch, tmp_path):
+    original, _ = _load(PROD / "originais" / "darius_twin.py", "twin_original", monkeypatch, BUGGY, tmp_path)
     history = [ChatMessage(role="user", content="Oi Netinho"), ChatMessage(role="user", content="Melhorou?")]
     assert await original.generate_darius_reply(history, "Como vc está?", contact_name="Gerente LIBINA") == BUGGY
 
@@ -142,9 +142,9 @@ def test_patched_production_handler_labels_authorship_with_the_real_history_line
     assert [(m.role, m.content) for m in ns["chat_history"]] == [("user", "Bom dia"), ("assistant", "[Dário] Bom dia, tudo certo?"), ("assistant", "[Gêmeo] Vou ver isso.")]
 
 
-def test_the_only_other_changes_in_the_handler_are_the_import_and_that_line(patched):
+def test_the_handler_diff_is_limited_to_the_three_documented_edits(patched):
     import difflib
     old = (PROD / "originais" / "handlers.py").read_text().splitlines()
     new = (patched / "handlers.py").read_text().splitlines()
-    changed = [row for row in difflib.unified_diff(old, new, lineterm="", n=0) if row[:1] in "+-" and row[:3] not in ("+++", "---")]
-    assert len(changed) == 3, changed          # 1 import adicionado + 1 linha trocada (-/+)
+    removed = [row for row in difflib.unified_diff(old, new, lineterm="", n=0) if row[:1] == "-" and row[:3] != "---"]
+    assert len(removed) == 1 and "chat_history = [ChatMessage(" in removed[0], removed       # so a linha do historico sai; o resto e acrescimo

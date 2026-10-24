@@ -1,3 +1,14 @@
+tests/test_twin_prod_handler_e2e.py::test_NEGATIVE_CONTROL_original_production_handler_sends_the_inverted_question PASSED
+tests/test_twin_prod_handler_e2e.py::test_NEGATIVE_CONTROL_original_production_handler_sends_an_authorization PASSED
+tests/test_twin_prod_handler_e2e.py::test_NEGATIVE_CONTROL_original_production_handler_answers_a_pure_farewell_to_a_bot PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_fixes_the_libina_reply_and_labels_authorship PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_holds_an_authorization_and_alerts_with_the_draft PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_stays_silent_for_farewells_bots_and_own_alerts[\U0001f44b] PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_stays_silent_for_farewells_bots_and_own_alerts[At\xe9! \U0001f64f] PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_stays_silent_for_farewells_bots_and_own_alerts[Sou o assistente virtual da Igreja de Azusa. Como posso ajudar voc\xea hoje?] PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_stays_silent_for_farewells_bots_and_own_alerts[\u2705 Teste do vigia de linhas: este \xe9 o caminho do alerta. N\xe3o responda.] PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_controls_normal_reply_still_goes_out PASSED
+tests/test_twin_prod_handler_e2e.py::test_patched_production_handler_kill_switches_by_environment PASSED
 tests/test_twin_prod_patch.py::test_patcher_output_is_pinned_so_the_reviewer_can_compare PASSED
 tests/test_twin_prod_patch.py::test_patcher_aborts_on_an_unexpected_original_and_writes_nothing PASSED
 tests/test_twin_prod_patch.py::test_patcher_aborts_when_an_anchor_is_not_unique PASSED
@@ -7,7 +18,7 @@ tests/test_twin_prod_patch.py::test_patched_production_twin_controls_sick_contac
 tests/test_twin_prod_patch.py::test_patched_production_twin_kill_switch_by_environment PASSED
 tests/test_twin_prod_patch.py::test_patched_production_twin_empty_after_guard_is_unavailable_never_inverted PASSED
 tests/test_twin_prod_patch.py::test_patched_production_handler_labels_authorship_with_the_real_history_line PASSED
-tests/test_twin_prod_patch.py::test_the_only_other_changes_in_the_handler_are_the_import_and_that_line PASSED
+tests/test_twin_prod_patch.py::test_the_handler_diff_is_limited_to_the_three_documented_edits PASSED
 tests/test_twin_role_inversion.py::test_history_labels_owner_and_twin_and_leaves_unknown_and_inbound_untouched PASSED
 tests/test_twin_role_inversion.py::test_autopilot_wins_over_human_flag_like_the_handlers_own_author_rule PASSED
 tests/test_twin_role_inversion.py::test_markers_echoed_by_the_model_never_reach_the_contact PASSED
@@ -142,4 +153,4 @@ tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_contin
 tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Fechado. Chegou? Sim, saiu ontem.] PASSED
 tests/test_style_distill.py::test_nome_liberado_na_configuracao_nao_conta_como_terceiro PASSED
 tests/test_style_distill.py::test_lote_pessoal_recusa_terceiro_mas_guarda_fato_do_dono_e_a_loja_nao_e_filtrada PASSED
-============================= 144 passed in 4.94s ==============================
+============================= 155 passed in 7.28s ==============================
