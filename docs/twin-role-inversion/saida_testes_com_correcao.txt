@@ -1,3 +1,13 @@
+tests/test_twin_prod_patch.py::test_patcher_output_is_pinned_so_the_reviewer_can_compare PASSED
+tests/test_twin_prod_patch.py::test_patcher_aborts_on_an_unexpected_original_and_writes_nothing PASSED
+tests/test_twin_prod_patch.py::test_patcher_aborts_when_an_anchor_is_not_unique PASSED
+tests/test_twin_prod_patch.py::test_NEGATIVE_CONTROL_the_original_production_twin_reproduces_the_libina_bug PASSED
+tests/test_twin_prod_patch.py::test_patched_production_twin_drops_the_returned_question_and_keeps_the_owners_state PASSED
+tests/test_twin_prod_patch.py::test_patched_production_twin_controls_sick_contact_and_nicknames PASSED
+tests/test_twin_prod_patch.py::test_patched_production_twin_kill_switch_by_environment PASSED
+tests/test_twin_prod_patch.py::test_patched_production_twin_empty_after_guard_is_unavailable_never_inverted PASSED
+tests/test_twin_prod_patch.py::test_patched_production_handler_labels_authorship_with_the_real_history_line PASSED
+tests/test_twin_prod_patch.py::test_the_only_other_changes_in_the_handler_are_the_import_and_that_line PASSED
 tests/test_twin_role_inversion.py::test_history_labels_owner_and_twin_and_leaves_unknown_and_inbound_untouched PASSED
 tests/test_twin_role_inversion.py::test_autopilot_wins_over_human_flag_like_the_handlers_own_author_rule PASSED
 tests/test_twin_role_inversion.py::test_markers_echoed_by_the_model_never_reach_the_contact PASSED
@@ -132,4 +142,4 @@ tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_contin
 tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Fechado. Chegou? Sim, saiu ontem.] PASSED
 tests/test_style_distill.py::test_nome_liberado_na_configuracao_nao_conta_como_terceiro PASSED
 tests/test_style_distill.py::test_lote_pessoal_recusa_terceiro_mas_guarda_fato_do_dono_e_a_loja_nao_e_filtrada PASSED
-============================= 134 passed in 4.98s ==============================
+============================= 144 passed in 4.94s ==============================

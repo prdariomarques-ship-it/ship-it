@@ -169,6 +169,13 @@ def strip_owner_aliases(reply: str, aliases: Iterable[str]) -> str:
     return reply[:1].upper() + reply[1:] if reply else reply
 
 
+def role_guard_enabled() -> bool:
+    """Interruptor por ambiente (sem tocar em config): TWIN_ROLE_GUARD_ENABLED=false desliga a remoção de apelidos e da pergunta de saúde."""
+    import os
+
+    return os.environ.get("TWIN_ROLE_GUARD_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+
 def guard_role_inversion(
     reply: str, inbound_text: str, contact_texts: Iterable[str], *, drop_health_question: bool = True, contact_name: str = "",
 ) -> str:

@@ -10,6 +10,12 @@ Branch `fix/twin-role-inversion` (a partir de `feat/vendedor-ativo-voz`; o `mast
 ## Evidência do caso real (print do WhatsApp, 23/10 13:04–13:06)
 O contato mandou **três mensagens seguidas** ("Oi Netinho" / "Melhorou?" / "Como vc está?") e a resposta veio com **linha em branco** antes de "Vc tá melhorando aí?". Ela chama o dono de "Netinho": o interlocutor fala COM o dono. A resposta foi enviada 1 min depois e lida (✔✔ azul). Um minuto depois saiu "Oi Jane" (origem não confirmada). O teste `test_regression_exact_libina_screen_...` reproduz exatamente esse formato.
 
+## CORREÇÃO (24/10, depois de receber o `darius_twin.py` e o `handlers.py` DE PRODUÇÃO)
+O que escrevi abaixo como "causa raiz" vale para a **candidata do repositório**, e em parte **não** para produção:
+- Produção **não recebe blocos de estilo** (`generate_darius_reply(history, message, contact_name)`), então a causa 2 (exemplos de estilo sem dono) não age hoje em produção; ela só existe se a função de estilo for ligada. O que continua valendo em produção: a causa 1 (histórico rotula toda saída como `assistant`, linha 447) e a causa 3 (o prompt não diz quem é o sujeito).
+- Produção já tem guardas que eu desconhecia: `silent_skip_reason`, `is_automated_inbound`, `contains_internal_marker`, `reply_commits_money_operation`, `reply_makes_commitment`. Por isso o patch de produção (`prod/`) **não** inclui meu silêncio/robô/ato proibido: a rodada 2 só se aplica à candidata até eu ver esses módulos.
+- **Pista nos dados, não prova:** a "febre desde ontem à noite" do 15424 aparece em outra conversa (❤️, mensagem 14894), mas era a febre do **bebê**. O canal que levaria isso ao LIBINA **não está** no código de produção que recebi (a história é por contato). Pode estar no prompt (`darius_twin.md`/`twin_conversation.md`) ou em `twin_policy`, que não vi.
+
 ## Causa raiz
 Os dois suspeitos da sua hipótese são reais e se somam; nenhum dos dois está sozinho comprovado como "o" gatilho do dia 15424:
 1. **Histórico sem autoria** — `backend/jobs/handlers.py:846` (antes): `role='user' if INBOUND else 'assistant'`. Toda saída (o que o dono digitou, o que o próprio Gêmeo respondeu, qualquer outra) virava `assistant`. O Gêmeo não distinguia o que "ele" disse do que o dono disse.
