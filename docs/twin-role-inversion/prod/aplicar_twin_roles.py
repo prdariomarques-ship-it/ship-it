@@ -96,12 +96,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--origem", required=True, type=Path)
     ap.add_argument("--saida", required=True, type=Path)
+    ap.add_argument("--sem-hash-handlers", action="store_true",
+                    help="nao exige o sha256 do handlers.py original (use se outro patch, ex. owner-guard, ja o alterou); as ancoras continuam obrigatorias")
     args = ap.parse_args()
     out = {}
     for name, edits in (("darius_twin.py", TWIN_EDITS), ("handlers.py", HANDLERS_EDITS)):
         raw = (args.origem / name).read_bytes()
         digest = hashlib.sha256(raw).hexdigest()
-        if not digest.startswith(SHA[name]):
+        if not digest.startswith(SHA[name]) and not (name == "handlers.py" and args.sem_hash_handlers):
             sys.exit(f"ABORTADO: {name} nao e o original esperado (sha256 {digest[:24]}, esperado {SHA[name]}...). Nada foi escrito.")
         out[name] = apply(name, raw.decode("utf-8"), edits)
     args.saida.mkdir(parents=True, exist_ok=True)

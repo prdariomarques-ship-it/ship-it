@@ -72,3 +72,10 @@ Detalhe dos achados em `ACHADOS_CONVERSAS_23_10.md`. **Nada aplicado na VPS.** N
 **Limites:** os vocabulários (despedida, robô, ato proibido) vêm dos casos reais e são conservadores, não exaustivos. A regra do dono ativo em produção hoje vem do ambiente (`TWIN_OWNER_PAUSE_MINUTES=6`); para valer 30 é preciso mudar a variável ali. Não cobre: contradição ao dono 106 min depois (LIBINA 15512), nem aconselhamento de investimento sem verbo de ato.
 
 **Rollback:** `git revert`; ou desligar por variável (`TWIN_SILENCE_ENABLED=false`, `TWIN_ACTION_GUARD_ENABLED=false`, `TWIN_OWNER_PAUSE_MINUTES=0`, `TWIN_ROLE_GUARD_ENABLED=false`) sem redeploy.
+
+
+## Retratação (24/10, depois de ler `darius_twin.md` e `twin_conversation.md`)
+Eu havia dito que os dois prompts **conflitam** sobre identidade. **Não conflitam:** `darius_twin.md` diz nunca dizer *espontaneamente* "sou um assistente"; `twin_conversation.md` diz que, **se perguntarem**, o Gêmeo responde "Aqui é o Twin, assistente do Dário". O que os dados mostram é outra coisa: o Gêmeo se apresentou **sem ser perguntado** em situações confusas (13453, 13489, 15524) e comentou o próprio ajuste (14767). É um desvio do prompt, não conflito dele; não há decisão de prompt a tomar. Se quiser fechar isso por código (calar apresentação espontânea), é uma regra à parte, não incluída.
+
+## Pacote de aplicação em produção
+`prod/twin-pacote/` (+ `prod/twin-pacote.zip`): aplicar, rollback, patcher e 3 módulos, com `SHA256SUMS`. Harness em `prod/vps/harness_twin.sh`: 13 cenários com docker de mentira sobre o `handlers.py`/`darius_twin.py` reais. Mutação: 6 de 8 erros introduzidos nos scripts foram pegos; o M1 (conferir o original do darius_twin) é redundante com o patcher, que também o confere; o M4 (esperar health) o docker de mentira não consegue simular. Os dois patches de produção (este e o owner-guard) aplicam-se em qualquer ordem, com resultado idêntico, sobre o `handlers.py` real.
