@@ -158,6 +158,9 @@ class Settings(BaseSettings):
     # WhatsApp number: off by default (old, global-reply behavior
     # unchanged) -- see webhooks/router.py's use_twin computation.
     whatsapp_twin_mode_enabled: bool = False
+    twin_action_guard_enabled: bool = True  # bloqueia ATOS proibidos ao Gemeo (autorizar, cobrar, pedir CPF/conta, prazo); agents/darius_twin_actions.py
+    twin_silence_enabled: bool = True  # nao responde despedida pura, robo/menu e alerta do proprio sistema; orchestrator/twin_silence.py
+    twin_owner_pause_minutes: int = 30  # dono falou na conversa ha menos disso = Gemeo cala (a producao ja le TWIN_OWNER_PAUSE_MINUTES=6 do ambiente)
     twin_role_guard_enabled: bool = True  # rede de seguranca de papeis do Gemeo (agents/darius_twin_roles.py); False = so remove marcadores [Dario]/[Gemeo]
     # How long the Twin waits for the real owner to reply before the
     # autopilot check job considers taking over (webhooks/router.py

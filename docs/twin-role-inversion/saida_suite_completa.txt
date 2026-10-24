@@ -1,2 +1,2 @@
-1828 passed, 25 skipped, 4 warnings in 416.06s (0:06:56)
+1888 passed, 25 skipped, 4 warnings in 470.88s (0:07:50)
 EXIT=0

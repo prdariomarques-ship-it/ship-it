@@ -27,6 +27,9 @@ ROLE_RULES = (
     "Não devolva pergunta sobre a saúde do interlocutor (\"e você, melhorou?\") a menos que ELE tenha dito, nesta conversa, que está doente ou mal. "
     f"No histórico, as falas de quem responde vêm marcadas: {OWNER_LABEL} foi o próprio Dário que digitou; {TWIN_LABEL} foi um assistente automático "
     "falando em nome dele. Fale sempre como o Dário e NUNCA escreva esses marcadores na resposta. "
+    "O nome ou apelido com que o interlocutor chama você (Netinho, pastor X, \"pai\") é o SEU: nunca use esse nome para falar com ele. "
+    "Não afirme como você está, onde está nem o que já fez (\"tô bem\", \"tomei\", \"já fiz\", \"já segui\") se isso não estiver na conversa; "
+    "diga que confirma depois. Nunca autorize, aprove, emita, cobre, peça agência/conta/CPF nem assuma prazo: isso é só do Dário. "
     "Trechos de exemplo (se houver) são de OUTRAS conversas do Dário com OUTRAS pessoas: o interlocutor atual não é nenhuma delas e nada ali "
     "descreve a situação dele. Fatos sobre o próprio Dário que aparecem nesses trechos (como a saúde dele) continuam valendo quando perguntarem sobre ele."
 )
@@ -117,10 +120,66 @@ def drop_health_boomerang(reply: str) -> str:
     return "".join(kept).strip()
 
 
-def guard_role_inversion(reply: str, inbound_text: str, contact_texts: Iterable[str], *, drop_health_question: bool = True) -> str:
+# --- apelidos do dono: o nome que o contato usa para chamar o DONO nunca é o nome do contato ---------------------------------------------------
+# Casos reais: o contato escreve "Oi, pastor Adriane" / "Renatinho e Paz" / "Oi Netinho" e o Gêmeo responde "Entendi, Adriane" / "Faz sentido, Renatinho" /
+# "Netinho, deixa eu ser claro"; o filho escreve "pai, você já foi buscar?" e o Gêmeo responde "Pai, acho que...".
+_GREETING = r"(?i:oi|ol[aá]|bom\s+dia|boa\s+tarde|boa\s+noite|paz(?:\s+do\s+senhor)?|e\s+a[ií]|fala|salve|opa|hey|hello)"
+_TITLE = r"(?i:pastor|pr\.?|irm[ãa]o|irm[ãa]|tio|tia|sr\.?|sra\.?|dona|seu|doutor|dr\.?|dra\.?)"
+_NAME = r"[A-ZÁÂÃÀÉÊÍÓÔÕÚÇ][A-Za-zÀ-ÿ]{2,}"
+_NOT_NAMES = frozenset(
+    "oi ola bom boa paz amem obrigado obrigada sim nao tudo fala opa eita salve hey hello valeu certo show entendi beleza tranquilo "
+    "deus senhor jesus gloria aleluia queria preciso pode vamos como quando onde porque que quem qual esse essa isso aquele".split()
+)
+_AFTER_GREETING = re.compile(rf"{_GREETING}[\s,!.]+(?:{_TITLE}\s+)?({_NAME})")
+_MESSAGE_LEAD = re.compile(rf"^\s*({_NAME})\s*(?:,|!|\s+e\s+)")
+_KINSHIP = re.compile(r"(?i:(?:^|[,.!?]\s*|\boi\s+|\be\s+a[ií]\s+)(pai|papai|papi|painho)\b|\b(pai|papai|papi|painho)\s*(?=[,!?.]))")
+
+
+def _plain(text: str) -> str:
+    import unicodedata
+
+    return "".join(c for c in unicodedata.normalize("NFD", text.lower()) if unicodedata.category(c) != "Mn")
+
+
+def owner_aliases(contact_texts: Iterable[str], contact_name: str = "") -> set[str]:
+    """Nomes e termos de parentesco que o CONTATO usa para chamar o dono (nunca o próprio nome do contato)."""
+    own = {_plain(t) for t in re.split(r"\W+", contact_name or "") if t}
+    found: set[str] = set()
+    for text in contact_texts:
+        text = text or ""
+        for m in _AFTER_GREETING.finditer(text):
+            found.add(m.group(1))
+        m = _MESSAGE_LEAD.match(text)
+        if m:
+            found.add(m.group(1))
+        for m in _KINSHIP.finditer(text):
+            found.add((m.group(1) or m.group(2)).lower())
+    return {a for a in found if _plain(a) not in own and _plain(a) not in _NOT_NAMES}
+
+
+def strip_owner_aliases(reply: str, aliases: Iterable[str]) -> str:
+    """Tira da resposta o vocativo que repete um apelido do dono (", Adriane.", "Netinho, ...", "Pai, ..."). O resto da frase fica."""
+    reply = reply.strip()
+    for alias in sorted(aliases, key=len, reverse=True):
+        a = re.escape(alias)
+        reply = re.sub(rf"(?i)^{a}\s*[,!:]\s*", "", reply)
+        reply = re.sub(rf"(?i),\s*{a}(?=\s*[!?.,])", "", reply)
+        reply = re.sub(rf"(?i)\b({_GREETING})\s+{a}\b(?=\s*[,!.?\s])", r"\1", reply)
+    reply = re.sub(r"[ \t]{2,}", " ", reply).strip()
+    return reply[:1].upper() + reply[1:] if reply else reply
+
+
+def guard_role_inversion(
+    reply: str, inbound_text: str, contact_texts: Iterable[str], *, drop_health_question: bool = True, contact_name: str = "",
+) -> str:
     """Resposta final do Gêmeo. Só age quando o interlocutor perguntou pela saúde do dono E nunca disse estar doente
     (nem na mensagem atual nem no histórico). Se sobrar nada, devolve "" e o chamador usa a retenção neutra."""
     reply = strip_author_markers(reply)
+    contact_texts = list(contact_texts)
+    if drop_health_question:
+        aliases = owner_aliases([*contact_texts, inbound_text], contact_name)
+        if aliases:
+            reply = strip_owner_aliases(reply, aliases)
     if drop_health_question and asks_about_owner_health(inbound_text) and not says_they_are_sick([inbound_text, *contact_texts]):
         return drop_health_boomerang(reply)
     return reply

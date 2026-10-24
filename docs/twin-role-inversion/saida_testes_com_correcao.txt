@@ -28,6 +28,65 @@ tests/test_twin_role_inversion.py::test_end_to_end_libina_case_through_the_real_
 tests/test_twin_role_inversion.py::test_end_to_end_negative_control_sick_contact_gets_the_question PASSED
 tests/test_twin_role_inversion.py::test_kill_switch_turns_off_only_the_health_question_removal PASSED
 tests/test_twin_role_inversion.py::test_regression_exact_libina_screen_three_inbound_messages_and_blank_line_before_the_question PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[\U0001f44b] PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[\U0001f64f] PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[At\xe9!] PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[At\xe9 mais! \U0001f44b] PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[Am\xe9m! \U0001f64f] PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[kkkk At\xe9!] PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[Valeu! Tudo de bom pra vc tamb\xe9m.] PASSED
+tests/test_twin_role_inversion.py::test_pure_farewells_get_no_reply_when_we_already_spoke[ok] PASSED
+tests/test_twin_role_inversion.py::test_real_questions_and_greetings_are_still_answered[Paz do Senhor!] PASSED
+tests/test_twin_role_inversion.py::test_real_questions_and_greetings_are_still_answered[Bom dia, tudo bem?] PASSED
+tests/test_twin_role_inversion.py::test_real_questions_and_greetings_are_still_answered[Tudo bem?] PASSED
+tests/test_twin_role_inversion.py::test_real_questions_and_greetings_are_still_answered[Obrigado, pode mandar o or\xe7amento] PASSED
+tests/test_twin_role_inversion.py::test_real_questions_and_greetings_are_still_answered[At\xe9 amanh\xe3 \xe0s 10] PASSED
+tests/test_twin_role_inversion.py::test_real_questions_and_greetings_are_still_answered[Preciso de ajuda] PASSED
+tests/test_twin_role_inversion.py::test_real_questions_and_greetings_are_still_answered[Entendi. Sem problema. Fico \xe0 disposi\xe7\xe3o. Fica com Deus!] PASSED
+tests/test_twin_role_inversion.py::test_menus_queues_and_bots_get_no_reply[Responderemos durante nosso hor\xe1rio de expediente \u2014 nossa equipe est\xe1 sempre online durante esse per\xedodo.] PASSED
+tests/test_twin_role_inversion.py::test_menus_queues_and_bots_get_no_reply[\u231b S\xf3 um instante...] PASSED
+tests/test_twin_role_inversion.py::test_menus_queues_and_bots_get_no_reply[Sou o assistente virtual da Igreja de Azusa. Como posso ajudar voc\xea hoje?] PASSED
+tests/test_twin_role_inversion.py::test_menus_queues_and_bots_get_no_reply[Vou encerrar nossa conversa por aqui.] PASSED
+tests/test_twin_role_inversion.py::test_menus_queues_and_bots_get_no_reply[Oi! Voc\xea ainda est\xe1 por a\xed?   Quer continuar nossa negocia\xe7\xe3o? \U0001f913] PASSED
+tests/test_twin_role_inversion.py::test_the_systems_own_alerts_are_never_answered[\u2705 Teste do vigia de linhas: este \xe9 o caminho do alerta (linha b2b-sales para o seu telefone). N\xe3o responda.] PASSED
+tests/test_twin_role_inversion.py::test_the_systems_own_alerts_are_never_answered[\u26a0\ufe0f A linha MARQUESCOLOR est\xe1 FORA DO AR: estado "close" h\xe1 cerca de 4 min.] PASSED
+tests/test_twin_role_inversion.py::test_the_systems_own_alerts_are_never_answered[\u2705 A linha MARQUESCOLOR voltou (open). Alerta autom\xe1tico, n\xe3o responda.] PASSED
+tests/test_twin_role_inversion.py::test_the_systems_own_alerts_are_never_answered[[G\xeameo Darius] Mensagem sens\xedvel de X n\xe3o foi respondida automaticamente.] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[Pode emitir-autorizacao] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[Pode ser 10.-autorizacao] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[Me manda a do seu filho tamb\xe9m, com ag\xeancia, conta e CPF.-dado_bancario] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[Vc n\xe3o quitou os 5 mil que te mandei. Quero meu dinheiro de volta.-cobranca] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[Falei s\xe9rio: quero o reembolso.-cobranca] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[N\xe3o consigo ver o comprovante aqui, mas se vc diz que depositou, t\xe1 ok.-confirmacao_financeira] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[Vou organizar isso por escrito pra te passar com n\xfameros. Me d\xe1 um retorno at\xe9 amanh\xe3 que j\xe1 monto a base.-prazo] PASSED
+tests/test_twin_role_inversion.py::test_acts_the_twin_must_never_perform_are_blocked[Boa, mano! J\xe1 segui aqui e vou dar uma for\xe7a.-acao_inventada] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Fechado. Qual hor\xe1rio fica bom pra voc\xea?] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[At\xe9 amanh\xe3!] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Valeu! Tudo de bom.] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Ainda n\xe3o, t\xf4 na mesma. Febre n\xe3o baixou ontem \xe0 noite, t\xe1 ruim de engolir tamb\xe9m. Vc t\xe1 melhorando a\xed?] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Vou ver isso e te falo.] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Pode ser. Que dia fica melhor pra vc?] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Pode ser 10 horas?] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Pode ser 10h] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[Recebi o link, mas por aqui n\xe3o consigo abrir.] PASSED
+tests/test_twin_role_inversion.py::test_normal_replies_are_not_blocked[T\xf4 no trem ainda. Se eu chegar antes de vc, deixo a chave com o porteiro, pode ser?] PASSED
+tests/test_twin_role_inversion.py::test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact[Oi, pastor Adriane, tudo bem, gra\xe7as a Deus.-Gerente LIBINA-Entendi, Adriane. Obrigado por avisar.-Entendi. Obrigado por avisar.] PASSED
+tests/test_twin_role_inversion.py::test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact[Renatinho e Paz, tudo bem? Coloquei l\xe1 no grupo-Gerente LIBINA-Faz sentido, Renatinho. O obreiro precisa dar exemplo.-Faz sentido. O obreiro precisa dar exemplo.] PASSED
+tests/test_twin_role_inversion.py::test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact[Oi Netinho-Gerente LIBINA-Netinho, deixa eu ser claro: n\xe3o \xe9 isso.-Deixa eu ser claro: n\xe3o \xe9 isso.] PASSED
+tests/test_twin_role_inversion.py::test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact[voc\xea j\xe1 foi buscar meu farol pai, voc\xea j\xe1 foi l\xe1 buscar?-D\xe1rio J\xdaNIOR-Pai, acho que a liga\xe7\xe3o embolou tudo aqui.-Acho que a liga\xe7\xe3o embolou tudo aqui.] PASSED
+tests/test_twin_role_inversion.py::test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact[Oi Maria-Maria Silva-Oi, Maria! Tudo bem?-Oi, Maria! Tudo bem?] PASSED
+tests/test_twin_role_inversion.py::test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact[Paz do Senhor pastor-Jonas-Paz do Senhor, Jonas! Tudo bem.-Paz do Senhor, Jonas! Tudo bem.] PASSED
+tests/test_twin_role_inversion.py::test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact[Bom dia papiii-Brittany-Bom dia, minha filha! Tudo certo?-Bom dia, minha filha! Tudo certo?] PASSED
+tests/test_twin_role_inversion.py::test_blocked_act_becomes_the_holding_message_never_the_act PASSED
+tests/test_twin_role_inversion.py::test_action_guard_kill_switch_lets_the_reply_through PASSED
+tests/test_twin_role_inversion.py::test_alias_stripping_runs_inside_the_twin_reply PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_the_twin_stays_silent_for_bots_alerts_and_farewells[\U0001f44b-despedida_ou_agradecimento] PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_the_twin_stays_silent_for_bots_alerts_and_farewells[Responderemos durante nosso hor\xe1rio de expediente-remetente_automatizado] PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_the_twin_stays_silent_for_bots_alerts_and_farewells[\u2705 Teste do vigia de linhas: n\xe3o responda.-alerta_do_proprio_sistema] PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_owner_active_within_30_minutes_silences_the_twin_and_31_does_not PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_owner_who_spoke_31_minutes_ago_does_not_silence_the_twin PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_owner_pause_can_be_disabled PASSED
+tests/test_twin_role_inversion.py::test_end_to_end_an_authorization_becomes_the_holding_message PASSED
 tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[-vazio] PASSED
 tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[Oi! Aqui \xe9 o assistente autom\xe1tico do D\xe1rio \u2014 ele viu sua mensagem e prefiro que ele mesmo te responda-texto_automatico] PASSED
 tests/test_style_distill.py::test_filtros_recusam_o_que_nao_e_estilo_do_dono[Aqui \xe9 a Chroma, da Oficina das Tintas Ribeir\xe3o Pires-texto_automatico] PASSED
@@ -73,4 +132,4 @@ tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_contin
 tests/test_style_distill.py::test_fatos_do_proprio_dono_e_frases_sem_nome_continuam_entrando[Fechado. Chegou? Sim, saiu ontem.] PASSED
 tests/test_style_distill.py::test_nome_liberado_na_configuracao_nao_conta_como_terceiro PASSED
 tests/test_style_distill.py::test_lote_pessoal_recusa_terceiro_mas_guarda_fato_do_dono_e_a_loja_nao_e_filtrada PASSED
-============================== 75 passed in 3.76s ==============================
+============================= 134 passed in 4.98s ==============================

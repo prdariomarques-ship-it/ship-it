@@ -769,11 +769,12 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
     that happens AFTER this point (including mid-generation) still blocks
     the send, because the revision captured here will no longer match by
     the time claim_send runs."""
-    from agents.darius_twin import TwinReplyUnavailable, generate_darius_reply
+    from agents.darius_twin import TwinReplyBlocked, TwinReplyUnavailable, generate_darius_reply
     from agents.darius_twin_roles import build_twin_history
+    from orchestrator import twin_silence
     from orchestrator.incident_dedup import decide_owner_alert
     from orchestrator.twin_risk_gate import HistoryEntry, MessageAuthor, RiskEvidence, is_high_risk_for_impersonation
-    from services import conversation_control
+    from services import conversation_control, owner_activity
     from utils.config import get_settings
     settings = get_settings()
     if not settings.whatsapp_twin_mode_enabled:
@@ -806,6 +807,21 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
         return
     _twin_history_digest = _owner_audio_history_digest(history)
     _twin_pending_snapshot = contact.awaiting_reply_since
+    # Quando CALAR (sem resposta e sem mensagem de retencao): robo/menu/alerta do proprio sistema/despedida pura (orchestrator/twin_silence.py)
+    # e dono ativo na conversa dentro de `twin_owner_pause_minutes` (casos reais 16-23/10: 35% das respostas foram a outros robos; o Gemeo
+    # contradisse o dono 12, 34 e 106 min depois de ele falar).
+    quiet = None
+    if settings.twin_silence_enabled:
+        prior_outbound = any(m.direction == MessageDirection.OUTBOUND for m in history if m.id != message_id)
+        quiet = twin_silence.silence_reason(message.content or '', has_prior_outbound=prior_outbound)
+    if quiet is None and settings.twin_owner_pause_minutes > 0:
+        if await owner_activity.find_owner_activity(db, contact_id, instance, settings.twin_owner_pause_minutes * 60) is not None:
+            quiet = 'dono_ativo'
+    if quiet is not None:
+        await _owner_audio_clear_pending(db, contact, _twin_pending_snapshot, instance)
+        await db.commit()
+        await record_log(db, source='twin_autopilot', level='info', message=f'Gemeo calado: {quiet}', payload={'contact_id': contact_id, 'instance': instance, 'reason': quiet})
+        return
 
     def _author_of(m) -> 'MessageAuthor':
         # Conservative by design: anything that is not clearly inbound
@@ -849,6 +865,13 @@ async def twin_autopilot_check(db: AsyncSession, payload: dict) -> None:
             extra_system = await build_style_blocks(message.content, instance)
             style_kwargs: dict = {'extra_system': extra_system} if extra_system else {}
             reply = await generate_darius_reply(chat_history, message.content, contact_name=contact.name, **style_kwargs)
+        except TwinReplyBlocked as blocked:
+            is_risky = True
+            reason = f'ato proibido ao Gêmeo: {blocked.category}'
+            evidence = RiskEvidence(
+                category=blocked.category, snippet=blocked.snippet, source_message_id=message.id,
+                source_author=MessageAuthor.UNKNOWN, source_created_at=None, in_current_message=True,
+            )
         except TwinReplyUnavailable:
             is_risky = True
             reason = 'resposta do LLM indisponível'

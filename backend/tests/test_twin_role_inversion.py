@@ -268,3 +268,158 @@ async def test_regression_exact_libina_screen_three_inbound_messages_and_blank_l
     # controle negativo na mesma forma: se ela tivesse dito que estava doente, a pergunta voltaria intacta
     history.append(ChatMessage(role="user", content="Eu também tô com gripe"))
     assert await twin.module.generate_darius_reply(history, "Como vc está?", contact_name="Gerente LIBINA") == twin.reply
+
+
+# ============================================================================================================================================
+# Rodada 2 (achados nas 223 respostas reais de 16 a 23/10): calar diante de robô/despedida/alerta, ato proibido, apelido do dono, dono ativo.
+# Os textos abaixo são os reais (sem dados pessoais); cada caso tem seu controle negativo.
+# ============================================================================================================================================
+from orchestrator import twin_silence  # noqa: E402
+from agents.darius_twin_actions import blocked_action  # noqa: E402
+
+
+@pytest.mark.parametrize("text", ["👋", "🙏", "Até!", "Até mais! 👋", "Amém! 🙏", "kkkk Até!", "Valeu! Tudo de bom pra vc também.", "ok"])
+def test_pure_farewells_get_no_reply_when_we_already_spoke(text):
+    assert twin_silence.silence_reason(text, has_prior_outbound=True) == "despedida_ou_agradecimento"
+    assert twin_silence.silence_reason(text, has_prior_outbound=False) is None          # abertura da conversa: responde
+
+
+@pytest.mark.parametrize("text", [
+    "Paz do Senhor!", "Bom dia, tudo bem?", "Tudo bem?", "Obrigado, pode mandar o orçamento", "Até amanhã às 10", "Preciso de ajuda",
+    "Entendi. Sem problema. Fico à disposição. Fica com Deus!",
+])
+def test_real_questions_and_greetings_are_still_answered(text):
+    assert twin_silence.silence_reason(text, has_prior_outbound=True) is None
+
+
+@pytest.mark.parametrize("text", [
+    "Responderemos durante nosso horário de expediente — nossa equipe está sempre online durante esse período.",
+    "⌛ Só um instante...", "Sou o assistente virtual da Igreja de Azusa. Como posso ajudar você hoje?", "Vou encerrar nossa conversa por aqui.",
+    "Oi! Você ainda está por aí?   Quer continuar nossa negociação? 🤓",
+])
+def test_menus_queues_and_bots_get_no_reply(text):
+    assert twin_silence.silence_reason(text, has_prior_outbound=False) == "remetente_automatizado"
+
+
+@pytest.mark.parametrize("text", [
+    "✅ Teste do vigia de linhas: este é o caminho do alerta (linha b2b-sales para o seu telefone). Não responda.",
+    "⚠️ A linha MARQUESCOLOR está FORA DO AR: estado \"close\" há cerca de 4 min.", "✅ A linha MARQUESCOLOR voltou (open). Alerta automático, não responda.",
+    "[Gêmeo Darius] Mensagem sensível de X não foi respondida automaticamente.",
+])
+def test_the_systems_own_alerts_are_never_answered(text):
+    assert twin_silence.silence_reason(text, has_prior_outbound=False) == "alerta_do_proprio_sistema"
+    assert twin_silence.silence_reason("A linha de ônibus passa aqui na frente?", has_prior_outbound=True) is None   # controle: "linha" comum
+
+
+@pytest.mark.parametrize("reply,category", [
+    ("Pode emitir", "autorizacao"), ("Pode ser 10.", "autorizacao"),
+    ("Me manda a do seu filho também, com agência, conta e CPF.", "dado_bancario"),
+    ("Vc não quitou os 5 mil que te mandei. Quero meu dinheiro de volta.", "cobranca"), ("Falei sério: quero o reembolso.", "cobranca"),
+    ("Não consigo ver o comprovante aqui, mas se vc diz que depositou, tá ok.", "confirmacao_financeira"),
+    ("Vou organizar isso por escrito pra te passar com números. Me dá um retorno até amanhã que já monto a base.", "prazo"),
+    ("Boa, mano! Já segui aqui e vou dar uma força.", "acao_inventada"),
+])
+def test_acts_the_twin_must_never_perform_are_blocked(reply, category):
+    assert blocked_action(reply).category == category
+
+
+@pytest.mark.parametrize("reply", [
+    "Fechado. Qual horário fica bom pra você?", "Até amanhã!", "Valeu! Tudo de bom.", BUGGY_REPLY.split("\n")[0],
+    "Vou ver isso e te falo.", "Pode ser. Que dia fica melhor pra vc?", "Pode ser 10 horas?", "Pode ser 10h", "Recebi o link, mas por aqui não consigo abrir.",
+    "Tô no trem ainda. Se eu chegar antes de vc, deixo a chave com o porteiro, pode ser?",
+])
+def test_normal_replies_are_not_blocked(reply):
+    assert blocked_action(reply) is None
+
+
+@pytest.mark.parametrize("inbound,name,reply,expected", [
+    ("Oi, pastor Adriane, tudo bem, graças a Deus.", "Gerente LIBINA", "Entendi, Adriane. Obrigado por avisar.", "Entendi. Obrigado por avisar."),
+    ("Renatinho e Paz, tudo bem? Coloquei lá no grupo", "Gerente LIBINA", "Faz sentido, Renatinho. O obreiro precisa dar exemplo.",
+     "Faz sentido. O obreiro precisa dar exemplo."),
+    ("Oi Netinho", "Gerente LIBINA", "Netinho, deixa eu ser claro: não é isso.", "Deixa eu ser claro: não é isso."),
+    ("você já foi buscar meu farol pai, você já foi lá buscar?", "Dário JÚNIOR", "Pai, acho que a ligação embolou tudo aqui.",
+     "Acho que a ligação embolou tudo aqui."),
+    # controles: o nome do próprio contato e os cumprimentos normais ficam
+    ("Oi Maria", "Maria Silva", "Oi, Maria! Tudo bem?", "Oi, Maria! Tudo bem?"),
+    ("Paz do Senhor pastor", "Jonas", "Paz do Senhor, Jonas! Tudo bem.", "Paz do Senhor, Jonas! Tudo bem."),
+    ("Bom dia papiii", "Brittany", "Bom dia, minha filha! Tudo certo?", "Bom dia, minha filha! Tudo certo?"),
+])
+def test_the_name_a_contact_uses_for_the_owner_is_never_used_to_address_the_contact(inbound, name, reply, expected):
+    assert roles.guard_role_inversion(reply, inbound, [], contact_name=name) == expected
+
+
+async def test_blocked_act_becomes_the_holding_message_never_the_act(twin):
+    twin.reply = "Pode emitir"
+    with pytest.raises(twin.module.TwinReplyBlocked) as exc:
+        await twin.module.generate_darius_reply([], "RESUMO DO ACORDO ... Confirma?", contact_name="Cobrança")
+    assert exc.value.category == "autorizacao"
+
+
+async def test_action_guard_kill_switch_lets_the_reply_through(twin, monkeypatch):
+    monkeypatch.setattr(get_settings(), "twin_action_guard_enabled", False, raising=False)
+    twin.reply = "Pode emitir"
+    assert await twin.module.generate_darius_reply([], "Confirma?", contact_name="X") == "Pode emitir"
+
+
+async def test_alias_stripping_runs_inside_the_twin_reply(twin):
+    twin.reply = "Entendi, Adriane. Obrigado por avisar."
+    history = [ChatMessage(role="user", content="Oi, pastor Adriane, tudo bem, graças a Deus.")]
+    assert await twin.module.generate_darius_reply(history, "Vou sair da igreja", contact_name="Gerente LIBINA") == "Entendi. Obrigado por avisar."
+
+
+# ---- handler de verdade, com banco: calar, dono ativo, ato bloqueado ------------------------------------------------------------------------
+async def _set_pending_text(world, text):
+    async with world.sessions() as db:
+        msg = await db.get(Message, world.pending_id)
+        msg.content = text
+        await db.commit()
+
+
+async def _add_owner_message(world, minutes_ago):
+    at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    async with world.sessions() as db:
+        db.add(Message(contact_id=world.contact_id, direction=MessageDirection.OUTBOUND, media_type=MessageMediaType.TEXT, content="digitei agora",
+                       whatsapp_instance=world.instance, sent_by_human=True, is_autopilot_reply=False, created_at=at, provider_timestamp=at))
+        await db.commit()
+
+
+async def _logs(world, text):
+    from models.log import LogEntry
+    async with world.sessions() as db:
+        return [r for r in (await db.execute(select(LogEntry).where(LogEntry.source == "twin_autopilot"))).scalars().all() if text in r.message]
+
+
+@pytest.mark.parametrize("text,reason", [("👋", "despedida_ou_agradecimento"), ("Responderemos durante nosso horário de expediente", "remetente_automatizado"),
+                                         ("✅ Teste do vigia de linhas: não responda.", "alerta_do_proprio_sistema")])
+async def test_end_to_end_the_twin_stays_silent_for_bots_alerts_and_farewells(world, text, reason):
+    await _set_pending_text(world, text)
+    await _run_handler(world)
+    assert await _sent_texts(world) == []                                  # nem resposta, nem mensagem de retenção
+    assert await _logs(world, f"Gemeo calado: {reason}")
+    assert world.llm.calls == []                                           # e nenhuma chamada ao LLM
+
+
+async def test_end_to_end_owner_active_within_30_minutes_silences_the_twin_and_31_does_not(world):
+    await _add_owner_message(world, minutes_ago=29)
+    await _run_handler(world)
+    assert await _sent_texts(world) == [] and await _logs(world, "Gemeo calado: dono_ativo")
+
+
+async def test_end_to_end_owner_who_spoke_31_minutes_ago_does_not_silence_the_twin(world):
+    await _add_owner_message(world, minutes_ago=31)
+    await _run_handler(world)
+    assert len(await _sent_texts(world)) == 1
+
+
+async def test_end_to_end_owner_pause_can_be_disabled(world, monkeypatch):
+    monkeypatch.setattr(get_settings(), "twin_owner_pause_minutes", 0, raising=False)
+    await _add_owner_message(world, minutes_ago=1)
+    await _run_handler(world)
+    assert len(await _sent_texts(world)) == 1
+
+
+async def test_end_to_end_an_authorization_becomes_the_holding_message(world):
+    world.llm.reply = "Pode emitir"
+    await _run_handler(world)
+    from jobs.handlers import TWIN_HOLDING_MESSAGE
+    assert await _sent_texts(world) == [TWIN_HOLDING_MESSAGE]

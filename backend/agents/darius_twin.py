@@ -12,6 +12,7 @@ import re
 import time
 from pathlib import Path
 
+from agents.darius_twin_actions import blocked_action
 from agents.darius_twin_roles import CONTACT_NOT_OWNER, ROLE_RULES, guard_role_inversion
 from providers.llm.base import STUB_REPLY, ChatMessage
 # `chat_with_fallback` (Qwen -> DeepSeek) existe na fabrica de LLM de PRODUCAO; a candidata ainda nao a tem (ver quadro, G02/E01).
@@ -37,6 +38,16 @@ _EMPTY_RETRY_MIN_SECONDS = 10.0
 class TwinReplyUnavailable(RuntimeError):
     """The LLM produced nothing usable (empty, or the 'AI unavailable' stub).
     Never send that under the owner's name."""
+
+
+class TwinReplyBlocked(TwinReplyUnavailable):
+    """The reply was usable text but performs an act the twin must never perform in the owner's name (authorize, charge, ask for bank data,
+    promise a deadline...). Same outcome as unavailable (neutral holding message + owner alert), with the category/snippet for the alert."""
+
+    def __init__(self, category: str, snippet: str) -> None:
+        super().__init__(f"reply blocked: {category} ('{snippet}')")
+        self.category = category
+        self.snippet = snippet
 
 
 def load_persona_prompt() -> str:
@@ -85,13 +96,17 @@ async def generate_darius_reply(
     # Rede de segurança dos papéis (agents/darius_twin_roles.py): o contato perguntou pelo dono e nunca disse estar doente -> a pergunta de
     # saúde devolvida a ele sai da resposta. Se não sobrar nada, é "sem resposta utilizável" (retenção neutra), nunca um texto invertido.
     contact_texts = [m.content for m in history if m.role == "user"]
+    settings = get_settings()
     guarded = guard_role_inversion(
-        reply, message, contact_texts, drop_health_question=get_settings().twin_role_guard_enabled
+        reply, message, contact_texts, drop_health_question=settings.twin_role_guard_enabled, contact_name=contact_name
     )
     if guarded != reply:
         logger.warning("Twin reply adjusted by the role-inversion guard")
     if not guarded:
         raise TwinReplyUnavailable("reply was only a health question returned to the contact")
+    if settings.twin_action_guard_enabled and (blocked := blocked_action(guarded)) is not None:
+        logger.warning("Twin reply blocked by the action guard (%s)", blocked.category)
+        raise TwinReplyBlocked(blocked.category, blocked.snippet)
     return guarded
 
 

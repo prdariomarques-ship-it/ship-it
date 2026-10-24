@@ -48,3 +48,20 @@ Fatos sobre **terceiros** vindos de outra conversa não devem aparecer para outr
 - Nada está aplicado; o rollback do código é `git revert` do(s) commit(s) da branch (ou simplesmente não mesclar).
 - Para a VPS (futuro, só com seu aval): usar o padrão já adotado — backup dos 4 arquivos no container, cópia atômica, reinício, verificação, volta automática se falhar. Restaurar = recolocar os originais e reiniciar. Sem migration, nada a reverter no banco.
 - Interruptor rápido: `TWIN_ROLE_GUARD_ENABLED=false` (ver acima). Para o filtro de privacidade, o rollback é remover a regra (ou liberar nomes via `STYLE_ALLOWED_NAMES`); exemplos já indexados não foram alterados por ele.
+
+## Rodada 2 — correções a partir das 223 respostas reais (16 a 23/10)
+Detalhe dos achados em `ACHADOS_CONVERSAS_23_10.md`. **Nada aplicado na VPS.** Novos interruptores (todos padrão `true`, ou 30 min): `TWIN_SILENCE_ENABLED`, `TWIN_ACTION_GUARD_ENABLED`, `TWIN_OWNER_PAUSE_MINUTES` (0 desliga), além do `TWIN_ROLE_GUARD_ENABLED` já existente.
+
+| Problema real | Correção | Onde |
+|---|---|---|
+| Gêmeo conversando com robôs (79 de 223): 👋 ↔ 👋 com o assistente da igreja, "Até." com o vigia, "Pode emitir" ao robô de cobrança | Cala (sem resposta e sem retenção) diante de despedida pura **quando já falamos antes**, de texto de robô/menu/fila e de alerta do próprio sistema | `orchestrator/twin_silence.py`, chamado em `twin_autopilot_check` antes do LLM |
+| Dono falou 12 e 34 min antes e o Gêmeo o contradisse | Cala se o dono atuou na conversa nos últimos `TWIN_OWNER_PAUSE_MINUTES` (padrão 30), usando a mesma definição de "dono ativo" de `services/owner_activity.py` | `twin_autopilot_check` |
+| "Pode emitir", "agência, conta e CPF", "quero o reembolso", "tá ok" ao depósito, prazo assumido, "Já segui aqui" | Bloqueia o **ato** (não o assunto) → mensagem de retenção + alerta ao dono, com a categoria no alerta | `agents/darius_twin_actions.py`, `TwinReplyBlocked` em `agents/darius_twin.py` |
+| "Entendi, Adriane" / "Faz sentido, Renatinho" / "Netinho, deixa…" / "Pai, acho que…" | Tira da resposta o vocativo que repete o nome/apelido com que o contato chama o dono (o nome do próprio contato é preservado) | `owner_aliases`/`strip_owner_aliases` em `agents/darius_twin_roles.py` |
+| "Tô bem sim" com o dono doente; "tomei", "já fiz" | Regra no prompt (`ROLE_RULES`): não afirmar estado/ação que não está na conversa. **Só prompt, sem garantia determinística.** | `agents/darius_twin_roles.py` |
+
+**Fora de escopo, por decisão sua anterior:** "financeiro" continua sendo tema (não bloqueio) no portão de risco. Para os clientes de investimento, o caminho sem código é marcá-los como `priority` na ficha do Gêmeo (o Gêmeo não responde sozinho).
+
+**Limites:** os vocabulários (despedida, robô, ato proibido) vêm dos casos reais e são conservadores, não exaustivos. A regra do dono ativo em produção hoje vem do ambiente (`TWIN_OWNER_PAUSE_MINUTES=6`); para valer 30 é preciso mudar a variável ali. Não cobre: contradição ao dono 106 min depois (LIBINA 15512), nem aconselhamento de investimento sem verbo de ato.
+
+**Rollback:** `git revert`; ou desligar por variável (`TWIN_SILENCE_ENABLED=false`, `TWIN_ACTION_GUARD_ENABLED=false`, `TWIN_OWNER_PAUSE_MINUTES=0`, `TWIN_ROLE_GUARD_ENABLED=false`) sem redeploy.
