@@ -60,6 +60,10 @@ async def run(self, db, user, message, contact_id=None, memories=None, history=N
 - **`planner`** (`agents/planner.py::Planner`) monta a lista de mensagens: system prompt + memórias formatadas + histórico de conversa + a mensagem do usuário. É deliberadamente burro — nenhuma decisão, só montagem de prompt. Não confundir com `orchestrator.planning.CognitivePlanner` (decide o quê fazer); este aqui só decide como apresentar o pedido ao modelo.
 - **`executor`** (`agents/executor.py::AgentExecutor`) roda o loop plan→act→observe: pede a próxima ação ao modelo, executa as tool calls pedidas através do Tool Registry, alimenta os resultados de volta, repete até uma resposta final ou o orçamento de iterações (`AGENT_MAX_ITERATIONS`) acabar.
 
+### Limite de confiança das memórias
+
+Memórias recuperadas podem conter texto escrito por usuários ou fontes externas. O `Planner` as serializa em JSON e as marca explicitamente como dados de referência não confiáveis no prompt de sistema; o agente não deve seguir instruções encontradas nelas nem deixar que mudem suas regras, permissões ou o pedido atual. Use memórias como contexto factual e confirme dados importantes pelas ferramentas. Não remova a serialização, o escape dos delimitadores ou essa instrução ao alterar o planner.
+
 ## Instalando um agente novo (convenção de pasta)
 
 Nenhum arquivo central lista agentes. `agents/registry.py` descobre todo módulo `agents/*_agent.py` automaticamente (`pkgutil.iter_modules`, uma vez, na primeira chamada a `get_agent`/`list_agents`); o decorator `@register_agent` roda no import e o agente já aparece em `GET /api/agents`, fica disponível em `/api/chat`, `/api/agents/{name}/run`, e — automaticamente, sem nenhuma mudança de código — se torna uma opção válida para o Cognitive Planner escolher, porque a lista de agentes que o Planner oferece ao modelo vem de `agents.registry.list_agents()` em tempo de execução.
