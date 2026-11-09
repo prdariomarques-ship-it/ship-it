@@ -19,6 +19,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.venv-ptbr/
 .pytest_cache/
 .ruff_cache/
 .coverage
