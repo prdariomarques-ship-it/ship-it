@@ -19,14 +19,13 @@ Os 19 ignorados são testes DARIUS, que exigem um checkout externo não disponí
 
 ## Testes direcionados
 - H1, M1, M2, M4 e reconciliação: 82 aprovados em SQLite e PG16 (relatado pela sessão de implementação).
-- Multiprocesso PG16 (8 testes): 8/8 em duas execuções (`run_final_mp1`, `run_final_mp2`). **A terceira execução prevista ainda não foi feita.**
+- Multiprocesso PG16 (8 testes): 8/8 em três execuções (`run_final_mp1`, `run_final_mp2`, `run_final_mp3`), conferidas pela coordenação.
 
 ## Qualidade estática
 - Ruff: limpo.
 - Mypy: 2 erros, preexistentes, de stubs `yaml` (sem stubs instalados). Sem regressão.
 
 ## Pendências de teste
-- Terceira execução do multiprocesso.
 - Revisão do diff pela sessão de revisão.
 - Teste de marca persistida (`test_watermark_converges…`) falha na baseline e continua fora de escopo.
 - Testes DARIUS (19): sem checkout externo autorizado.
