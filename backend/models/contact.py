@@ -30,6 +30,10 @@ class Contact(Base, TimestampMixin):
     last_interaction_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+    # None means no owner reply is pending; used only when Twin mode is enabled.
+    awaiting_reply_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     messages = relationship(
         "Message", back_populates="contact", cascade="all, delete-orphan"
