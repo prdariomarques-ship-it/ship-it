@@ -168,6 +168,18 @@ class WhatsAppProvider(ABC):
     @abstractmethod
     async def send_audio(self, to: str, url: str) -> dict: ...
 
+    async def download_media(
+        self, media_key: str, instance: str | None = None
+    ) -> tuple[bytes, str] | None:
+        """Optional provider capability for downloading inbound media.
+
+        Providers without a documented and implemented media-download API
+        safely report the capability as unavailable. This default preserves
+        the webhook's best-effort behavior without claiming transcription
+        support or raising for an unsupported provider.
+        """
+        return None
+
     @abstractmethod
     async def send_location(
         self, to: str, latitude: float, longitude: float, caption: str = ""
