@@ -30,6 +30,7 @@ from repositories.contact import ContactRepository
 from repositories.message import MessageRepository
 
 KNOWLEDGE_SOURCE = "knowledge"
+PRODUCT_SOURCE = "product_catalog"
 
 
 class MemoryManager:
@@ -62,6 +63,18 @@ class MemoryManager:
         return [item for item in results if item.get("source") == KNOWLEDGE_SOURCE][
             :limit
         ]
+
+    async def index_product(self, db: AsyncSession, sku: str, content: str) -> None:
+        """Index or replace a product vector using its stable catalog SKU."""
+        await memory_service.replace_by_external_id(
+            db, content=content, source=PRODUCT_SOURCE, external_id=sku
+        )
+
+    async def deindex_product(self, db: AsyncSession, sku: str) -> None:
+        """Remove the product vector(s) associated with a catalog SKU."""
+        await memory_service.delete_by_external_id(
+            db, source=PRODUCT_SOURCE, external_id=sku
+        )
 
     async def remember(
         self, db: AsyncSession, content: str, source: str, contact_id: int | None = None
